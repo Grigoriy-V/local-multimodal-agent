@@ -1,0 +1,37 @@
+# Python and local environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# Model weights and local model cache
+# Anchored to the repository root so app/models/ stays tracked.
+/models/
+/weights/
+*.safetensors
+*.gguf
+*.bin
+
+# Application state and generated material
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+/data/
+/uploads/
+/outputs/
+/runs/
+/logs/
+.chainlit/
+.files/
+
+# Local agent/runtime state
+.codex/sessions/

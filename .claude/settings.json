@@ -1,0 +1,25 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Edit(.git/**)",
+      "Bash(rm -rf:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git remote:*)",
+      "Bash(docker:*)",
+      "Bash(vllm:*)"
+    ],
+    "allow": [
+      "Bash(uv run pytest:*)",
+      "Bash(uv run python tools/work_log.py:*)",
+      "Bash(uv run python scripts/doctor.py:*)"
+    ]
+  }
+}
