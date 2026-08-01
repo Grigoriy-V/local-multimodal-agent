@@ -15,7 +15,7 @@ import httpx
 import pytest
 
 from app.config import ModelSettings
-from app.models import ContentPart, Message
+from app.models import ContentPart, Message, ToolCall
 from app.models.openai_compatible import (
     BackendError,
     OpenAICompatibleBackend,
@@ -104,6 +104,49 @@ def test_mixed_message_keeps_part_order() -> None:
         "image_url",
         "input_audio",
     ]
+
+
+def test_an_assistant_turn_sends_its_tool_calls_and_null_content() -> None:
+    call = ToolCall(id="call_1", name="read_file", arguments={"path": "README.md"})
+
+    [message] = build_messages([Message(role="assistant", tool_calls=(call,))])
+
+    assert message["content"] is None
+    assert message["tool_calls"] == [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path": "README.md"}'},
+        }
+    ]
+
+
+def test_a_completion_round_trips_back_into_a_request() -> None:
+    """What the model said it called must be what the next request replays."""
+
+    payload = completion_payload(
+        tool_calls=[
+            {"id": "call_1", "function": {"name": "read_file", "arguments": '{"path": "x"}'}}
+        ]
+    )
+    completion = parse_completion(payload)
+
+    [message] = build_messages(
+        [Message(role="assistant", tool_calls=completion.tool_calls)]
+    )
+
+    assert message["tool_calls"][0]["function"]["arguments"] == '{"path": "x"}'
+
+
+def test_an_assistant_turn_with_text_and_tool_calls_keeps_both() -> None:
+    call = ToolCall(id="call_1", name="list_files", arguments={})
+
+    [message] = build_messages(
+        [Message(role="assistant", content=[text_part("let me look")], tool_calls=(call,))]
+    )
+
+    assert message["content"] == [{"type": "text", "text": "let me look"}]
+    assert len(message["tool_calls"]) == 1
 
 
 def test_roles_and_tool_call_id_survive() -> None:

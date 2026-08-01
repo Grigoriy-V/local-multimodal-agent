@@ -31,21 +31,29 @@ class ContentPart:
 
 
 @dataclass(frozen=True)
-class Message:
-    role: Role
-    content: Sequence[ContentPart]
-    tool_call_id: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.content:
-            raise ValueError("a message requires at least one content part")
-
-
-@dataclass(frozen=True)
 class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Message:
+    """One turn.
+
+    An assistant turn may carry tool calls instead of content: asking for a tool
+    and saying nothing is a complete answer. A tool turn carries the result and
+    the `tool_call_id` it answers.
+    """
+
+    role: Role
+    content: Sequence[ContentPart] = ()
+    tool_calls: tuple[ToolCall, ...] = ()
+    tool_call_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.content and not self.tool_calls:
+            raise ValueError("a message requires content or tool calls")
 
 
 @dataclass(frozen=True)

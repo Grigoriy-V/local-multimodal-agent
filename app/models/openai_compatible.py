@@ -54,10 +54,19 @@ def build_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
 
     payload: list[dict[str, Any]] = []
     for message in messages:
-        item: dict[str, Any] = {
-            "role": message.role,
-            "content": [_content_part(part) for part in message.content],
-        }
+        parts = [_content_part(part) for part in message.content]
+        # An assistant turn that only calls tools has no content, and the wire
+        # format spells that null rather than as an empty list.
+        item: dict[str, Any] = {"role": message.role, "content": parts or None}
+        if message.tool_calls:
+            item["tool_calls"] = [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
+                }
+                for call in message.tool_calls
+            ]
         if message.tool_call_id is not None:
             item["tool_call_id"] = message.tool_call_id
         payload.append(item)

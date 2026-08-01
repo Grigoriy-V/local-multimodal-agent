@@ -53,9 +53,10 @@ reports/   evidence and the two JSONL journals
 ## Status
 
 Stage 1 is closed: the model answers text, image, multi-image, audio, streaming,
-tool-call and structured-JSON requests through repository code. Stage 2, the
-agent, has not started. Work proceeds one approved step at a time after an
-explicit human command.
+tool-call and structured-JSON requests through repository code. Stage 2 has
+started — a two-node graph closes the tool loop over `list_files` and
+`read_file`; persistence, memory and the UI are still missing. Work proceeds one
+approved step at a time after an explicit human command.
 
 The model server is infrastructure and lives outside this repository; the
 project reaches it over `MODEL_ENDPOINT` only. Copy `.env.example` to `.env` to

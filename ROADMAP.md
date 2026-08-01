@@ -2,7 +2,7 @@
 
 **Updated:** 2026-08-01
 
-**Project status:** Stage 1 closed, Stage 2 not started
+**Project status:** Stage 1 closed, Stage 2 started — the tool loop closes
 
 **Current approved step:** none
 
@@ -15,7 +15,13 @@ Maximum ten bullets. When full, replace a stale fact — do not append.
 
 - The repository contains documents, the package skeleton, the `ModelBackend`
   interface, an OpenAI-compatible backend on `httpx`, settings, an environment
-  doctor, the Stage 1 smoke runner, and the work-log tool.
+  doctor, the Stage 1 smoke runner, the work-log tool, the filesystem tools, and
+  the minimal agent graph.
+- The tool loop closes: `Message` carries the assistant's own tool calls, and a
+  two-node graph — model, tools — ran a real two-iteration cycle against the
+  endpoint in 3.8 s.
+- `list_files` and `read_file` take their allowed root as an argument and
+  resolve every model-supplied path before comparing it against that root.
 - The model runs outside the repository: `gemma-4-12B-it-qat-w4a16-ct` weights
   and a vLLM 0.26 server live in WSL2 `Ubuntu-22.04`, reached only over
   `http://127.0.0.1:8000/v1`. The repository declares no inference dependency.
@@ -25,8 +31,8 @@ Maximum ten bullets. When full, replace a stale fact — do not append.
   and flac, and two flat images the model can name.
 - Only `app/models/` may import a transport or provider library; importing the
   interface package does not pull in `httpx`.
-- The Windows `.venv` holds the test tools, the `app` dependency group, and the
-  project installed editable.
+- The Windows `.venv` holds the test tools, the `app` and `agent` dependency
+  groups, and the project installed editable.
 - The full target specification is fixed in `docs/CONTRACT.md`.
 
 ## Plan
@@ -61,11 +67,12 @@ tool layers were not rewritten to achieve it.
 
 Maximum three. Not authorized by being listed.
 
-1. Close the tool loop: let `Message` carry the assistant's own tool calls, then
-   drive one real call-tool-answer cycle through a minimal graph. Smallest slice
-   that proves the Stage 2 shape end to end.
-2. Build the SQLite layer — threads, messages, and facts — so there is something
-   for a conversation to survive into.
+1. Build the SQLite layer — threads, messages, and facts — so there is something
+   for a conversation to survive into, plus `remember_fact` and `search_memory`
+   on top of it.
+2. Put Chainlit in front of the graph, showing tool calls and intermediate
+   steps. Makes the agent usable by hand; adds nothing the closing criteria ask
+   for.
 
 ## Out of scope
 

@@ -51,9 +51,18 @@ def test_media_part_requires_data_and_media_type() -> None:
         ContentPart(kind="audio", media_type="audio/wav")
 
 
-def test_message_requires_content() -> None:
-    with pytest.raises(ValueError, match="at least one content part"):
+def test_message_requires_content_or_tool_calls() -> None:
+    with pytest.raises(ValueError, match="content or tool calls"):
         Message(role="user", content=[])
+
+
+def test_an_assistant_turn_may_be_tool_calls_alone() -> None:
+    call = ToolCall(id="call_1", name="list_files", arguments={})
+
+    message = Message(role="assistant", tool_calls=(call,))
+
+    assert message.content == ()
+    assert message.tool_calls == (call,)
 
 
 def test_multimodal_message_preserves_part_order() -> None:
