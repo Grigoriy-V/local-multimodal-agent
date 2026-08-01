@@ -11,23 +11,23 @@ The application never binds to model internals. Everything goes through
 
 | Layer | Choice |
 |---|---|
-| Model | `google/gemma-4-12b-it` |
-| Inference | vLLM, OpenAI-compatible API |
-| Inference fallback | Transformers + BitsAndBytes 4-bit |
-| Agent | LangChain, later LangGraph |
+| Model | `gemma-4-12B-it-qat-w4a16-ct` |
+| Inference | vLLM, OpenAI-compatible API, outside this repository |
+| Orchestration | LangGraph |
 | UI | Chainlit |
-| Application API | FastAPI |
+| Application API | FastAPI, deferred until a second consumer exists |
 | Persistence | SQLite |
 | Runtime | Python 3.12, `uv`, Windows, RTX 4090 24 GB |
 
 ## Architecture
 
 ```text
-Chainlit -> FastAPI -> LangChain agent -> ModelBackend -> vLLM -> Gemma 4 12B IT
+Chainlit -> LangGraph agent -> ModelBackend -> vLLM -> Gemma 4 12B IT
 ```
 
-Stage 3 replaces the LangChain agent with an explicit LangGraph workflow without
-touching the inference, UI, memory, or tool layers.
+Stage 2 builds a minimal graph; Stage 3 grows it to the full flow — explicit
+state, checkpoints, resumable sessions, retries, confirmation before destructive
+actions — without touching the inference, UI, memory, or tool layers.
 
 ## Layout
 

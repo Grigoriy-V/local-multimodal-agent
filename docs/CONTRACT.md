@@ -18,16 +18,19 @@ Fine-tuning is not part of the current stage.
 
 ## Core stack
 
-- **Model:** `google/gemma-4-12b-it`
-- **Inference:** vLLM with an OpenAI-compatible API
-- **Inference fallback:** Transformers + BitsAndBytes 4-bit
-- **Agent framework, stage 1:** LangChain
-- **Agent framework, stage 2:** LangGraph
+- **Model:** `gemma-4-12B-it-qat-w4a16-ct` — Gemma 4 12B IT, w4a16 QAT
+- **Inference:** vLLM with an OpenAI-compatible API, run outside this repository
+- **Orchestration:** LangGraph, from the first agent onward
 - **UI:** Chainlit
-- **Application API:** FastAPI
+- **Application API:** FastAPI, deferred until a consumer other than Chainlit
+  exists. The deployment boundary is a goal, not a Stage 2 task.
 - **Persistence:** SQLite
 - **Language:** Python
 - **Hardware target:** NVIDIA RTX 4090 24 GB
+
+A Transformers + BitsAndBytes fallback is not part of the stack. It would put an
+inference dependency inside a repository that deliberately has none; it is parked
+in `docs/BACKLOG.md` against the trigger "vLLM proves unworkable".
 
 Do not bind the application directly to Gemma internals. All model access must go through a common backend interface or OpenAI-compatible API.
 
@@ -36,24 +39,17 @@ Do not bind the application directly to Gemma internals. All model access must g
 ```text
 Chainlit
   ↓
-FastAPI application
+LangGraph agent
   ↓
-LangChain agent
-  ↓
-Model gateway
+ModelBackend
   ↓
 vLLM OpenAI-compatible API
   ↓
 Gemma 4 12B IT
 ```
 
-Later:
-
-```text
-LangChain agent
-  ↓ replace
-LangGraph workflow
-```
+FastAPI enters between Chainlit and the agent when a second consumer appears.
+The agent must not assume it is called over HTTP, so that insertion stays cheap.
 
 ## Stage 1 — Multimodal smoke test
 
@@ -72,7 +68,10 @@ Implement and verify:
 
 The smoke test must be independent from the final agent UI where practical.
 
-## Stage 2 — Basic LangChain agent
+## Stage 2 — Minimal LangGraph agent
+
+A small graph: call the model, run any tools it asked for, call it again, answer.
+The point of Stage 2 is a working agent, not a complete graph.
 
 Implement a minimal working agent with these tools:
 
@@ -106,9 +105,9 @@ Memory must remain outside the model.
 
 Initial retrieval may use SQLite full-text search. Vector embeddings are optional and should not be added before the basic system works.
 
-## Stage 3 — LangGraph migration
+## Stage 3 — Full graph
 
-After the LangChain version is stable, replace implicit orchestration with an explicit graph:
+After the minimal agent is stable, grow the graph to the full flow:
 
 ```text
 receive_input
@@ -122,7 +121,7 @@ receive_input
 → return_response
 ```
 
-The LangGraph version must add:
+Stage 3 must add:
 
 - explicit state;
 - checkpoints;
@@ -149,14 +148,21 @@ The rest of the application must not depend on a specific Gemma class, tokenizer
 
 Replacing Gemma with Gemma E4B, Qwen or another OpenAI-compatible model should require configuration changes, not agent rewrites.
 
+A message must be able to carry an assistant's own tool calls and a tool result,
+otherwise the tool loop cannot close.
+
+The project's own message type is what the graph state holds. An orchestration
+framework's message classes are not adopted as the project's domain language,
+because that trades a dependency on the model for a dependency on the framework
+and moves multimodal content back into a format the project does not control.
+
 ## Suggested repository structure
 
 ```text
 local-multimodal-agent/
 ├── app/
-│   ├── api/
+│   ├── api/                    (empty until FastAPI is needed)
 │   ├── agent/
-│   │   ├── langchain_agent.py
 │   │   └── graph.py
 │   ├── context/
 │   ├── memory/
@@ -168,9 +174,9 @@ local-multimodal-agent/
 │   └── chainlit_app.py
 ├── configs/
 ├── scripts/
+│   ├── doctor.py
 │   └── smoke_test.py
 ├── tests/
-├── docker/
 ├── README.md
 └── pyproject.toml
 ```
@@ -185,6 +191,7 @@ local-multimodal-agent/
 - Do not silently truncate context.
 - Do not store model-generated facts as trusted memory without an explicit save decision.
 - Do not expose unrestricted filesystem access.
+- Do not build the FastAPI layer before a second consumer needs it.
 
 ## Acceptance criteria
 
@@ -198,5 +205,5 @@ The current stage is complete when:
 - saved facts can be retrieved in a later session;
 - older context is summarized instead of growing indefinitely;
 - inference and agent layers are model-agnostic;
-- LangChain implementation is covered by basic integration tests;
-- LangGraph migration can begin without rewriting the inference, UI, memory or tool layers.
+- the agent is covered by basic integration tests;
+- Stage 3 can grow the graph without rewriting the inference, UI, memory or tool layers.

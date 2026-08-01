@@ -11,14 +11,13 @@ dev = [
     "pytest-asyncio>=0.24",
 ]
 app = [
-    "fastapi>=0.115",
-    "uvicorn>=0.32",
     "httpx>=0.28",
     "pydantic-settings>=2.6",
 ]
+# LangGraph pulls langchain-core in transitively. Being installed is not
+# permission to import it; see DECISIONS.md.
 agent = [
-    "langchain-core>=0.3",
-    "langchain-openai>=0.2",
+    "langgraph>=1.2",
 ]
 ui = [
     "chainlit>=2.0",

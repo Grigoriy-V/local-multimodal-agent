@@ -21,6 +21,43 @@ OpenAI-compatible model must be a configuration change, not an agent rewrite.
 **Rules out.** Importing model internals from `app/agent/`, `app/context/`,
 `app/memory/`, `app/tools/`, `app/api/`, or `ui/`.
 
+## 2026-08-01: LangGraph from the first agent; LangChain is dropped
+
+**Decision.** There is no LangChain stage. The first agent is a minimal
+LangGraph graph, and Stage 3 grows that same graph instead of migrating to it.
+LangGraph's core is used — `StateGraph`, checkpointers, `interrupt` — but not its
+prebuilt `create_react_agent` or `ToolNode`.
+
+**Why.** LangChain was in the plan for a fast first result, and the human's
+learning interest is LangGraph, not LangChain. Measured on 2026-08-01 against
+langgraph 1.2.10: the core graph runs on the project's own dataclasses, keeps
+state across a checkpointer, and closes a tool loop without any LangChain type.
+The prebuilts do not: `create_react_agent` requires a `BaseChatModel`, and
+`ToolNode` rejects anything but a `langchain_core` message with
+`NotImplementedError: Unsupported message type`. Adopting them would mean
+adopting `langchain_core` messages as the project's own message type, which puts
+image and audio content back into a format the project does not control — the
+exact risk `ModelBackend` exists to prevent. The tool loop they would save is
+roughly sixty lines.
+
+**Rules out.** `create_react_agent`, `ToolNode`, and any use of
+`langchain_core` message classes in graph state or in `app/`. `langchain-core`
+still arrives as a transitive dependency of `langgraph`; being installed is not
+permission to import it.
+
+## 2026-08-01: FastAPI is deferred, not abandoned
+
+**Decision.** Stage 2 has no HTTP layer. Chainlit calls the agent as a Python
+module. FastAPI is added when a consumer other than Chainlit exists.
+
+**Why.** The end goal is a deployable product, so the API boundary is real — but
+in Stage 2 it would have exactly one caller and would be a layer built for its
+own sake. The cost of adding it later is low provided the agent never assumes it
+is called over HTTP.
+
+**Rules out.** Business logic in Chainlit callbacks, and any agent code that
+depends on a request, response, or session object.
+
 ## 2026-08-01: SQLite-only memory before any vector store
 
 **Decision.** Long-term facts live in SQLite; initial retrieval uses full-text

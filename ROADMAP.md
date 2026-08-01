@@ -38,19 +38,19 @@ criterion, not the method. A closed stage collapses to one line and a link.
 
 Closed 2026-08-01: `reports/2026-08-01_stage1_smoke_script.md`.
 
-### Stage 2 — LangChain agent
+### Stage 2 — Minimal LangGraph agent
 
-A minimal agent with `list_files`, `read_file`, `remember_fact`, and
-`search_memory`, four context layers, SQLite persistence, and Chainlit exposing
-tool calls and intermediate steps.
+A small graph — model, tools, model — with `list_files`, `read_file`,
+`remember_fact`, and `search_memory`, four context layers, SQLite persistence,
+and Chainlit exposing tool calls and intermediate steps.
 
 **Closes when:** conversations survive a restart, a fact saved in one session is
 retrieved in a later one, older context is summarized rather than grown, and
 integration tests cover the agent.
 
-### Stage 3 — LangGraph migration
+### Stage 3 — Full graph
 
-Replace implicit orchestration with an explicit graph adding state, checkpoints,
+Grow the same graph to the full flow, adding explicit state, checkpoints,
 resumable sessions, context-size control, tool error handling, retry paths, and
 confirmation before destructive actions.
 
@@ -61,11 +61,11 @@ tool layers were not rewritten to achieve it.
 
 Maximum three. Not authorized by being listed.
 
-1. Carry a tool result back to the model. `Message` can hold a `tool_call_id`
-   but cannot hold the assistant's own tool calls, so no tool loop can close.
-   Stage 2 needs this on its first iteration.
-2. Build the SQLite layer before the agent — threads, messages, and facts — so
-   there is something for a conversation to survive into.
+1. Close the tool loop: let `Message` carry the assistant's own tool calls, then
+   drive one real call-tool-answer cycle through a minimal graph. Smallest slice
+   that proves the Stage 2 shape end to end.
+2. Build the SQLite layer — threads, messages, and facts — so there is something
+   for a conversation to survive into.
 
 ## Out of scope
 
