@@ -42,7 +42,7 @@ Reviewed 2026-08-01. Update only for durable scope or safety changes.
 
 - **Goal:** local multimodal agent over Gemma 4 12B IT with a model-agnostic
   architecture; see `docs/CONTRACT.md`.
-- **Stage:** 2 of 3, in progress. Stage 1 is closed.
+- **Stage:** 3 of 3, not started. Stages 1 and 2 are closed.
 - **Model access:** only through `ModelBackend`; the rest of the application
   must not import a provider SDK, tokenizer, or processor.
 - **Persistence:** SQLite. Memory lives outside the model.

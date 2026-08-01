@@ -2,7 +2,7 @@
 
 **Updated:** 2026-08-01
 
-**Project status:** Stage 1 closed, Stage 2 started — the tool loop closes
+**Project status:** Stages 1 and 2 closed, Stage 3 not started
 
 **Current approved step:** none
 
@@ -13,13 +13,16 @@ The human approves one step before implementation begins.
 
 Maximum ten bullets. When full, replace a stale fact — do not append.
 
-- The repository contains documents, the package skeleton, the `ModelBackend`
-  interface, an OpenAI-compatible backend on `httpx`, settings, an environment
-  doctor, the Stage 1 smoke runner, the work-log tool, the filesystem tools, and
-  the minimal agent graph.
-- The tool loop closes: `Message` carries the assistant's own tool calls, and a
-  two-node graph — model, tools — ran a real two-iteration cycle against the
-  endpoint in 3.8 s.
+- A working agent exists: a four-node graph — `load`, `model`, `tools`,
+  `persist` — with the four contract tools, four context layers, SQLite
+  persistence, and Chainlit in front. Evidence:
+  `reports/2026-08-01_stage2_agent.md`.
+- The conversation lives in the project's own SQLite, not in a LangGraph
+  checkpointer. Facts are global across threads and saved only when the model
+  calls `remember_fact`.
+- Older turns leave the verbatim window only once the rolling summary covers
+  them, and a cut only lands at the start of a user turn, so no tool result is
+  ever orphaned.
 - `list_files` and `read_file` take their allowed root as an argument and
   resolve every model-supplied path before comparing it against that root.
 - The model runs outside the repository: `gemma-4-12B-it-qat-w4a16-ct` weights
@@ -29,10 +32,10 @@ Maximum ten bullets. When full, replace a stale fact — do not append.
   `reports/2026-08-01_stage1_smoke_script.md`.
 - The fixtures carry meaning rather than bytes: three seconds of speech in wav
   and flac, and two flat images the model can name.
-- Only `app/models/` may import a transport or provider library; importing the
-  interface package does not pull in `httpx`.
-- The Windows `.venv` holds the test tools, the `app` and `agent` dependency
-  groups, and the project installed editable.
+- `httpx` is imported only by `app/models/`, `langgraph` only by `app/agent/`,
+  and no `langchain_core` type appears anywhere in `app/`.
+- The Windows `.venv` holds every dependency group and the project installed
+  editable.
 - The full target specification is fixed in `docs/CONTRACT.md`.
 
 ## Plan
@@ -46,13 +49,7 @@ Closed 2026-08-01: `reports/2026-08-01_stage1_smoke_script.md`.
 
 ### Stage 2 — Minimal LangGraph agent
 
-A small graph — model, tools, model — with `list_files`, `read_file`,
-`remember_fact`, and `search_memory`, four context layers, SQLite persistence,
-and Chainlit exposing tool calls and intermediate steps.
-
-**Closes when:** conversations survive a restart, a fact saved in one session is
-retrieved in a later one, older context is summarized rather than grown, and
-integration tests cover the agent.
+Closed 2026-08-01: `reports/2026-08-01_stage2_agent.md`.
 
 ### Stage 3 — Full graph
 
@@ -67,12 +64,12 @@ tool layers were not rewritten to achieve it.
 
 Maximum three. Not authorized by being listed.
 
-1. Build the SQLite layer — threads, messages, and facts — so there is something
-   for a conversation to survive into, plus `remember_fact` and `search_memory`
-   on top of it.
-2. Put Chainlit in front of the graph, showing tool calls and intermediate
-   steps. Makes the agent usable by hand; adds nothing the closing criteria ask
-   for.
+1. Add a checkpointer so a turn that dies mid-tool-call can be resumed, and
+   `interrupt` so a destructive tool asks first. The two Stage 3 items the
+   current shape most obviously lacks.
+2. Give the UI a thread list instead of resuming the newest thread silently.
+3. Bound the request by tokens, not by turn count — the current window counts
+   messages, so one large image can still dominate a request.
 
 ## Out of scope
 

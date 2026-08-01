@@ -68,6 +68,33 @@ retrieval quality is optimized.
 
 **Rules out.** Adding a vector database as part of Stage 2.
 
+## 2026-08-01: The conversation lives in the project's own SQLite
+
+**Decision.** Threads, messages, the rolling summary, and facts are owned by
+`app/memory/store.py`. A LangGraph checkpointer, when Stage 3 adds one, records
+in-flight turn state only — it is not where the conversation is kept.
+
+**Why.** The conversation is the product's data: it must be readable, queryable
+and portable without LangGraph, and it must survive a framework change. A
+checkpointer's schema is LangGraph's, versioned by LangGraph, and holds serialized
+graph state rather than a message history anything else can use.
+
+**Rules out.** Reconstructing history from a checkpointer, and any storage of
+conversation content outside `MemoryStore`.
+
+## 2026-08-01: Facts are global and only ever saved by an explicit tool call
+
+**Decision.** A long-term fact enters the store only when the model calls
+`remember_fact`. The thread is recorded as provenance, but retrieval is global:
+a fact saved in one conversation is visible in every later one.
+
+**Why.** The contract forbids storing model-generated facts as trusted memory
+without an explicit save decision, so nothing may be harvested from an answer
+automatically. Global visibility is the point of long-term memory — a fact scoped
+to its own thread is indistinguishable from the transcript.
+
+**Rules out.** Inferring facts from model output, and per-thread fact isolation.
+
 ## 2026-08-01: No PROJECT_LOG; this file plus the journals replace it
 
 **Decision.** There is no `PROJECT_LOG.md`. Decisions live here, measured

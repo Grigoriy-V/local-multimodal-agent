@@ -20,3 +20,17 @@ class ModelSettings(BaseSettings):
     timeout: float = 120.0
     max_tokens: int = 512
     temperature: float = 0.0
+
+
+class AgentSettings(BaseSettings):
+    """Where the agent stores memory, what it may read, and how much it keeps."""
+
+    model_config = SettingsConfigDict(env_prefix="AGENT_", env_file=".env", extra="ignore")
+
+    database: str = "data/memory.sqlite3"
+    # The only directory the filesystem tools may reach. Widening it is a
+    # deliberate act, which is why it is configuration and not a default guess.
+    workspace: str = "."
+    keep_recent: int = 8
+    summarize_after: int = 16
+    retrieved_facts: int = 5

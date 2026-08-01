@@ -25,9 +25,11 @@ The application never binds to model internals. Everything goes through
 Chainlit -> LangGraph agent -> ModelBackend -> vLLM -> Gemma 4 12B IT
 ```
 
-Stage 2 builds a minimal graph; Stage 3 grows it to the full flow — explicit
-state, checkpoints, resumable sessions, retries, confirmation before destructive
-actions — without touching the inference, UI, memory, or tool layers.
+The graph is `load -> model -> tools -> model -> persist`: context is assembled
+from four layers, the model answers or asks for a tool, and only the turn's own
+messages are written back. Stage 3 grows the same graph — checkpoints, resumable
+sessions, retries, confirmation before destructive actions — without touching the
+inference, UI, memory, or tool layers.
 
 ## Layout
 
@@ -52,11 +54,12 @@ reports/   evidence and the two JSONL journals
 
 ## Status
 
-Stage 1 is closed: the model answers text, image, multi-image, audio, streaming,
-tool-call and structured-JSON requests through repository code. Stage 2 has
-started — a two-node graph closes the tool loop over `list_files` and
-`read_file`; persistence, memory and the UI are still missing. Work proceeds one
-approved step at a time after an explicit human command.
+Stages 1 and 2 are closed. The agent runs: it answers text, images and audio,
+calls `list_files`, `read_file`, `remember_fact` and `search_memory`, keeps
+conversations in SQLite across restarts, finds a fact saved in an earlier
+session, and folds older turns into a rolling summary. Stage 3 — checkpoints,
+resumable sessions, confirmation before destructive actions — has not started.
+Work proceeds one approved step at a time after an explicit human command.
 
 The model server is infrastructure and lives outside this repository; the
 project reaches it over `MODEL_ENDPOINT` only. Copy `.env.example` to `.env` to
@@ -66,4 +69,7 @@ point somewhere else.
 .venv\Scripts\python.exe -m pytest -q            # offline, needs nothing
 .venv\Scripts\python.exe -m scripts.doctor       # can this machine run it
 .venv\Scripts\python.exe -m scripts.smoke_test   # every Stage 1 item, needs the server
+.venv\Scripts\python.exe -m chainlit run ui/chainlit_app.py -w   # the agent, needs the server
 ```
+
+The agent reads only `AGENT_WORKSPACE` and writes only `AGENT_DATABASE`.
