@@ -121,6 +121,10 @@ receive_input
 → return_response
 ```
 
+This is the required logical flow, not a required count or naming of LangGraph
+nodes. Adjacent responsibilities may share a node when their boundaries remain
+explicit and independently testable.
+
 Stage 3 must add:
 
 - explicit state;
@@ -193,17 +197,33 @@ local-multimodal-agent/
 - Do not expose unrestricted filesystem access.
 - Do not build the FastAPI layer before a second consumer needs it.
 
-## Acceptance criteria
+## Version 1 acceptance criteria
 
-The current stage is complete when:
+Version 1 is a working product baseline, not only a collection of implemented
+features. It is complete when all of the following hold together:
 
 - Gemma 4 12B IT runs locally on RTX 4090;
 - text, image and audio requests work;
 - Chainlit communicates with the agent;
-- the model can call all four tools;
+- the UI provides normal persistent chat history with create, switch, resume
+  and restart behavior, while preserving conversations created before the
+  history integration;
+- the model can call all five current tools, with `write_file` confirmed before
+  execution;
 - conversations survive application restarts;
 - saved facts can be retrieved in a later session;
 - older context is summarized instead of growing indefinitely;
 - inference and agent layers are model-agnostic;
 - the agent is covered by basic integration tests;
-- Stage 3 can grow the graph without rewriting the inference, UI, memory or tool layers.
+- uploads expose only supported input types at explicit safe sizes;
+- unsupported or oversized input is refused clearly and never becomes an empty
+  model turn;
+- expected tool and filesystem failures return readable tool results rather
+  than terminating the graph;
+- an overlong request gets one bounded recovery attempt after context folding,
+  or a clear refusal when the new input cannot fit by itself;
+- pending destructive calls survive restart, while the checkpoint database is
+  treated as non-canonical execution state that may retain completed
+  checkpoints;
+- the complete UI experience passes a browser/restart product smoke against the
+  local endpoint, in addition to offline regression tests.

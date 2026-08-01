@@ -21,6 +21,11 @@ your own changes need no approval. Return once with a complete result or one
 consolidated blocker. Run checks in proportion to concrete risk; documentation
 edits that do not touch code, config, commands, or safety need no test run.
 
+A user-facing capability is complete only after a short end-to-end product
+check of the actual experience. Technical presence is not product acceptance,
+and a claim in the roadmap, decisions or reports must not be stronger than the
+evidence that was collected.
+
 This repository is run from more than one agent application. Do not assume which
 one is active and do not rely on features specific to one of them. Only one
 application works in the repository at a time.
@@ -42,7 +47,8 @@ Reviewed 2026-08-01. Update only for durable scope or safety changes.
 
 - **Goal:** local multimodal agent over Gemma 4 12B IT with a model-agnostic
   architecture; see `docs/CONTRACT.md`.
-- **Stage:** 3 of 3, under way. Stages 1 and 2 are closed.
+- **Stage:** stages 1 and 2 are closed. Stage 3's functional core exists, but
+  version 1 is reopened for product completion; see `ROADMAP.md`.
 - **Model access:** only through `ModelBackend`; the rest of the application
   must not import a provider SDK, tokenizer, or processor.
 - **Persistence:** SQLite. Memory lives outside the model.
@@ -85,10 +91,11 @@ and the exact command. Never expand scope to another repository.
 
 ## Records
 
-`ROADMAP.md` is canonical for direction and holds the plan, current state, and
-the approved step. `DECISIONS.md` records only decisions that change
-architecture or scope, never work results. `docs/BACKLOG.md` holds ideas and has
-no authority.
+`ROADMAP.md` is canonical for current direction, state, order and the approved
+step. `DECISIONS.md` records only decisions that change architecture or scope,
+never work results. `docs/BACKLOG.md` is the source of truth for detailed
+deferred and possible later direction. It is not a contract and does not
+authorize work by itself; `ROADMAP.md` carries only its short active summary.
 
 Use `tools/work_log.py` rather than hand-editing the JSONL journals; see
 `--help`. Set `--agent` to the application actually running, so records stay

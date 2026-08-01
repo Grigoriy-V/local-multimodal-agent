@@ -151,6 +151,31 @@ it piecemeal now would make the policy work in version 2 harder, not easier.
 MCP server, an evaluation harness, and runtime workspace selection as version 1
 work. All are recorded in `docs/BACKLOG.md`.
 
+## 2026-08-01: Version 1 is reopened for product completion
+
+**Decision.** The earlier Version 1 closure is superseded. Its functional core
+and evidence remain valid, but Version 1 closes only against the product
+acceptance criteria in `docs/CONTRACT.md`: normal persistent chat history,
+bounded and honest attachment handling, tool failures that remain inside the
+turn, recoverable or clearly refused context overflow, and an end-to-end
+browser/restart smoke without regressions to the existing agent.
+
+Version 2 remains deferred. `ROADMAP.md` holds its short direction;
+`docs/BACKLOG.md` holds the truthful detail for that possible later stage but is
+neither a contract nor authorization to begin it.
+
+**Why.** Product review found that several first-pass checks proved a narrower
+property than the closure language claimed: startup action buttons were not a
+normal chat history, reactive token measurement was not a preflight hard bound,
+and expected operating-system tool failures were not covered by the tool error
+boundary. Reopening preserves the working foundation while correcting those
+gaps before scope expands.
+
+**Rules out.** Starting Version 2 before Version 1 closes again, treating the
+technical presence of a user-facing feature as product acceptance, and choosing
+the storage implementation for native Chainlit history in this documentation
+step.
+
 ## 2026-08-01: No PROJECT_LOG; this file plus the journals replace it
 
 **Decision.** There is no `PROJECT_LOG.md`. Decisions live here, measured

@@ -53,23 +53,27 @@ reports/   evidence and the two JSONL journals
 
 ## Status
 
-All three stages are closed; **version 1** is complete —
-`reports/2026-08-01_v1.md`. The agent answers text, images and audio; calls
+Stages 1 and 2 are closed. The Stage 3 functional core is working, but
+**version 1 is reopened for product completion**; current criteria are in
+`docs/CONTRACT.md` and direction in `ROADMAP.md`. The first-pass evidence remains
+in `reports/2026-08-01_v1.md`. The agent answers text, images and audio; calls
 `list_files`, `read_file`, `write_file`, `remember_fact` and `search_memory`;
 keeps conversations in SQLite across restarts; finds a fact saved in an earlier
-session; folds older turns into a rolling summary once the request itself grows
-past its token budget; stops to ask before it writes a file, resuming that
+session; folds older turns into a rolling summary after a completed request is
+measured over budget; stops to ask before it writes a file, resuming that
 question even after the process that asked it is gone; retries a model call that
-failed transiently; offers the recent conversations on start; shows images and
-audio in its answers; and says which attachment it could not read. Version 2 is
-listed in `docs/BACKLOG.md`. Work proceeds one approved step at a time after an
-explicit human command.
+failed transiently; can replay recent conversations; shows images and audio in
+its answers; and says which attachment it could not read. Version 1 still needs
+native persistent chat history, honest upload limits, complete tool-error
+handling, context-overflow recovery and a final product smoke. Version 2 is
+summarized in `ROADMAP.md` and detailed in `docs/BACKLOG.md`. Work proceeds one
+approved step at a time after an explicit human command.
 
-The request is bounded in tokens the model counted itself: the ceiling is read
-from `/v1/models`, the size from `usage.prompt_tokens`, and the project
-configures only `AGENT_CONTEXT_FRACTION` — the share of that ceiling a request
-may reach before older turns are folded. Give the agent more room by raising
-vLLM's `--max-model-len`; nothing here needs to change.
+The server reports the ceiling through `/v1/models` and the completed request
+size through `usage.prompt_tokens`. `AGENT_CONTEXT_FRACTION` decides when an
+over-budget request triggers a fold before the next turn. This is reactive
+accounting; Version 1 completion adds bounded recovery for a request the server
+rejects before it can report usage.
 
 The model server is infrastructure and lives outside this repository; the
 project reaches it over `MODEL_ENDPOINT` only. Copy `.env.example` to `.env` to
@@ -80,7 +84,7 @@ point somewhere else.
 .venv\Scripts\python.exe -m scripts.doctor       # can this machine run it
 .venv\Scripts\python.exe -m scripts.smoke_test   # every Stage 1 item, needs the server
 .venv\Scripts\python.exe -m scripts.stage3_live  # asking before a write, needs the server
-.venv\Scripts\python.exe -m scripts.v1_live      # every version 1 item, needs the server
+.venv\Scripts\python.exe -m scripts.v1_live      # first-pass v1 checks, needs the server
 .venv\Scripts\python.exe -m chainlit run ui/chainlit_app.py -w   # the agent, needs the server
 ```
 
