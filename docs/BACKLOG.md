@@ -26,12 +26,35 @@ useful detail here until implementation or a later decision makes it stale.
 - **FastAPI application layer.** Only when a consumer other than Chainlit
   exists. See `DECISIONS.md`.
 
-## Version 1.5 (provisional)
+## Independent infrastructure experiments
+
+- **Measure 64k and 128k context together with controllable VRAM reservation.**
+  This is a separate GPU experiment, not an implicit requirement of Version
+  1.5 or Version 2. Compare the validated 16k baseline with 64k and 128k using
+  real prompts near each limit, not startup success alone. For every context
+  size record server startup, idle reserved VRAM, vLLM's weight and KV-cache
+  allocation, prompt tokens accepted, time to first token, generation speed,
+  correctness, maximum safe concurrency and any OOM or context rejection. Test
+  output caps such as 2k, 4k and 8k as part of the same matrix: measure long
+  coding generations, truncation or repetition, and the real combined
+  prompt-plus-completion envelope because `--max-model-len` covers both input
+  and output rather than input alone.
+  Compare KV cache `auto` with `fp8`, the default reservation with lower
+  `--gpu-memory-utilization`, and an explicit `--kv-cache-memory-bytes` budget.
+  Also measure whether `--enforce-eager`, `--cpu-offload-gb` or
+  `--enable-sleep-mode` releases useful VRAM at an acceptable latency cost.
+  Distinguish allocated/reserved memory from memory actively touched by one
+  request: vLLM normally preallocates KV cache, so the goal is the smallest
+  stable reservation profile, not a misleading claim of demand-only VRAM.
+  Produce one recommended launch profile for 16k, 64k and 128k, or record that
+  a profile is not viable on 24 GB. Trigger only with explicit approval for
+  repeated server restarts and materially long GPU prompts.
+
+## Version 1.5
 
 Version 1.5 is a learning-oriented bridge between the working Version 1 product
-and the policy platform of Version 2. Its final scope and order will be decided
-only after Version 1 closes. The graph and harness matter more here than visual
-customization.
+and the policy platform of Version 2. Its ordered plan lives in `ROADMAP.md`.
+The graph and harness matter more here than visual customization.
 
 - **Use native Chainlit product controls first.** Candidate capabilities are
   native commands such as `/compact`, `/workspace`, `/memory` and `/status`;
@@ -46,6 +69,12 @@ customization.
   instead of issuing a corrected call. Validate arguments before consent,
   return precise structured errors, and allow correction within an explicit
   retry budget.
+- **Add targeted text edits in Version 1.5.** `edit_file` performs an atomic
+  exact replacement inside the same sandbox as `write_file`. The old text must
+  occur exactly once; zero or multiple matches are readable failures. The tool
+  shows the proposed change before consent and participates in the task-scoped
+  grant, so retries repair the existing artifact instead of regenerating the
+  entire file.
 - **Clean up the new-chat lifecycle.** The Version 1 closing smoke preserved the
   canonical conversation and resumed it after restart, but the initial
   Chainlit thread URL remained as an empty `Conversation` beside the canonical
@@ -88,9 +117,8 @@ order are deliberately not fixed before Version 1 closes.
   interface requests a tool. A browser cannot grant an arbitrary native path
   directly, so directory access will be a choice among explicitly allowed
   roots.
-- **Capabilities added only behind that policy.** This includes `edit_file` for
-  targeted changes instead of risky whole-file rewrites, and documents dropped
-  into chat — `.txt`, `.md`, `.pdf`, `.docx`. Text formats are nearly free;
+- **Capabilities added only behind that policy.** This includes documents
+  dropped into chat — `.txt`, `.md`, `.pdf`, `.docx`. Text formats are nearly free;
   `.pdf` and `.docx` need parsing dependencies. Documents remain an important
   user capability, but must not bypass the same access rules as other tools.
 - **An MCP server over the policy-governed tools and memory**, so stronger
@@ -113,11 +141,10 @@ order are deliberately not fixed before Version 1 closes.
   compliance, memory retrieval and graph regressions, with reproducible fixture
   tasks and comparable results.
 - **Video, frame by frame.** The model has no video input; frames are images.
-  Trigger: a context of 64–128k, plus frame batching and compression. Feasible
-  on 24 GB because Gemma's sliding-window attention keeps a full KV cache only
-  on every sixth layer — roughly 8 GB at 128k, halved again by
-  `--kv-cache-dtype fp8`. The arithmetic is an estimate and has not been
-  measured.
+  Trigger: the independent context/VRAM experiment first proves a viable 64k
+  or 128k profile, followed by frame batching and compression. Existing KV
+  cache arithmetic is only an estimate and must not be treated as evidence of
+  feasibility on 24 GB.
 
 ## Directions, not tasks
 

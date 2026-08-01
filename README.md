@@ -56,7 +56,8 @@ reports/   evidence and the two JSONL journals
 **Version 1 is complete.** Closing evidence is in
 `reports/2026-08-01_v1_product_smoke.md`; current direction is in `ROADMAP.md`.
 The agent answers text, images and audio; calls
-`list_files`, `read_file`, `write_file`, `remember_fact` and `search_memory`;
+`list_files`, `read_file`, `write_file`, `edit_file`, `remember_fact` and
+`search_memory`;
 keeps conversations in SQLite across restarts; finds a fact saved in an earlier
 session; folds older turns into a rolling summary after a completed request is
 measured over budget; stops to ask before it writes a file, resuming that

@@ -30,6 +30,7 @@ class ScriptedBackend(ModelBackend):
         self.limit = limit
         self.requests: list[list[Message]] = []
         self.tools_seen: list[Any] = []
+        self.formats_seen: list[Any] = []
 
     async def context_limit(self) -> int | None:
         return self.limit
@@ -42,6 +43,7 @@ class ScriptedBackend(ModelBackend):
     ) -> Completion:
         self.requests.append(list(messages))
         self.tools_seen.append(tools)
+        self.formats_seen.append(response_format)
         if self.completions:
             result = self.completions.pop(0)
             if isinstance(result, Exception):

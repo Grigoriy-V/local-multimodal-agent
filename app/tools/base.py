@@ -73,6 +73,49 @@ class Toolbox:
         tool = self._tools.get(name)
         return tool is not None and tool.destructive
 
+    def validation_error(self, call: ToolCall) -> str | None:
+        """Return a readable JSON-schema error without executing the tool.
+
+        Tool schemas in this project deliberately use a small JSON-schema
+        subset. Keeping the check here makes the schema shown to the model the
+        same contract enforced before consent and execution.
+        """
+
+        tool = self._tools.get(call.name)
+        if tool is None:
+            return None
+        schema = tool.parameters
+        arguments = call.arguments
+        if schema.get("type") == "object" and not isinstance(arguments, dict):
+            return "arguments must be an object"
+
+        properties = schema.get("properties", {})
+        missing = [name for name in schema.get("required", []) if name not in arguments]
+        if missing:
+            return f"missing required argument(s): {', '.join(missing)}"
+
+        if schema.get("additionalProperties") is False:
+            unexpected = [name for name in arguments if name not in properties]
+            if unexpected:
+                return f"unexpected argument(s): {', '.join(unexpected)}"
+
+        json_types = {
+            "string": lambda value: isinstance(value, str),
+            "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
+            "number": lambda value: isinstance(value, (int, float)) and not isinstance(value, bool),
+            "boolean": lambda value: isinstance(value, bool),
+            "object": lambda value: isinstance(value, dict),
+            "array": lambda value: isinstance(value, list),
+        }
+        for name, value in arguments.items():
+            expected = properties.get(name, {}).get("type")
+            if expected in json_types and not json_types[expected](value):
+                return f"argument {name!r} must be {expected}"
+            minimum = properties.get(name, {}).get("minLength")
+            if minimum is not None and isinstance(value, str) and len(value) < minimum:
+                return f"argument {name!r} must contain at least {minimum} character(s)"
+        return None
+
     def run(self, call: ToolCall) -> Message:
         """Answer one tool call with a message the model can be shown."""
 
@@ -80,6 +123,14 @@ class Toolbox:
         if tool is None:
             result = f"error: unknown tool {call.name!r}; available: {', '.join(self.names)}"
         else:
+            validation_error = self.validation_error(call)
+            if validation_error:
+                result = f"error: bad arguments for {call.name}: {validation_error}"
+                return Message(
+                    role="tool",
+                    content=[ContentPart(kind="text", text=result)],
+                    tool_call_id=call.id,
+                )
             try:
                 result = tool.run(**call.arguments)
             except ToolError as error:

@@ -33,13 +33,15 @@ def tools(root: Path) -> dict[str, Tool]:
     "path",
     ["..", "../secret.txt", "sub/../../secret.txt", "C:/Windows/win.ini", "/etc/passwd"],
 )
-@pytest.mark.parametrize("name", ["read_file", "write_file"])
+@pytest.mark.parametrize("name", ["read_file", "write_file", "edit_file"])
 def test_paths_outside_the_root_are_refused(workspace: Path, name: str, path: str) -> None:
     escapee = workspace.parent / "secret.txt"
     escapee.write_text("must not be touched", encoding="utf-8")
     arguments = {"path": path}
     if name == "write_file":
         arguments["content"] = "overwritten"
+    elif name == "edit_file":
+        arguments.update(old_text="inside", new_text="outside")
 
     with pytest.raises(ToolError, match="outside the allowed root"):
         tools(workspace)[name].run(**arguments)
@@ -114,10 +116,62 @@ def test_write_file_on_a_directory_is_refused(workspace: Path) -> None:
         tools(workspace)["write_file"].run(path="sub", content="x")
 
 
-def test_only_write_file_is_destructive(workspace: Path) -> None:
+def test_edit_file_replaces_one_exact_match(workspace: Path) -> None:
+    result = tools(workspace)["edit_file"].run(
+        path="notes.txt", old_text="kept", new_text="stayed"
+    )
+
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "stayed inside"
+    assert result == "edited notes.txt (replaced 1 match; 13 characters)"
+
+
+@pytest.mark.parametrize("text", ["absent", "e"])
+def test_edit_file_refuses_non_unique_matches(workspace: Path, text: str) -> None:
+    before = (workspace / "notes.txt").read_text(encoding="utf-8")
+
+    with pytest.raises(ToolError, match="must occur exactly once"):
+        tools(workspace)["edit_file"].run(path="notes.txt", old_text=text, new_text="x")
+
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == before
+
+
+def test_edit_file_refuses_an_empty_match(workspace: Path) -> None:
+    with pytest.raises(ToolError, match="cannot be empty"):
+        tools(workspace)["edit_file"].run(path="notes.txt", old_text="", new_text="x")
+
+
+def test_edit_file_on_a_missing_file_is_refused(workspace: Path) -> None:
+    with pytest.raises(ToolError, match="is not a file"):
+        tools(workspace)["edit_file"].run(
+            path="missing.txt", old_text="old", new_text="new"
+        )
+
+
+def test_edit_file_leaves_the_original_when_atomic_replace_fails(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = (workspace / "notes.txt").read_text(encoding="utf-8")
+
+    def fail_replace(source: str, destination: Path) -> None:
+        raise PermissionError(13, "permission denied")
+
+    monkeypatch.setattr("app.tools.filesystem.os.replace", fail_replace)
+    with pytest.raises(PermissionError, match="permission denied"):
+        tools(workspace)["edit_file"].run(
+            path="notes.txt", old_text="kept", new_text="changed"
+        )
+
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == before
+    assert sorted(path.name for path in workspace.iterdir()) == ["notes.txt", "sub"]
+
+
+def test_write_and_edit_are_destructive(workspace: Path) -> None:
     box = toolbox(workspace)
 
-    assert [name for name in box.names if box.destructive(name)] == ["write_file"]
+    assert [name for name in box.names if box.destructive(name)] == [
+        "write_file",
+        "edit_file",
+    ]
 
 
 def test_an_unknown_tool_is_not_destructive(workspace: Path) -> None:
@@ -140,6 +194,7 @@ def test_schemas_describe_every_tool(workspace: Path) -> None:
         "list_files",
         "read_file",
         "write_file",
+        "edit_file",
     ]
     assert schemas[1]["function"]["parameters"]["required"] == ["path"]
     assert all(schema["type"] == "function" for schema in schemas)
@@ -179,6 +234,16 @@ def test_wrong_arguments_are_reported_rather_than_crashing(workspace: Path) -> N
     text = toolbox(workspace).run(call).content[0].text
 
     assert text.startswith("error: bad arguments for read_file")
+
+
+def test_schema_rejects_wrong_types_and_unexpected_arguments(workspace: Path) -> None:
+    wrong_type = ToolCall(id="a", name="read_file", arguments={"path": 3})
+    extra = ToolCall(
+        id="b", name="write_file", arguments={"path": "x", "content": "y", "force": True}
+    )
+
+    assert "argument 'path' must be string" in toolbox(workspace).run(wrong_type).content[0].text
+    assert "unexpected argument(s): force" in toolbox(workspace).run(extra).content[0].text
 
 
 def test_an_empty_result_still_produces_content(workspace: Path) -> None:

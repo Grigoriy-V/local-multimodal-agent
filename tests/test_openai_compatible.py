@@ -37,6 +37,10 @@ def settings(**overrides: Any) -> ModelSettings:
     return ModelSettings(_env_file=None, **{**base, **overrides})
 
 
+def test_default_output_cap_is_the_v15_coding_profile() -> None:
+    assert ModelSettings(_env_file=None).max_tokens == 4096
+
+
 def backend(handler, **overrides: Any) -> OpenAICompatibleBackend:
     return OpenAICompatibleBackend(settings(**overrides), transport=httpx.MockTransport(handler))
 

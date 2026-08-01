@@ -141,8 +141,8 @@ async def test_the_tool_schemas_are_sent_on_every_request(workspace: Path, store
 
     names = [[tool["function"]["name"] for tool in seen] for seen in backend.tools_seen]
     assert names == [
-        ["list_files", "read_file", "write_file"],
-        ["list_files", "read_file", "write_file"],
+        ["list_files", "read_file", "write_file", "edit_file"],
+        ["list_files", "read_file", "write_file", "edit_file"],
     ]
 
 

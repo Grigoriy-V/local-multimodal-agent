@@ -53,6 +53,7 @@ def memory_tools(store: MemoryStore, thread_id: str | None = None, limit: int = 
                     }
                 },
                 "required": ["text"],
+                "additionalProperties": False,
             },
             run=lambda text: _remember(store, thread_id, text),
         ),
@@ -65,6 +66,7 @@ def memory_tools(store: MemoryStore, thread_id: str | None = None, limit: int = 
                     "query": {"type": "string", "description": "Words to look for."}
                 },
                 "required": ["query"],
+                "additionalProperties": False,
             },
             run=lambda query: _search(store, query, limit),
         ),

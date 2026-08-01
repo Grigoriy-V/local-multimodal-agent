@@ -193,7 +193,13 @@ def build_agent(
 
     async def run_tools(state: AgentState) -> dict[str, list[Message]]:
         calls = state.messages[-1].tool_calls
-        risky = [call for call in calls if toolbox.destructive(call.name)]
+        # Invalid calls go straight back to the model as tool errors. Asking a
+        # user to approve a call that cannot run is both noisy and misleading.
+        risky = [
+            call
+            for call in calls
+            if toolbox.destructive(call.name) and toolbox.validation_error(call) is None
+        ]
         allowed = dict.fromkeys((call.id for call in calls), True)
         if risky and checkpointer is None:
             allowed.update(dict.fromkeys((call.id for call in risky), False))

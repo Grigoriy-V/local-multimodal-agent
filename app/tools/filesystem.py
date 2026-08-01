@@ -10,6 +10,8 @@ first, because overwriting a file the user cares about is inside the root too.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 from app.tools.base import Tool, ToolError
@@ -72,8 +74,44 @@ def _write_file(root: Path, path: str, content: str) -> str:
     return f"{verb} {path} ({len(content)} characters)"
 
 
+def _edit_file(root: Path, path: str, old_text: str, new_text: str) -> str:
+    target = _resolve(root, path)
+    if not target.is_file():
+        raise ToolError(f"path {path!r} is not a file")
+    if not old_text:
+        raise ToolError("old_text cannot be empty")
+
+    current = target.read_text(encoding="utf-8")
+    matches = current.count(old_text)
+    if matches != 1:
+        raise ToolError(
+            f"old_text must occur exactly once in {path!r}; found {matches} matches"
+        )
+    updated = current.replace(old_text, new_text, 1)
+
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target.parent, delete=False
+        ) as output:
+            temporary = output.name
+            output.write(updated)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary, target.stat().st_mode)
+        os.replace(temporary, target)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+    return f"edited {path} (replaced 1 match; {len(updated)} characters)"
+
+
 def filesystem_tools(root: Path) -> list[Tool]:
-    """Build `list_files`, `read_file` and `write_file` confined to `root`."""
+    """Build the filesystem tools confined to `root`."""
 
     resolved = Path(root).resolve()
     if not resolved.is_dir():
@@ -92,6 +130,7 @@ def filesystem_tools(root: Path) -> list[Tool]:
                     }
                 },
                 "required": [],
+                "additionalProperties": False,
             },
             run=lambda path=".": _list_files(resolved, path),
         ),
@@ -107,6 +146,7 @@ def filesystem_tools(root: Path) -> list[Tool]:
                     }
                 },
                 "required": ["path"],
+                "additionalProperties": False,
             },
             run=lambda path: _read_file(resolved, path),
         ),
@@ -129,8 +169,41 @@ def filesystem_tools(root: Path) -> list[Tool]:
                     },
                 },
                 "required": ["path", "content"],
+                "additionalProperties": False,
             },
             run=lambda path, content: _write_file(resolved, path, content),
+            destructive=True,
+        ),
+        Tool(
+            name="edit_file",
+            description=(
+                "Replace one exact, unique text fragment in an existing UTF-8 file inside "
+                "the workspace. The user is asked to approve the edit before it happens."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Path relative to the workspace root.",
+                    },
+                    "old_text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Exact text that must occur once in the file.",
+                    },
+                    "new_text": {
+                        "type": "string",
+                        "description": "Replacement text; may be empty to delete the match.",
+                    },
+                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": False,
+            },
+            run=lambda path, old_text, new_text: _edit_file(
+                resolved, path, old_text, new_text
+            ),
             destructive=True,
         ),
     ]

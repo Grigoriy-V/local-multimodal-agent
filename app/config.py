@@ -18,7 +18,9 @@ class ModelSettings(BaseSettings):
     name: str = "gemma-4-12b-it"
     api_key: str | None = None
     timeout: float = 120.0
-    max_tokens: int = 512
+    # Version 1.5 coding profile. This is an output cap, not reserved output and
+    # not the server context length; the validated server context stays 16k.
+    max_tokens: int = 4096
     temperature: float = 0.0
     # Extra attempts after the first, for failures that say "later", not "no".
     retries: int = 2

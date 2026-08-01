@@ -2,8 +2,7 @@
 
 **Updated:** 2026-08-01
 
-**Project status:** Version 1 closed; Version 1.5 is a provisional direction
-under discussion
+**Project status:** Version 1 closed; Version 1.5 steps 1 through 4 closed
 
 **Current approved step:** none
 
@@ -14,10 +13,15 @@ The human approves one step before implementation begins.
 
 Maximum ten bullets. When full, replace a stale fact — do not append.
 
-- A working agent exists: a four-node graph — `load`, `model`, `tools`,
-  `persist` — with the four contract tools, four context layers, SQLite
-  persistence, and Chainlit in front. Evidence:
-  `reports/2026-08-01_stage2_agent.md`.
+- The conversational agent remains a four-node graph — `load`, `model`,
+  `tools`, `persist` — with six tools, four context layers, SQLite and Chainlit.
+  A separate bounded task graph now owns the explicit
+  `task -> plan -> implement -> test -> evaluate -> retry/finalize` lifecycle.
+  Its model adapter produces structured plans and executes filesystem calls only
+  through the active task grant, returning exact tool results to the model.
+  Evidence: `reports/2026-08-01_stage2_agent.md` and
+  `reports/2026-08-01_v15_step2.md` through
+  `reports/2026-08-01_v15_step4.md`.
 - The conversation lives in the project's own SQLite; the checkpointer has its
   own file and holds only turns still in flight. Facts are global across threads
   and saved only when the model calls `remember_fact`.
@@ -68,40 +72,68 @@ Closed 2026-08-01: `reports/2026-08-01_stage2_agent.md`.
 
 Closed 2026-08-01: `reports/2026-08-01_v1_product_smoke.md`.
 
-### Version 1.5 — Native product controls and learning harness (provisional)
+### Version 1.5 — Agent task harness and native product controls
 
-Version 1.5 is a provisional direction, not an authorized or finalized stage.
-After Version 1 closes, it should prioritize learning and strengthening the
-graph and harness over visual polish: native Chainlit controls and commands,
-workspace instruction loading, inspectable memory, and a bounded
-task-to-implementation-to-test loop. Details and unresolved decisions live in
-`docs/BACKLOG.md`.
+Version 1.5 first proves the agent loop on one concrete vertical slice: the
+agent must create, repair and verify a working HTML Snake inside its sandbox.
+Graph and harness correctness come before UI polish. Detailed boundaries and
+later ideas live in `docs/BACKLOG.md`; listing these steps does not authorize
+their implementation.
 
-Provisional plan:
+Milestone A — autonomous Snake task:
 
-1. Harden tool-call and chat lifecycle behavior: validate calls before asking
-   for confirmation, recover from correctable argument errors, and remove
-   temporary/duplicate thread artifacts without losing canonical history.
-2. Load applicable workspace `AGENTS.md` instructions without expanding the
-   sandbox or tool permissions.
-3. Add only useful native Chainlit controls and commands through thin UI
-   adapters; defer custom frontend work.
-4. Make SQLite memory inspectable and editable, with candidate memories kept
-   separate from user-approved committed memory.
-5. Evolve the graph into a bounded task, implementation, test and evaluation
-   loop with explicit budgets and policy-approved verifiers.
-6. Close with regression and product tasks that prove creation, verification,
-   recovery and restart behavior end to end, including the HTML Snake case.
+1. Closed 2026-08-01: added atomic sandboxed exact single-match `edit_file`,
+   JSON-schema validation before confirmation, and the measured
+   `MODEL_MAX_TOKENS=4096` coding profile while retaining the validated 16k
+   server context. Evidence: `reports/2026-08-01_v15_step1.md`.
+2. Closed 2026-08-01: added explicit task state and graph routes for
+   `task -> plan -> implement -> test -> evaluate -> retry/finalize`, structured
+   plans and acceptance criteria, and hard iteration, tool-call and time
+   budgets. Evidence: `reports/2026-08-01_v15_step2.md`.
+3. Closed 2026-08-01: added a checkpointed task-scoped grant. After planning,
+   one explicit approval permits `write_file` and `edit_file` only in the
+   declared sandbox subdirectory for that run; the grant survives a SQLite
+   checkpoint and is revoked on completion or refusal. Evidence:
+   `reports/2026-08-01_v15_step3.md`.
+4. Closed 2026-08-01: connected a model-agnostic `ModelTaskWorker` to the task
+   graph. It starts each attempt from a real grant-root listing, creates through
+   `write_file`, repairs through `read_file` plus `edit_file`, feeds exact tool
+   failures back to the model and prevents over-budget calls from running.
+   Evidence: `reports/2026-08-01_v15_step4.md`.
+5. Add a deterministic web verifier for file presence, HTML structure,
+   JavaScript syntax and required game controls; return one structured test
+   report to `evaluate`.
+6. Route a failed report back to implementation while budget remains, otherwise
+   finalize honestly with the artifact and failures; never claim success from
+   plausible code alone.
+7. Add the browser verifier and preview: load the page, collect console errors,
+   prove canvas rendering and time-based movement, exercise keyboard input and
+   expose the final artifact through the UI.
+8. Close Milestone A with offline graph tests and one live Gemma product task
+   that creates Snake, corrects a seeded or observed failure, passes both
+   verifier layers and survives the required confirmation/checkpoint flow.
 
-Closing criterion: the final Version 1.5 scope is approved, every retained plan
-item works through the actual UI, and the bounded graph can complete or clearly
-stop representative sandbox tasks without silent state or permission changes.
+Milestone B — product capabilities on the working harness:
+
+9. Reconcile temporary and canonical chat IDs, then add useful native Chainlit
+   commands, settings and task status through thin UI adapters.
+10. Load applicable workspace `AGENTS.md` instructions without expanding the
+    sandbox, grants or tool permissions.
+11. Make SQLite memory inspectable and editable, with candidate memories kept
+    separate from user-approved committed memory.
+12. Run the complete regression and browser/restart product smoke for all
+    retained Version 1.5 capabilities.
+
+Closing criterion: the bounded graph completes or clearly stops representative
+sandbox tasks; the live Snake task passes deterministic and browser checks; and
+the retained instruction, native UI, chat and memory behavior works through the
+actual product without silent state or permission changes.
 
 ### Version 2 — Policy-governed tool platform (deferred)
 
 Version 2 is not authorized yet. Its short direction is: a durable policy and
-grant system for tools; policy-governed capabilities including targeted edits
-and documents; an MCP surface for stronger external models; and tracing,
+grant system for tools; policy-governed documents and future capabilities; an
+MCP surface for stronger external models; and tracing,
 statistics and evaluation for the graph and tool system. Detailed deferred
 direction lives in `docs/BACKLOG.md`.
 
@@ -109,7 +141,7 @@ Provisional plan:
 
 1. Define one durable policy predicate and inspectable grant lifecycle shared
    by every UI, model and tool call.
-2. Add targeted edits and document ingestion behind that policy boundary.
+2. Put document ingestion and later capabilities behind that policy boundary.
 3. Expose policy-governed tools and memory through MCP.
 4. Evaluate Codex app-server integration without nesting incompatible agent
    loops or placing subscription credentials in the repository.
@@ -126,8 +158,8 @@ regression behavior hold across supported interfaces.
 
 Maximum three. Not authorized by being listed.
 
-1. Review and finalize the provisional Version 1.5 scope and order, then approve
-   its first implementation step.
+1. Approve and implement Version 1.5 step 5: a deterministic web verifier for
+   file presence, HTML structure, JavaScript syntax and required game controls.
 
 ## Out of scope
 

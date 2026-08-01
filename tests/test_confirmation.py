@@ -48,6 +48,12 @@ def writes(path: str, content: str) -> ScriptedBackend:
     return ScriptedBackend(calls("write_file", path=path, content=content), says("Done."))
 
 
+def edits(path: str, old_text: str, new_text: str) -> ScriptedBackend:
+    return ScriptedBackend(
+        calls("edit_file", path=path, old_text=old_text, new_text=new_text), says("Done.")
+    )
+
+
 # --- the question ------------------------------------------------------------
 
 
@@ -79,6 +85,24 @@ async def test_a_read_is_never_asked_about(paths: tuple[Path, Path], workspace: 
     await agent.aclose()
 
 
+async def test_an_invalid_write_is_rejected_before_confirmation(
+    paths: tuple[Path, Path], workspace: Path
+) -> None:
+    backend = ScriptedBackend(
+        calls("write_file", content="missing path"), says("I could not write the file.")
+    )
+    agent = open_agent(paths, workspace, backend)
+
+    produced = await agent.answer("t1", user("Write a file."))
+
+    assert await agent.pending("t1") is None
+    assert body(produced[1]) == (
+        "error: bad arguments for write_file: missing required argument(s): path"
+    )
+    assert not (workspace / "missing path").exists()
+    await agent.aclose()
+
+
 # --- the answer --------------------------------------------------------------
 
 
@@ -94,6 +118,23 @@ async def test_approving_writes_the_file_and_finishes_the_turn(
     assert [message.role for message in rest] == ["tool", "assistant"]
     assert body(rest[0]) == "overwrote notes.txt (2 characters)"
     assert await agent.pending("t1") is None
+    await agent.aclose()
+
+
+async def test_an_edit_requires_approval_and_changes_one_match(
+    paths: tuple[Path, Path], workspace: Path
+) -> None:
+    agent = open_agent(paths, workspace, edits("notes.txt", "42", "43"))
+    await agent.answer("t1", user("Change 42 to 43."))
+
+    question = await agent.pending("t1")
+    assert question is not None and question[0]["name"] == "edit_file"
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "the answer is 42"
+
+    rest = [message async for message in agent.resume("t1", {"call_edit_file": True})]
+
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "the answer is 43"
+    assert body(rest[0]).startswith("edited notes.txt")
     await agent.aclose()
 
 
