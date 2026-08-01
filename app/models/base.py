@@ -13,6 +13,14 @@ from typing import Any, Literal
 Role = Literal["system", "user", "assistant", "tool"]
 
 
+class BackendError(RuntimeError):
+    """The model endpoint was reached but its answer cannot be used."""
+
+
+class ContextOverflowError(BackendError):
+    """The endpoint refused a request because it exceeded its context window."""
+
+
 @dataclass(frozen=True)
 class ContentPart:
     """One piece of a message. Parts keep the order the user supplied."""

@@ -30,7 +30,8 @@ htmlcov/
 /outputs/
 /runs/
 /logs/
-.chainlit/
+.chainlit/*
+!.chainlit/config.toml
 .files/
 
 # Local agent/runtime state

@@ -11,65 +11,88 @@ second consumer can be added without moving any of it.
 from __future__ import annotations
 
 import json
+import os
+import secrets
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from app.attachments import AttachmentError, AttachmentSource, load_attachments
+
+
+def _auth_secret() -> str:
+    """Return a stable local signing key without putting it in the repository."""
+
+    local_data = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+    secret_path = local_data / "local-multimodal-agent" / "chainlit-auth-secret"
+    if secret_path.exists():
+        return secret_path.read_text(encoding="utf-8").strip()
+    secret_path.parent.mkdir(parents=True, exist_ok=True)
+    secret = secrets.token_urlsafe(32)
+    try:
+        descriptor = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return secret_path.read_text(encoding="utf-8").strip()
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(secret)
+    return secret
+
+
+# Chainlit requires authentication before it exposes native chat history. The
+# transparent single-user login is only a UI identity; the signing key lives in
+# the user's local application data, not in source control or conversation data.
+os.environ.setdefault("CHAINLIT_AUTH_SECRET", _auth_secret())
+
 import chainlit as cl
 
 from app.agent.runtime import Agent, create_agent
-from app.memory import Thread
+from app.config import AgentSettings
+from app.memory import MemoryStore
 from app.models import ContentPart, Message
+from ui.chainlit_history import LOCAL_USER_IDENTIFIER, MemoryStoreDataLayer
 
 IMAGE = "image"
 AUDIO = "audio"
 CONFIRM_TIMEOUT = 600
-CHOOSE_TIMEOUT = 120
-# How many past conversations to offer. Beyond a handful the list stops being a
-# choice and becomes a search problem, which this is not.
-CHOICES = 5
-OPENING_WIDTH = 48
 
 
-def part_for(path: str, mime: str | None) -> ContentPart | None:
-    """Turn one attachment into a content part, or ignore what the model cannot read."""
+@cl.header_auth_callback
+async def local_auth(_headers: Any) -> cl.User:
+    """A single transparent identity for this loopback-only application."""
 
-    kind = (
-        IMAGE
-        if (mime or "").startswith("image/")
-        else AUDIO
-        if (mime or "").startswith("audio/")
-        else None
-    )
-    if kind is None:
-        return None
-    return ContentPart(kind=kind, data=Path(path).read_bytes(), media_type=mime)
+    return cl.User(identifier=LOCAL_USER_IDENTIFIER, display_name="Local user")
+
+
+@cl.data_layer
+def history_layer() -> MemoryStoreDataLayer:
+    return MemoryStoreDataLayer(MemoryStore(AgentSettings().database))
+
+
+def attachment_sources(incoming: cl.Message) -> list[AttachmentSource]:
+    """Translate Chainlit metadata without deciding what the agent accepts."""
+
+    sources = []
+    for element in incoming.elements or ():
+        path = getattr(element, "path", None)
+        if path:
+            sources.append(
+                AttachmentSource(
+                    path=Path(path),
+                    media_type=getattr(element, "mime", None),
+                    name=getattr(element, "name", None) or Path(path).name,
+                )
+            )
+    return sources
 
 
 def to_message(incoming: cl.Message) -> Message:
     parts: list[ContentPart] = []
     if incoming.content:
         parts.append(ContentPart(kind="text", text=incoming.content))
-    for element in incoming.elements or ():
-        path = getattr(element, "path", None)
-        part = part_for(path, getattr(element, "mime", None)) if path else None
-        if part is not None:
-            parts.append(part)
+    parts.extend(load_attachments(attachment_sources(incoming)))
     if not parts:
-        parts.append(ContentPart(kind="text", text="(empty message)"))
+        raise AttachmentError("the message has no text or usable attachments")
     return Message(role="user", content=parts)
-
-
-def rejected(incoming: cl.Message) -> list[str]:
-    """Attachments the model cannot read, named so the user is told rather than
-    left to wonder why the agent ignored the file."""
-
-    names = []
-    for element in incoming.elements or ():
-        path = getattr(element, "path", None)
-        if path and part_for(path, getattr(element, "mime", None)) is None:
-            names.append(getattr(element, "name", None) or Path(path).name)
-    return names
 
 
 def spoken(message: Message) -> str:
@@ -101,18 +124,6 @@ def attachments(message: Message) -> list[Any]:
             )
         )
     return shown
-
-
-async def replay(agent: Agent, thread_id: str) -> None:
-    """Show what the store already holds, so a restart looks like a continuation."""
-
-    for message in agent.history(thread_id):
-        if message.role == "user":
-            await cl.Message(
-                content=spoken(message), elements=attachments(message), author="you"
-            ).send()
-        elif message.role == "assistant" and spoken(message):
-            await cl.Message(content=spoken(message)).send()
 
 
 async def render(produced: AsyncIterator[Message]) -> None:
@@ -162,33 +173,6 @@ async def confirm(question: list[dict[str, Any]]) -> dict[str, bool]:
     return answers
 
 
-def summarise(thread: Thread) -> str:
-    opening = thread.opening or "(no words)"
-    if len(opening) > OPENING_WIDTH:
-        opening = opening[: OPENING_WIDTH - 1] + "…"
-    return f"{opening} · {thread.messages} messages"
-
-
-async def choose_thread(agent: Agent) -> str:
-    """Ask which conversation to open. No answer continues the most recent one."""
-
-    threads = agent.threads()
-    if not threads:
-        return cl.context.session.id
-
-    actions = [
-        cl.Action(name=thread.id, payload={"thread_id": thread.id}, label=summarise(thread))
-        for thread in threads[:CHOICES]
-    ]
-    actions.append(cl.Action(name="new", payload={"thread_id": ""}, label="New conversation"))
-    response = await cl.AskActionMessage(
-        content="Which conversation?", actions=actions, timeout=CHOOSE_TIMEOUT
-    ).send()
-    if response is None:
-        return threads[0].id
-    return response.get("payload", {}).get("thread_id") or cl.context.session.id
-
-
 async def report_fill(agent: Agent) -> None:
     """State how large the last request was, counted by the model itself."""
 
@@ -223,15 +207,17 @@ async def drive(
 @cl.on_chat_start
 async def start() -> None:
     agent = create_agent()
-    thread_id = await choose_thread(agent)
+    thread_id = cl.context.session.id
     cl.user_session.set("agent", agent)
     cl.user_session.set("thread_id", thread_id)
 
-    await replay(agent, thread_id)
-    await cl.Message(
-        content=f"Ready. Thread `{thread_id}`, workspace `{agent.workspace}`."
-    ).send()
 
+@cl.on_chat_resume
+async def resume(thread: dict[str, Any]) -> None:
+    agent = create_agent()
+    thread_id = thread["id"]
+    cl.user_session.set("agent", agent)
+    cl.user_session.set("thread_id", thread_id)
     if await agent.pending(thread_id) is not None:
         await cl.Message(content="This conversation stopped waiting for an answer.").send()
         await drive(agent, thread_id)
@@ -242,13 +228,15 @@ async def on_message(incoming: cl.Message) -> None:
     agent: Agent = cl.user_session.get("agent")
     thread_id: str = cl.user_session.get("thread_id")
 
-    ignored = rejected(incoming)
-    if ignored:
+    try:
+        message = to_message(incoming)
+    except AttachmentError as exc:
         await cl.Message(
-            content=f"I can only read images and audio, so I ignored: {', '.join(ignored)}."
+            content=f"Upload refused: {exc}."
         ).send()
+        return
 
-    await drive(agent, thread_id, agent.steps(thread_id, to_message(incoming)))
+    await drive(agent, thread_id, agent.steps(thread_id, message))
 
 
 @cl.on_chat_end

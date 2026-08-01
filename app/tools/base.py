@@ -86,6 +86,9 @@ class Toolbox:
                 result = f"error: {error}"
             except TypeError as error:
                 result = f"error: bad arguments for {call.name}: {error}"
+            except OSError as error:
+                detail = error.strerror or str(error) or type(error).__name__
+                result = f"error: {call.name} failed: {detail}"
         return Message(
             role="tool",
             content=[ContentPart(kind="text", text=result or "(empty)")],

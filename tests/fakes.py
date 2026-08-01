@@ -21,7 +21,7 @@ class ScriptedBackend(ModelBackend):
 
     def __init__(
         self,
-        *completions: Completion,
+        *completions: Completion | Exception,
         default: Completion | None = None,
         limit: int | None = None,
     ) -> None:
@@ -43,7 +43,10 @@ class ScriptedBackend(ModelBackend):
         self.requests.append(list(messages))
         self.tools_seen.append(tools)
         if self.completions:
-            return self.completions.pop(0)
+            result = self.completions.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
         if self.default is None:
             raise AssertionError("the backend was called more times than the test scripted")
         return self.default

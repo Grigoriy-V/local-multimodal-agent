@@ -16,7 +16,16 @@ from typing import Any, Self
 import httpx
 
 from app.config import ModelSettings
-from app.models.base import Completion, ContentPart, Message, ModelBackend, ToolCall, Usage
+from app.models.base import (
+    BackendError,
+    Completion,
+    ContentPart,
+    ContextOverflowError,
+    Message,
+    ModelBackend,
+    ToolCall,
+    Usage,
+)
 
 AUDIO_FORMATS = {
     "audio/wav": "wav",
@@ -30,10 +39,25 @@ AUDIO_FORMATS = {
 # full, a proxy that gave up early. A 4xx about the request itself is excluded —
 # sending the same bad request again only wastes the time it takes to refuse it.
 TRANSIENT_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+CONTEXT_OVERFLOW_STATUS = frozenset({400, 413, 422})
+CONTEXT_OVERFLOW_MARKERS = (
+    "maximum context length",
+    "context length exceeded",
+    "context window",
+    "too many tokens",
+    "prompt is too long",
+    "input is too long",
+    "max_model_len",
+)
 
 
-class BackendError(RuntimeError):
-    """The endpoint was reached but its answer cannot be used."""
+def is_context_overflow(status_code: int, detail: str) -> bool:
+    """Classify provider-specific overflow wording at the provider boundary."""
+
+    lowered = detail.lower()
+    return status_code in CONTEXT_OVERFLOW_STATUS and any(
+        marker in lowered for marker in CONTEXT_OVERFLOW_MARKERS
+    )
 
 
 def _encode(part: ContentPart) -> str:
@@ -209,7 +233,12 @@ class OpenAICompatibleBackend(ModelBackend):
             else:
                 if response.status_code < 400:
                     return response.json()
-                failure = BackendError(f"HTTP {response.status_code}: {response.text}")
+                error_type = (
+                    ContextOverflowError
+                    if is_context_overflow(response.status_code, response.text)
+                    else BackendError
+                )
+                failure = error_type(f"HTTP {response.status_code}: {response.text}")
                 transient = response.status_code in TRANSIENT_STATUS
             if not transient or attempt >= self.settings.retries:
                 raise failure
@@ -241,7 +270,12 @@ class OpenAICompatibleBackend(ModelBackend):
         async with self._client.stream("POST", "/chat/completions", json=body) as response:
             if response.status_code >= 400:
                 await response.aread()
-                raise BackendError(f"HTTP {response.status_code}: {response.text}")
+                error_type = (
+                    ContextOverflowError
+                    if is_context_overflow(response.status_code, response.text)
+                    else BackendError
+                )
+                raise error_type(f"HTTP {response.status_code}: {response.text}")
             async for line in response.aiter_lines():
                 text = parse_stream_line(line)
                 if text:

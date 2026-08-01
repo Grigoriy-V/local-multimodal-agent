@@ -12,9 +12,9 @@ import pytest
 
 pytest.importorskip("chainlit", reason="the ui dependency group is optional")
 
-from app.memory import Thread
 from app.models import ContentPart, Message
-from ui.chainlit_app import media_parts, part_for, rejected, spoken, summarise, to_message
+from app.attachments import AttachmentError
+from ui.chainlit_app import media_parts, spoken, to_message
 
 
 class FakeElement:
@@ -57,43 +57,17 @@ def test_an_audio_attachment_is_carried_as_audio(tmp_path: Path) -> None:
     assert [part.kind for part in message.content] == ["audio"]
 
 
-def test_an_unsupported_attachment_is_ignored(tmp_path: Path) -> None:
+def test_an_unsupported_attachment_refuses_the_message(tmp_path: Path) -> None:
     document = tmp_path / "report.pdf"
     document.write_bytes(b"%PDF")
 
-    assert part_for(str(document), "application/pdf") is None
+    with pytest.raises(AttachmentError, match="report.pdf: unsupported file type"):
+        to_message(FakeMessage("read this", [FakeElement(str(document), "application/pdf")]))
 
 
-def test_a_message_with_nothing_usable_still_produces_a_turn(tmp_path: Path) -> None:
-    document = tmp_path / "report.pdf"
-    document.write_bytes(b"%PDF")
-
-    message = to_message(FakeMessage("", [FakeElement(str(document), "application/pdf")]))
-
-    assert message.content[0].text == "(empty message)"
-
-
-def test_an_ignored_attachment_is_named_so_it_can_be_reported(tmp_path: Path) -> None:
-    """Dropping a file in silence looks like the agent read it and said nothing."""
-
-    document = tmp_path / "report.pdf"
-    document.write_bytes(b"%PDF")
-    picture = tmp_path / "shot.png"
-    picture.write_bytes(b"\x89PNG")
-
-    incoming = FakeMessage(
-        "look",
-        [FakeElement(str(document), "application/pdf"), FakeElement(str(picture), "image/png")],
-    )
-
-    assert rejected(incoming) == ["report.pdf"]
-
-
-def test_nothing_is_reported_when_everything_was_read(tmp_path: Path) -> None:
-    picture = tmp_path / "shot.png"
-    picture.write_bytes(b"\x89PNG")
-
-    assert rejected(FakeMessage("look", [FakeElement(str(picture), "image/png")])) == []
+def test_a_blank_message_does_not_become_an_empty_model_turn() -> None:
+    with pytest.raises(AttachmentError, match="no text or usable attachments"):
+        to_message(FakeMessage())
 
 
 # --- what comes back out -----------------------------------------------------
@@ -118,27 +92,6 @@ def test_a_text_only_message_has_nothing_to_show() -> None:
     message = Message(role="assistant", content=[ContentPart(kind="text", text="hi")])
 
     assert media_parts(message) == []
-
-
-def test_a_thread_is_labelled_by_how_it_began() -> None:
-    thread = Thread(id="abc", updated_at="2026-08-01T00:00:00+00:00", messages=4, opening="hello")
-
-    assert summarise(thread) == "hello · 4 messages"
-
-
-def test_a_long_opening_is_cut_to_fit_a_button() -> None:
-    thread = Thread(id="abc", updated_at="x", messages=2, opening="word " * 40)
-
-    label = summarise(thread)
-
-    assert label.startswith("word")
-    assert "…" in label
-
-
-def test_a_thread_that_began_without_words_is_still_recognisable() -> None:
-    thread = Thread(id="abc", updated_at="x", messages=2, opening="")
-
-    assert summarise(thread) == "(no words) · 2 messages"
 
 
 def test_spoken_joins_only_the_text_parts() -> None:

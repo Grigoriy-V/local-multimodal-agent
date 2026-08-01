@@ -40,6 +40,7 @@ async def fold_older_messages(
     thread_id: str,
     policy: ContextPolicy,
     used_tokens: int | None = None,
+    force: bool = False,
 ) -> str | None:
     """Summarize everything past the verbatim window. Returns the new summary.
 
@@ -61,7 +62,7 @@ async def fold_older_messages(
         and used_tokens is not None
         and used_tokens > policy.max_input_tokens
     )
-    if len(pending) <= policy.summarize_after and not oversized:
+    if len(pending) <= policy.summarize_after and not oversized and not force:
         return None
 
     cut = first_user_turn(pending, len(pending) - policy.keep_recent)

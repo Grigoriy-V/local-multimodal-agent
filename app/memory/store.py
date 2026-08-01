@@ -71,6 +71,7 @@ class Thread:
     """Enough about a conversation to choose it without opening it."""
 
     id: str
+    created_at: str
     updated_at: str
     messages: int
     opening: str
@@ -181,15 +182,16 @@ class MemoryStore:
         """
 
         rows = self._db.execute(
-            "SELECT t.id, t.updated_at,"
+            "SELECT t.id, t.created_at, t.updated_at,"
             "  (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id) AS messages,"
             "  (SELECT m.content FROM messages m WHERE m.thread_id = t.id AND m.role = 'user'"
             "   ORDER BY m.position LIMIT 1) AS opening"
-            " FROM threads t ORDER BY t.updated_at DESC"
+            " FROM threads t ORDER BY t.updated_at DESC, t.rowid DESC"
         ).fetchall()
         return [
             Thread(
                 id=row["id"],
+                created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 messages=row["messages"],
                 opening=_opening_text(row["opening"]),

@@ -187,3 +187,24 @@ def test_an_empty_result_still_produces_content(workspace: Path) -> None:
     message = box.run(ToolCall(id="call_1", name="quiet", arguments={}))
 
     assert message.content[0].text == "(empty)"
+
+
+def test_an_operating_system_failure_becomes_a_readable_tool_result() -> None:
+    def denied() -> str:
+        raise PermissionError(13, "permission denied")
+
+    box = Toolbox([Tool(name="blocked", description="", parameters={}, run=denied)])
+
+    text = box.run(ToolCall(id="call_1", name="blocked", arguments={})).content[0].text
+
+    assert text == "error: blocked failed: permission denied"
+
+
+def test_a_programming_error_is_not_hidden_as_a_tool_result() -> None:
+    def broken() -> str:
+        raise ValueError("bug")
+
+    box = Toolbox([Tool(name="broken", description="", parameters={}, run=broken)])
+
+    with pytest.raises(ValueError, match="bug"):
+        box.run(ToolCall(id="call_1", name="broken", arguments={}))

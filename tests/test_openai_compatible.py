@@ -18,8 +18,10 @@ from app.config import ModelSettings
 from app.models import ContentPart, Message, ToolCall
 from app.models.openai_compatible import (
     BackendError,
+    ContextOverflowError,
     OpenAICompatibleBackend,
     build_messages,
+    is_context_overflow,
     parse_completion,
     parse_context_limit,
     parse_stream_line,
@@ -319,6 +321,35 @@ async def test_an_http_error_becomes_a_backend_error() -> None:
 
     async with backend(handler) as client:
         with pytest.raises(BackendError, match="HTTP 400"):
+            await client.invoke([Message(role="user", content=[text_part()])])
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "This model's maximum context length is 8192 tokens",
+        "prompt is too long for max_model_len",
+        "context window exceeded",
+    ],
+)
+def test_context_overflow_wording_is_classified_at_the_provider_boundary(detail: str) -> None:
+    assert is_context_overflow(400, detail)
+
+
+def test_an_unrelated_bad_request_is_not_classified_as_context_overflow() -> None:
+    assert not is_context_overflow(400, "invalid image payload")
+    assert not is_context_overflow(503, "maximum context length")
+
+
+async def test_context_overflow_has_a_typed_backend_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={"error": "This model's maximum context length is 8192 tokens"},
+        )
+
+    async with backend(handler) as client:
+        with pytest.raises(ContextOverflowError, match="HTTP 400"):
             await client.invoke([Message(role="user", content=[text_part()])])
 
 

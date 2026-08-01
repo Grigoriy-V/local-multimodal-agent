@@ -25,7 +25,11 @@ def _resolve(root: Path, path: str) -> Path:
     symlinks that leave the root are all refused by the same comparison.
     """
 
-    candidate = (root / (path or ".")).resolve()
+    try:
+        candidate = (root / (path or ".")).resolve()
+    except (OSError, RuntimeError) as error:
+        detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
+        raise ToolError(f"path {path!r} cannot be resolved: {detail}") from error
     if candidate != root and root not in candidate.parents:
         raise ToolError(f"path {path!r} is outside the allowed root")
     return candidate

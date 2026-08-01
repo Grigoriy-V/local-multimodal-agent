@@ -13,7 +13,7 @@ import pytest
 from app.agent.graph import build_agent
 from app.memory import MemoryStore
 from app.models import Completion, ContentPart, Message, ToolCall
-from app.tools import Toolbox, filesystem_tools
+from app.tools import Tool, Toolbox, filesystem_tools
 from tests.fakes import ScriptedBackend, calls
 
 
@@ -114,6 +114,23 @@ async def test_a_failing_tool_goes_back_to_the_model(workspace: Path, store: Mem
 
     assert result["messages"][2].content[0].text.startswith("error:")
     assert result["messages"][-1].content[0].text == "sorry"
+
+
+async def test_an_os_failure_stays_inside_the_tool_loop(store: MemoryStore) -> None:
+    def denied() -> str:
+        raise PermissionError(13, "permission denied")
+
+    backend = ScriptedBackend(calls("blocked"), Completion(text="I could not read it."))
+    agent = build_agent(
+        backend,
+        Toolbox([Tool(name="blocked", description="", parameters={}, run=denied)]),
+        store,
+    )
+
+    result = await agent.ainvoke(ask("Read the blocked file."))
+
+    assert result["messages"][2].content[0].text == "error: blocked failed: permission denied"
+    assert result["messages"][-1].content[0].text == "I could not read it."
 
 
 async def test_the_tool_schemas_are_sent_on_every_request(workspace: Path, store: MemoryStore) -> None:

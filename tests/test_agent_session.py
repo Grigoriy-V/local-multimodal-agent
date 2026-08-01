@@ -15,7 +15,7 @@ import pytest
 from app.agent.runtime import Agent
 from app.context import ContextPolicy
 from app.memory import MemoryStore
-from app.models import ContentPart, Message
+from app.models import ContentPart, ContextOverflowError, Message
 from tests.fakes import ScriptedBackend, body, calls, prompt_text, says, user
 
 
@@ -312,6 +312,100 @@ async def test_a_request_over_budget_folds_the_conversation(
     summary, through = agent.store.summary("t1")
     assert summary == "ok"
     assert through > 0
+
+
+def seed_old_turns(store: MemoryStore, thread_id: str = "t1") -> None:
+    messages = []
+    for turn in range(3):
+        messages.extend(
+            [
+                user(f"old turn {turn}"),
+                Message(
+                    role="assistant",
+                    content=[ContentPart(kind="text", text=f"old answer {turn}")],
+                ),
+            ]
+        )
+    store.append(thread_id, messages)
+
+
+async def test_context_overflow_folds_then_retries_once(
+    database: Path, workspace: Path
+) -> None:
+    store = MemoryStore(database)
+    seed_old_turns(store)
+    backend = ScriptedBackend(
+        ContextOverflowError("too large"),
+        says("compressed older turns"),
+        says("recovered answer", input_tokens=40),
+        limit=100,
+    )
+    policy = ContextPolicy(keep_recent=2, summarize_after=100)
+    agent = Agent(backend, store, workspace, policy, context_fraction=0.6)
+
+    produced = await agent.answer("t1", user("new question"))
+
+    assert body(produced[-1]) == "recovered answer"
+    assert len(backend.requests) == 3
+    assert agent.store.summary("t1")[0] == "compressed older turns"
+    assert "old turn 0" not in prompt_text(backend.requests[-1])
+
+
+async def test_a_second_context_overflow_returns_a_clear_refusal(
+    database: Path, workspace: Path
+) -> None:
+    store = MemoryStore(database)
+    seed_old_turns(store)
+    backend = ScriptedBackend(
+        ContextOverflowError("first overflow"),
+        says("compressed older turns"),
+        ContextOverflowError("still too large"),
+        limit=100,
+    )
+    policy = ContextPolicy(keep_recent=2, summarize_after=100)
+    agent = Agent(backend, store, workspace, policy, context_fraction=0.6)
+
+    produced = await agent.answer("t1", user("huge new question"))
+
+    assert "too large for the model's context window" in body(produced[-1])
+    assert len(backend.requests) == 3
+    assert body(agent.history("t1")[-1]) == body(produced[-1])
+
+
+async def test_an_input_that_cannot_be_folded_is_refused_without_retrying(
+    database: Path, workspace: Path
+) -> None:
+    backend = ScriptedBackend(ContextOverflowError("too large"), limit=100)
+    agent = Agent(backend, MemoryStore(database), workspace, context_fraction=0.6)
+
+    produced = await agent.answer("t1", user("one enormous new input"))
+
+    assert "too large for the model's context window" in body(produced[-1])
+    assert len(backend.requests) == 1
+    assert [body(message) for message in agent.history("t1")] == [
+        "one enormous new input",
+        body(produced[-1]),
+    ]
+
+
+async def test_overflow_while_summarizing_stops_with_a_refusal(
+    database: Path, workspace: Path
+) -> None:
+    store = MemoryStore(database)
+    seed_old_turns(store)
+    backend = ScriptedBackend(
+        ContextOverflowError("original request overflow"),
+        ContextOverflowError("summary also overflowed"),
+        limit=100,
+    )
+    policy = ContextPolicy(keep_recent=2, summarize_after=100)
+    agent = Agent(backend, store, workspace, policy, context_fraction=0.6)
+
+    produced = await agent.answer("t1", user("new question"))
+
+    assert "too large for the model's context window" in body(produced[-1])
+    assert len(backend.requests) == 2
+    assert agent.store.summary("t1") == (None, 0)
 
 
 async def test_the_workspace_is_the_only_readable_root(

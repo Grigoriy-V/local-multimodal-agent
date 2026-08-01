@@ -26,6 +26,56 @@ useful detail here until implementation or a later decision makes it stale.
 - **FastAPI application layer.** Only when a consumer other than Chainlit
   exists. See `DECISIONS.md`.
 
+## Version 1.5 (provisional)
+
+Version 1.5 is a learning-oriented bridge between the working Version 1 product
+and the policy platform of Version 2. Its final scope and order will be decided
+only after Version 1 closes. The graph and harness matter more here than visual
+customization.
+
+- **Use native Chainlit product controls first.** Candidate capabilities are
+  native commands such as `/compact`, `/workspace`, `/memory` and `/status`;
+  chat settings; task/progress status; microphone/audio hooks; file uploads;
+  actions and ordinary UI elements. Chainlit callbacks remain thin adapters to
+  shared application services. Custom CSS, JavaScript and a replacement React
+  frontend are deliberately deferred until native controls prove insufficient.
+- **Validate tool calls before confirmation and support bounded correction.**
+  The HTML Snake product check exposed a `write_file` call containing `content`
+  but no required `path`. The safe tool rejected it, but the UI first asked the
+  user to approve an invalid call and the model then asked conversationally
+  instead of issuing a corrected call. Validate arguments before consent,
+  return precise structured errors, and allow correction within an explicit
+  retry budget.
+- **Clean up the new-chat lifecycle.** The Version 1 closing smoke preserved the
+  canonical conversation and resumed it after restart, but the initial
+  Chainlit thread URL remained as an empty `Conversation` beside the canonical
+  stored thread. Reconcile temporary and canonical IDs so create, switch and
+  resume do not leave duplicate sidebar artifacts.
+- **Load workspace instructions.** The local agent should discover applicable
+  `AGENTS.md` instructions only inside its explicitly allowed workspace and add
+  them to the instruction layer. Nested instructions and precedence need a
+  small explicit rule before implementation. Instructions may constrain agent
+  behavior but never expand filesystem roots, tool grants or safety policy.
+- **Make memory inspectable and reviewable.** SQLite remains the canonical
+  runtime store because it supports retrieval, provenance and safe updates. Add
+  a human-readable view with edit/delete controls and, if useful, a generated
+  Markdown export or projection. Do not make an uncontrolled Markdown file a
+  second competing source of truth.
+- **Separate candidate memory from committed memory.** The model may propose
+  facts or preferences that appear worth remembering, including without an
+  explicit `remember_fact` request, but model-generated candidates are not
+  trusted memory until the user reviews, edits or approves them. Record source
+  thread, time and provenance. Policy-based automatic saving of narrow,
+  low-risk preferences may be reconsidered later.
+- **Add a bounded task loop to the graph.** The intended learning flow is
+  `task -> plan/reason -> implement -> test -> evaluate -> finalize`, with a
+  failed evaluation returning to implementation while iteration, tool-call and
+  time budgets remain. Store a structured plan, status and decision rationale,
+  not private token-by-token chain-of-thought. Testing uses only policy-approved
+  verifiers and every retry remains inside the workspace sandbox. A small HTML
+  application such as Snake is a useful acceptance task: create it, validate or
+  preview it, observe failures and retry within the budget.
+
 ## Version 2
 
 Version 2 turns the working local agent into a policy-governed, observable and
@@ -46,6 +96,16 @@ order are deliberately not fixed before Version 1 closes.
 - **An MCP server over the policy-governed tools and memory**, so stronger
   external models such as Claude Code or Codex can use the system without
   receiving a second, less safe implementation of its capabilities.
+- **Codex app-server integration research.** Codex can authenticate through a
+  ChatGPT subscription, but app-server exposes the complete Codex agent runtime
+  rather than a normal raw-model or OpenAI-compatible completion endpoint.
+  Before treating it as another backend, compare two shapes: use this project
+  as an app-server client, or expose this project's policy-governed tools and
+  memory over MCP while Codex owns its loop. The latter is the more natural
+  default hypothesis and avoids accidentally nesting one agent loop inside
+  another. Start localhost-only, keep authentication material outside the
+  repository, respect plan/rate limits, and investigate only after Version 1
+  and the policy/MCP boundary are stable.
 - **Run tracing and statistics** for model calls, tool calls, policy decisions,
   context decisions, latency, retries, failures and outcome quality, inspectable
   after the fact.

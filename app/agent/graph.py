@@ -21,7 +21,15 @@ from langgraph.types import interrupt
 from app.context import Context, ContextPolicy, build_prelude, fold_older_messages
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import MemoryStore
-from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall, Usage
+from app.models import (
+    Completion,
+    ContentPart,
+    ContextOverflowError,
+    Message,
+    ModelBackend,
+    ToolCall,
+    Usage,
+)
 from app.tools import Toolbox
 
 
@@ -91,6 +99,23 @@ def declined(call: ToolCall) -> Message:
     )
 
 
+def context_refusal() -> Message:
+    """A completed assistant turn when even one bounded recovery cannot fit."""
+
+    return Message(
+        role="assistant",
+        content=[
+            ContentPart(
+                kind="text",
+                text=(
+                    "I cannot process this request because it is too large for the model's "
+                    "context window. Shorten it or start a new conversation."
+                ),
+            )
+        ],
+    )
+
+
 def latest_text(messages: list[Message]) -> str:
     """The newest user text, which is what memory retrieval searches on."""
 
@@ -122,20 +147,48 @@ def build_agent(
     policy = policy or ContextPolicy()
     schemas = toolbox.schemas() or None
 
-    def load(state: AgentState) -> dict[str, Context]:
+    def assemble_context(state: AgentState) -> Context:
         summary, through = store.summary(state.thread_id)
         history = store.messages(state.thread_id, after=through - 1)
         query = latest_text(state.messages)
         facts = store.search(query, limit=policy.retrieved_facts) if query else []
-        return {
-            "context": Context(
-                prelude=build_prelude(summary, facts, system_prompt),
-                history=history,
-            )
-        }
+        return Context(
+            prelude=build_prelude(summary, facts, system_prompt),
+            history=history,
+        )
+
+    def load(state: AgentState) -> dict[str, Context]:
+        return {"context": assemble_context(state)}
 
     async def call_model(state: AgentState) -> dict[str, Any]:
-        completion = await backend.invoke(state.context.prompt(state.messages), tools=schemas)
+        try:
+            completion = await backend.invoke(state.context.prompt(state.messages), tools=schemas)
+        except ContextOverflowError:
+            try:
+                folded = await fold_older_messages(
+                    backend, store, state.thread_id, policy, force=True
+                )
+            except ContextOverflowError:
+                folded = None
+            if folded is None:
+                return {"messages": [context_refusal()], "usage": Usage()}
+
+            recovered = assemble_context(state)
+            try:
+                completion = await backend.invoke(
+                    recovered.prompt(state.messages), tools=schemas
+                )
+            except ContextOverflowError:
+                return {
+                    "context": recovered,
+                    "messages": [context_refusal()],
+                    "usage": Usage(),
+                }
+            return {
+                "context": recovered,
+                "messages": [assistant_message(completion)],
+                "usage": completion.usage,
+            }
         return {"messages": [assistant_message(completion)], "usage": completion.usage}
 
     async def run_tools(state: AgentState) -> dict[str, list[Message]]:

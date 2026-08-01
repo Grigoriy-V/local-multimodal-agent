@@ -2,8 +2,8 @@
 
 **Updated:** 2026-08-01
 
-**Project status:** Version 1 reopened for product completion; stages 1 and 2
-are closed and the Stage 3 functional core exists
+**Project status:** Version 1 closed; Version 1.5 is a provisional direction
+under discussion
 
 **Current approved step:** none
 
@@ -28,20 +28,21 @@ Maximum ten bullets. When full, replace a stale fact — do not append.
   them, and a cut only lands at the start of a user turn, so no tool result is
   ever orphaned. Two things fold: too many messages, or a request measured over
   budget.
-- The server reports `max_model_len` and `usage.prompt_tokens`, and an
-  over-budget completed request triggers a fold before the next turn. This is
-  reactive accounting, not a preflight hard bound; overflow recovery remains a
-  Version 1 completion item. Evidence: `reports/2026-08-01_v1.md`.
+- The server reports `max_model_len` and `usage.prompt_tokens`. In addition to
+  normal reactive folding, a typed context overflow now forces one fold and one
+  retry; an unfittable request ends as a stored readable refusal. Evidence:
+  `reports/2026-08-01_v1.md` and `reports/2026-08-01_v1_resilience.md`.
 - The file tools take their allowed root as an argument and resolve every
   model-supplied path before comparing it against that root; the root defaults
   to a `workspace/` sandbox, not to the repository.
 - The model runs outside the repository: `gemma-4-12B-it-qat-w4a16-ct` weights
   and a vLLM 0.26 server live in WSL2 `Ubuntu-22.04`, reached only over
   `http://127.0.0.1:8000/v1`. The repository declares no inference dependency.
-- The UI can replay stored conversations, show images and audio, name an
-  attachment it cannot read, and report the last measured request size. Its
-  current startup button chooser is temporary; Version 1 still needs normal
-  persistent chat history and product-level create, switch and resume behavior.
+- Chainlit reads its native sidebar and resumed threads from the canonical
+  conversation SQLite. Its upload control and the UI-independent admission
+  boundary now share explicit media and size limits, and a refused batch never
+  starts a model turn. Evidence: `reports/2026-08-01_v1_chat_history.md` and
+  `reports/2026-08-01_v1_uploads.md`.
 - `httpx` is imported only by `app/models/`, `langgraph` only by `app/agent/`,
   and no `langchain_core` type appears anywhere in `app/`. No tokenizer,
   processor or provider SDK is imported anywhere.
@@ -51,8 +52,9 @@ Maximum ten bullets. When full, replace a stale fact — do not append.
 
 ## Plan
 
-Three stages from the contract. Each states the outcome and its closing
-criterion, not the method. A closed stage collapses to one line and a link.
+Each open major stage or version keeps a compact outcome, ordered plan and
+closing criterion, so the work remaining is visible independently of the next
+step candidate. A closed stage collapses to one line and an evidence link.
 
 ### Stage 1 — Multimodal smoke test
 
@@ -64,23 +66,36 @@ Closed 2026-08-01: `reports/2026-08-01_stage2_agent.md`.
 
 ### Stage 3 — Full graph / Version 1 product completion
 
-The functional core was delivered 2026-08-01 in two parts: checkpoints,
-resumable turns and confirmation —
-`reports/2026-08-01_stage3_confirmation.md`; then the first Version 1 pass —
-`reports/2026-08-01_v1.md`. Version 1 was reopened after product review.
+Closed 2026-08-01: `reports/2026-08-01_v1_product_smoke.md`.
 
-Version 1 closes only when all of these hold together:
+### Version 1.5 — Native product controls and learning harness (provisional)
 
-- normal persistent chat history supports create, switch, resume and restart
-  without losing the existing conversations;
-- the upload control accepts only supported inputs at explicit safe sizes, and
-  unsupported or oversized input never becomes an empty model turn;
-- expected tool and filesystem failures return readable tool results instead of
-  terminating the graph;
-- context overflow causes one bounded recovery attempt or a clear refusal, while
-  the existing rolling-summary behavior remains intact;
-- the complete experience passes offline regression checks and a real
-  browser/restart product smoke against the local endpoint.
+Version 1.5 is a provisional direction, not an authorized or finalized stage.
+After Version 1 closes, it should prioritize learning and strengthening the
+graph and harness over visual polish: native Chainlit controls and commands,
+workspace instruction loading, inspectable memory, and a bounded
+task-to-implementation-to-test loop. Details and unresolved decisions live in
+`docs/BACKLOG.md`.
+
+Provisional plan:
+
+1. Harden tool-call and chat lifecycle behavior: validate calls before asking
+   for confirmation, recover from correctable argument errors, and remove
+   temporary/duplicate thread artifacts without losing canonical history.
+2. Load applicable workspace `AGENTS.md` instructions without expanding the
+   sandbox or tool permissions.
+3. Add only useful native Chainlit controls and commands through thin UI
+   adapters; defer custom frontend work.
+4. Make SQLite memory inspectable and editable, with candidate memories kept
+   separate from user-approved committed memory.
+5. Evolve the graph into a bounded task, implementation, test and evaluation
+   loop with explicit budgets and policy-approved verifiers.
+6. Close with regression and product tasks that prove creation, verification,
+   recovery and restart behavior end to end, including the HTML Snake case.
+
+Closing criterion: the final Version 1.5 scope is approved, every retained plan
+item works through the actual UI, and the bounded graph can complete or clearly
+stop representative sandbox tasks without silent state or permission changes.
 
 ### Version 2 — Policy-governed tool platform (deferred)
 
@@ -90,12 +105,29 @@ and documents; an MCP surface for stronger external models; and tracing,
 statistics and evaluation for the graph and tool system. Detailed deferred
 direction lives in `docs/BACKLOG.md`.
 
+Provisional plan:
+
+1. Define one durable policy predicate and inspectable grant lifecycle shared
+   by every UI, model and tool call.
+2. Add targeted edits and document ingestion behind that policy boundary.
+3. Expose policy-governed tools and memory through MCP.
+4. Evaluate Codex app-server integration without nesting incompatible agent
+   loops or placing subscription credentials in the repository.
+5. Add tracing and comparable statistics for model, graph, policy and tool
+   decisions.
+6. Build reproducible evaluations for tool choice, policy compliance, memory
+   retrieval and graph regressions.
+
+Closing criterion: external capable models can use the same governed tools and
+memory, and recorded evaluations demonstrate that policy, observability and
+regression behavior hold across supported interfaces.
+
 ## Next step candidates
 
 Maximum three. Not authorized by being listed.
 
-1. Finish Version 1 product completion, beginning with native persistent chat
-   history. Each implementation step still requires separate human approval.
+1. Review and finalize the provisional Version 1.5 scope and order, then approve
+   its first implementation step.
 
 ## Out of scope
 

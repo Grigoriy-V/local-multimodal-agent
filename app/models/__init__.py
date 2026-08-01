@@ -1,6 +1,8 @@
 from app.models.base import (
+    BackendError,
     Completion,
     ContentPart,
+    ContextOverflowError,
     Message,
     ModelBackend,
     ToolCall,
@@ -8,8 +10,10 @@ from app.models.base import (
 )
 
 __all__ = [
+    "BackendError",
     "Completion",
     "ContentPart",
+    "ContextOverflowError",
     "Message",
     "ModelBackend",
     "ToolCall",
