@@ -18,7 +18,9 @@ implementation.
 
 ## Evidence to name before use
 
-- model weights location and how the server is launched: not decided;
-- credentials and endpoint configuration: not decided;
-- test fixtures for image and audio input: not created;
+- model weights remain outside the repository; the validated server launch is
+  documented in `README.md` and its paths are machine-specific;
+- endpoint configuration is documented in `.env.example`; the validated local
+  endpoint needs no credential;
+- image and audio fixtures live in `tests/fixtures/`;
 - local constraints beyond `AGENTS.md`: none.

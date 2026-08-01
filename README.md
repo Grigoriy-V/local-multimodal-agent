@@ -53,31 +53,90 @@ reports/   evidence and the two JSONL journals
 
 ## Status
 
-Stages 1 and 2 are closed. The Stage 3 functional core is working, but
-**version 1 is reopened for product completion**; current criteria are in
-`docs/CONTRACT.md` and direction in `ROADMAP.md`. The first-pass evidence remains
-in `reports/2026-08-01_v1.md`. The agent answers text, images and audio; calls
+**Version 1 is complete.** Closing evidence is in
+`reports/2026-08-01_v1_product_smoke.md`; current direction is in `ROADMAP.md`.
+The agent answers text, images and audio; calls
 `list_files`, `read_file`, `write_file`, `remember_fact` and `search_memory`;
 keeps conversations in SQLite across restarts; finds a fact saved in an earlier
 session; folds older turns into a rolling summary after a completed request is
 measured over budget; stops to ask before it writes a file, resuming that
 question even after the process that asked it is gone; retries a model call that
-failed transiently; can replay recent conversations; shows images and audio in
-its answers; and says which attachment it could not read. Version 1 still needs
-native persistent chat history, honest upload limits, complete tool-error
-handling, context-overflow recovery and a final product smoke. Version 2 is
-summarized in `ROADMAP.md` and detailed in `docs/BACKLOG.md`. Work proceeds one
-approved step at a time after an explicit human command.
+failed transiently; provides native persistent chat history; enforces explicit
+upload limits; recovers once from context overflow; and shows images and audio
+in its answers. Version 1.5 and Version 2 are summarized in `ROADMAP.md` and
+detailed in `docs/BACKLOG.md`.
 
 The server reports the ceiling through `/v1/models` and the completed request
 size through `usage.prompt_tokens`. `AGENT_CONTEXT_FRACTION` decides when an
-over-budget request triggers a fold before the next turn. This is reactive
-accounting; Version 1 completion adds bounded recovery for a request the server
-rejects before it can report usage.
+over-budget request triggers a fold before the next turn. A context-overflow
+response forces one fold and one retry; if the request still cannot fit, the
+agent returns and stores a readable refusal.
 
 The model server is infrastructure and lives outside this repository; the
 project reaches it over `MODEL_ENDPOINT` only. Copy `.env.example` to `.env` to
 point somewhere else.
+
+## Install the application
+
+The tested application environment is Windows with Python 3.12 and `uv`:
+
+```powershell
+git clone https://github.com/Grigoriy-V/local-multimodal-agent.git
+cd local-multimodal-agent
+uv sync --all-groups
+Copy-Item .env.example .env
+```
+
+Model weights and the vLLM environment are intentionally not part of this
+repository.
+
+## Start the model server
+
+The validated inference setup is vLLM 0.26 in WSL2 `Ubuntu-22.04` on an RTX
+4090 24 GB. Download or otherwise provide the Gemma weights separately, then
+adjust `MODEL_PATH` and the vLLM environment path for your machine:
+
+```bash
+# Run inside WSL2 Ubuntu-22.04.
+source "$HOME/venvs/vllm/bin/activate"
+
+MODEL_PATH="$HOME/models/gemma-4-12B-it-qat-w4a16-ct"
+export VLLM_USE_V2_MODEL_RUNNER=0
+export VLLM_USE_FLASHINFER_SAMPLER=0
+export CUDA_HOME="$VIRTUAL_ENV/lib/python3.10/site-packages/nvidia/cu13"
+
+vllm serve "$MODEL_PATH" \
+  --served-model-name gemma-4-12b-it \
+  --max-model-len 16384 \
+  --limit-mm-per-prompt '{"image":4,"audio":1}' \
+  --enable-auto-tool-choice \
+  --tool-call-parser gemma4 \
+  --reasoning-parser gemma4 \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+`0.0.0.0` is used for the tested Windows-to-WSL localhost forwarding. Check
+your firewall before exposing the WSL interface to another machine.
+
+From Windows PowerShell, verify that the endpoint is visible:
+
+```powershell
+.venv\Scripts\python.exe -m scripts.doctor
+```
+
+## Start the UI
+
+With the model server running, start Chainlit from Windows PowerShell:
+
+```powershell
+.venv\Scripts\python.exe -m chainlit run ui/chainlit_app.py --port 8100 --headless
+```
+
+Open <http://127.0.0.1:8100>. Stop the UI with `Ctrl+C`; conversations remain
+in the local SQLite database and are restored on the next start.
+
+## Checks
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q            # offline, needs nothing
@@ -85,7 +144,6 @@ point somewhere else.
 .venv\Scripts\python.exe -m scripts.smoke_test   # every Stage 1 item, needs the server
 .venv\Scripts\python.exe -m scripts.stage3_live  # asking before a write, needs the server
 .venv\Scripts\python.exe -m scripts.v1_live      # first-pass v1 checks, needs the server
-.venv\Scripts\python.exe -m chainlit run ui/chainlit_app.py -w   # the agent, needs the server
 ```
 
 The agent touches only `AGENT_WORKSPACE`, which defaults to `workspace/`, and
