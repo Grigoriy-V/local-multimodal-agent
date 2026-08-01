@@ -83,7 +83,7 @@ async def approve(graph, task: str = "Create an artifact", subdirectory: str = "
     assert pending.value == {
         "kind": "task_grant",
         "subdirectory": subdirectory,
-        "permissions": ["write_file", "edit_file"],
+        "permissions": ["write_file", "edit_file", "browser_verify"],
         "plan": "Create and verify one artifact.",
         "acceptance_criteria": ["artifact passes its check"],
     }
@@ -140,7 +140,9 @@ async def test_a_failed_report_returns_to_implementation_with_feedback(
 
 async def test_iteration_budget_stops_a_persistently_failing_task(tmp_path: Path) -> None:
     async def implement(context: TaskContext) -> ImplementationResult:
-        return ImplementationResult("still incomplete", tool_calls=1)
+        return ImplementationResult(
+            "still incomplete", tool_calls=1, artifacts=("draft.html",)
+        )
 
     async def test(context: TaskContext, result: ImplementationResult) -> Report:
         return failed()
@@ -157,6 +159,8 @@ async def test_iteration_budget_stops_a_persistently_failing_task(tmp_path: Path
     assert result["outcome"].status == "stopped"
     assert result["outcome"].summary == "iteration budget exhausted with failing checks"
     assert result["outcome"].iterations == 2
+    assert result["outcome"].artifacts == ("draft.html",)
+    assert result["outcome"].failures == ("artifact: missing",)
     assert result["grant"].status == "revoked"
 
 

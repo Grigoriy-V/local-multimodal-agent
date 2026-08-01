@@ -137,6 +137,17 @@ With the model server running, start Chainlit from Windows PowerShell:
 Open <http://127.0.0.1:8100>. Stop the UI with `Ctrl+C`; conversations remain
 in the local SQLite database and are restored on the next start.
 
+The product target is a general autonomous agent, not a menu of individual
+tools. In agent mode, an ordinary request should cause the model to plan,
+choose governed filesystem/browser capabilities, validate the result and repair
+or finalize. Permission prompts approve scoped side effects; users should not
+have to select `read_file`, `preview`, `browser` or another implementation tool.
+
+The rejected experimental `task`/`preview` controls and Snake-specific verifier
+are disconnected from the UI and application task runtime. Until the general
+agent-mode harness replaces them, the app exposes the normal conversational
+agent and its governed tools. Snake remains only a regression benchmark.
+
 ## Checks
 
 ```powershell
@@ -148,6 +159,12 @@ in the local SQLite database and are restored on the next start.
 ```
 
 The agent touches only `AGENT_WORKSPACE`, which defaults to `workspace/`, and
-only after you approve a write.
+only after you approve a write. File tools accept either a relative path inside
+that root or an absolute path such as
+`D:\ML\local-multimodal-agent\workspace\snake.html`; resolving outside the root
+is still refused. If only a filename is supplied and its directory is unknown,
+the agent is instructed to ask for the location instead of guessing.
 It writes `AGENT_DATABASE`, the conversation, and `AGENT_CHECKPOINTS`, which
 holds turns still in flight and can be deleted without losing one.
+Task grants use the separate `AGENT_TASK_CHECKPOINTS` file, which defaults to
+`data/task-checkpoints.sqlite3`.

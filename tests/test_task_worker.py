@@ -26,6 +26,7 @@ from app.agent.task_worker import (
     build_model_task_graph,
     parse_plan,
 )
+from app.agent.web_verifier import WebVerifier
 from app.models import Completion, ToolCall
 from tests.fakes import ScriptedBackend, body, calls, says
 
@@ -85,6 +86,7 @@ async def test_write_file_creates_inside_the_granted_directory(tmp_path: Path) -
         "<html>game</html>"
     )
     assert result.tool_calls == 2  # automatic listing plus write_file
+    assert result.artifacts == ("game.html",)
     assert body(backend.requests[1][-1]).startswith("created game.html")
 
 
@@ -103,6 +105,7 @@ async def test_retry_reads_current_file_and_repairs_with_edit_file(tmp_path: Pat
 
     assert (run / "game.html").read_text(encoding="utf-8") == "score=1"
     assert result.tool_calls == 3
+    assert result.artifacts == ("game.html",)
     assert "game.html" in body(backend.requests[0][1])
     assert "score check failed" in body(backend.requests[0][1])
     assert body(backend.requests[1][-1]) == "score=0"
@@ -123,6 +126,27 @@ async def test_precise_tool_failure_returns_to_the_model(tmp_path: Path) -> None
 
     assert "found 2 matches" in body(backend.requests[1][-1])
     assert (run / "game.html").read_text(encoding="utf-8") == "same same"
+
+
+async def test_repeated_grant_prefix_is_refused_and_repaired(tmp_path: Path) -> None:
+    backend = ScriptedBackend(
+        calls(
+            "write_file",
+            path="tasks/run/snake.html",
+            content="wrong nested target",
+        ),
+        calls("write_file", path="snake.html", content="correct target"),
+        says("Created the file at the grant root."),
+    )
+    worker = ModelTaskWorker(backend, tmp_path)
+    task_context = context(root="tasks/run")
+
+    result = await worker.implement(task_context)
+
+    assert "already relative" in body(backend.requests[1][-1])
+    assert not (tmp_path / "tasks" / "run" / "tasks").exists()
+    assert (tmp_path / "tasks" / "run" / "snake.html").read_text() == "correct target"
+    assert result.artifacts == ("snake.html",)
 
 
 async def test_calls_beyond_the_budget_do_not_run(tmp_path: Path) -> None:
@@ -192,3 +216,64 @@ async def test_model_worker_is_wired_through_the_checkpointed_task_graph(
     assert result["outcome"].tool_calls == 2
     assert result["grant"].status == "revoked"
     assert (tmp_path / "snake" / "game.html").is_file()
+
+
+async def test_verifier_feedback_drives_a_model_repair_attempt(tmp_path: Path) -> None:
+    draft_script = """const canvas = document.getElementById('game');
+const context = canvas.getContext('2d');"""
+    repaired_script = """const canvas = document.getElementById('game');
+const context = canvas.getContext('2d');
+document.addEventListener('keydown', event => {
+  if (event.key === 'ArrowLeft') return 'left';
+  if (event.key === 'ArrowUp') return 'up';
+  if (event.key === 'ArrowRight') return 'right';
+  if (event.key === 'ArrowDown') return 'down';
+});
+function loop() { context.fillRect(0, 0, 10, 10); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);"""
+    draft = (
+        "<!DOCTYPE html><html><head><title>Snake</title></head><body>"
+        f"<canvas id='game'></canvas><script>{draft_script}</script></body></html>"
+    )
+    backend = ScriptedBackend(
+        says(plan_json()),
+        calls("write_file", path="snake.html", content=draft),
+        says("Created a first draft."),
+        calls("read_file", path="snake.html"),
+        calls(
+            "edit_file",
+            path="snake.html",
+            old_text=draft_script,
+            new_text=repaired_script,
+        ),
+        says("Repaired every verifier failure."),
+    )
+
+    def syntax_ok(_source: str) -> CheckResult:
+        return CheckResult("javascript_syntax", True, "test parser accepted JavaScript")
+
+    saver = InMemorySaver(
+        serde=JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
+    )
+    graph = build_model_task_graph(
+        backend,
+        tmp_path,
+        WebVerifier(tmp_path, syntax_checker=syntax_ok),
+        checkpointer=saver,
+    )
+    run_config = {"configurable": {"thread_id": "repair-task"}}
+    await graph.ainvoke(
+        {"task": "Create a working Snake", "subdirectory": "run"},
+        config=run_config,
+    )
+
+    result = await graph.ainvoke(Command(resume=True), config=run_config)
+
+    retry_prompt = body(backend.requests[3][1])
+    assert "game_controls: missing signals:" in retry_prompt
+    assert result["outcome"].status == "completed"
+    assert result["outcome"].iterations == 2
+    assert result["outcome"].tool_calls == 5
+    assert result["outcome"].artifacts == ("snake.html",)
+    assert result["outcome"].failures == ()
+    assert "keydown" in (tmp_path / "run" / "snake.html").read_text(encoding="utf-8")

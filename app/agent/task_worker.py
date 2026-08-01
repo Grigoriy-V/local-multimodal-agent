@@ -9,7 +9,7 @@ workspace state through a separate verifier in the next Version 1.5 step.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -58,8 +58,10 @@ PLANNER_SYSTEM_PROMPT = (
 IMPLEMENTER_SYSTEM_PROMPT = (
     "Implement the task inside the provided sandbox. Inspect files instead of guessing. "
     "Use write_file to create or fully replace a file, edit_file for an exact unique "
-    "repair, and read_file after a failure or whenever current contents matter. Paths are "
-    "relative to the granted task directory. Tool results are authoritative. When the "
+    "repair, and read_file after a failure or whenever current contents matter. Tool paths "
+    "are relative to the granted task directory; choose filenames from the task and never "
+    "prefix a tool path with the granted directory. Tool results and test feedback are "
+    "authoritative; repair every reported failure that is within the task. When the "
     "implementation attempt is complete, answer with a concise factual summary."
 )
 
@@ -104,6 +106,8 @@ def implementation_prompt(context: TaskContext, listing: str) -> str:
     return (
         f"Task: {context.task}\n"
         f"Granted directory: {context.grant.subdirectory}\n"
+        "Tool path rule: paths are relative to the granted directory; do not repeat that "
+        "directory in a tool path.\n"
         f"Attempt: {context.iteration}\n"
         f"Plan:\n{steps}\n"
         f"Acceptance criteria:\n{criteria}\n"
@@ -111,6 +115,14 @@ def implementation_prompt(context: TaskContext, listing: str) -> str:
         f"Current directory listing:\n{listing}\n"
         f"Tool calls remaining after this inspection: {context.remaining_tool_calls - 1}"
     )
+
+
+def repeats_grant_directory(path: str, subdirectory: str) -> bool:
+    """Catch a common rooted-tool mistake before it creates a nested duplicate."""
+
+    requested = PurePosixPath(path.replace("\\", "/")).parts
+    granted = PurePosixPath(subdirectory.replace("\\", "/")).parts
+    return len(requested) > len(granted) and requested[: len(granted)] == granted
 
 
 class ModelTaskWorker:
@@ -147,6 +159,7 @@ class ModelTaskWorker:
         inspection = toolbox.run(ToolCall("task_inspect", "list_files", {}))
         listing = inspection.content[0].text or "(empty)"
         used = 1
+        artifacts: set[str] = set()
         messages = [
             text_message("system", IMPLEMENTER_SYSTEM_PROMPT),
             text_message("user", implementation_prompt(context, listing)),
@@ -162,12 +175,26 @@ class ModelTaskWorker:
             messages.append(assistant_message(completion))
             if not completion.tool_calls:
                 summary = completion.text.strip() or "model returned no implementation summary"
-                return ImplementationResult(summary, tool_calls=used)
+                return ImplementationResult(
+                    summary, tool_calls=used, artifacts=tuple(sorted(artifacts))
+                )
 
             runnable = completion.tool_calls[:remaining]
             overflow = completion.tool_calls[remaining:]
             for call in runnable:
-                if toolbox.destructive(call.name) and not context.grant.allows(call.name):
+                path = call.arguments.get("path")
+                if isinstance(path, str) and repeats_grant_directory(
+                    path, context.grant.subdirectory
+                ):
+                    result = text_message(
+                        "tool",
+                        "error: tool paths are already relative to the granted directory; "
+                        "remove the repeated grant prefix",
+                    )
+                    result = Message(
+                        role="tool", content=result.content, tool_call_id=call.id
+                    )
+                elif toolbox.destructive(call.name) and not context.grant.allows(call.name):
                     result = text_message(
                         "tool", f"error: task grant does not allow {call.name}"
                     )
@@ -177,6 +204,14 @@ class ModelTaskWorker:
                 else:
                     result = toolbox.run(call)
                 messages.append(result)
+                result_text = " ".join(part.text or "" for part in result.content)
+                artifact = path
+                if (
+                    call.name in {"write_file", "edit_file"}
+                    and not result_text.startswith("error:")
+                    and isinstance(artifact, str)
+                ):
+                    artifacts.add(Path(artifact).as_posix())
                 used += 1
             for call in overflow:
                 messages.append(
@@ -198,7 +233,9 @@ class ModelTaskWorker:
                 except BackendError as error:
                     raise TaskStageError(f"implementation failed: {error}") from error
                 summary = final.text.strip() or "tool-call budget exhausted"
-                return ImplementationResult(summary, tool_calls=used)
+                return ImplementationResult(
+                    summary, tool_calls=used, artifacts=tuple(sorted(artifacts))
+                )
 
 
 def build_model_task_graph(

@@ -215,6 +215,11 @@ class Agent:
     def history(self, thread_id: str) -> list[Message]:
         return self.store.messages(thread_id)
 
+    def record(self, thread_id: str, messages: list[Message]) -> None:
+        """Persist UI-native work that did not pass through the chat graph."""
+
+        self.store.append(thread_id, messages)
+
     def threads(self) -> list[Thread]:
         return self.store.threads()
 

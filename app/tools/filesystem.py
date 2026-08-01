@@ -28,7 +28,8 @@ def _resolve(root: Path, path: str) -> Path:
     """
 
     try:
-        candidate = (root / (path or ".")).resolve()
+        supplied = Path(path or ".")
+        candidate = supplied.resolve() if supplied.is_absolute() else (root / supplied).resolve()
     except (OSError, RuntimeError) as error:
         detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
         raise ToolError(f"path {path!r} cannot be resolved: {detail}") from error
@@ -120,13 +121,19 @@ def filesystem_tools(root: Path) -> list[Tool]:
     return [
         Tool(
             name="list_files",
-            description="List the files and directories at a path inside the workspace.",
+            description=(
+                "List files and directories inside the allowed workspace root. Accepts "
+                "either an absolute path inside that root or a path relative to it."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path relative to the workspace root. Defaults to the root.",
+                        "description": (
+                            "Absolute path inside the workspace root, or a path relative to "
+                            "that root. Defaults to the root."
+                        ),
                     }
                 },
                 "required": [],
@@ -136,13 +143,18 @@ def filesystem_tools(root: Path) -> list[Tool]:
         ),
         Tool(
             name="read_file",
-            description="Read a UTF-8 text file inside the workspace.",
+            description=(
+                "Read a UTF-8 text file inside the allowed workspace root. Accepts either "
+                "an absolute path inside that root or a path relative to it."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path relative to the workspace root.",
+                        "description": (
+                            "Absolute path inside the workspace root, or a path relative to it."
+                        ),
                     }
                 },
                 "required": ["path"],
@@ -161,7 +173,9 @@ def filesystem_tools(root: Path) -> list[Tool]:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path relative to the workspace root.",
+                        "description": (
+                            "Absolute path inside the workspace root, or a path relative to it."
+                        ),
                     },
                     "content": {
                         "type": "string",
@@ -186,7 +200,9 @@ def filesystem_tools(root: Path) -> list[Tool]:
                     "path": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Path relative to the workspace root.",
+                        "description": (
+                            "Absolute path inside the workspace root, or a path relative to it."
+                        ),
                     },
                     "old_text": {
                         "type": "string",

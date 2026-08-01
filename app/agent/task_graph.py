@@ -55,7 +55,7 @@ class TaskPlan:
 class TaskGrant:
     subdirectory: str
     status: Literal["pending", "active", "revoked"] = "pending"
-    permissions: tuple[str, ...] = ("write_file", "edit_file")
+    permissions: tuple[str, ...] = ("write_file", "edit_file", "browser_verify")
     revoked_reason: str | None = None
 
     def __post_init__(self) -> None:
@@ -90,12 +90,16 @@ class TaskContext:
 class ImplementationResult:
     summary: str
     tool_calls: int = 0
+    artifacts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "artifacts", tuple(self.artifacts))
         if not self.summary.strip():
             raise ValueError("an implementation result requires a summary")
         if self.tool_calls < 0:
             raise ValueError("tool_calls cannot be negative")
+        if any(not artifact.strip() for artifact in self.artifacts):
+            raise ValueError("artifact paths cannot be empty")
 
 
 @dataclass(frozen=True)
@@ -108,9 +112,11 @@ class CheckResult:
 @dataclass(frozen=True)
 class TestReport:
     checks: tuple[CheckResult, ...]
+    artifacts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "checks", tuple(self.checks))
+        object.__setattr__(self, "artifacts", tuple(self.artifacts))
         if not self.checks:
             raise ValueError("a test report requires at least one check")
 
@@ -138,6 +144,12 @@ class TaskOutcome:
     iterations: int
     tool_calls: int
     elapsed_seconds: float
+    artifacts: tuple[str, ...] = ()
+    failures: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "artifacts", tuple(self.artifacts))
+        object.__setattr__(self, "failures", tuple(self.failures))
 
 
 @dataclass
@@ -148,6 +160,7 @@ class TaskState:
     plan: TaskPlan | None = None
     iteration: int = 0
     tool_calls: int = 0
+    artifacts: tuple[str, ...] = ()
     implementation: ImplementationResult | None = None
     test_report: TestReport | None = None
     evaluation: Evaluation | None = None
@@ -230,8 +243,16 @@ def build_task_graph(
             "task": task,
             "subdirectory": scope,
             "grant": None if stop_reason else TaskGrant(scope),
+            "plan": None,
+            "iteration": 0,
+            "tool_calls": 0,
+            "artifacts": (),
+            "implementation": None,
+            "test_report": None,
+            "evaluation": None,
             "stop_reason": stop_reason,
             "started_at": clock(),
+            "outcome": None,
         }
 
     def authorize(state: TaskState) -> dict[str, object]:
@@ -300,6 +321,7 @@ def build_task_graph(
         return {
             "iteration": iteration,
             "tool_calls": state.tool_calls + result.tool_calls,
+            "artifacts": tuple(dict.fromkeys((*state.artifacts, *result.artifacts))),
             "implementation": result,
             "test_report": None,
         }
@@ -311,7 +333,10 @@ def build_task_graph(
             report = await bounded(tester(context(state), state.implementation), state)
         except TimeoutError:
             return {"stop_reason": "time budget exhausted during testing"}
-        return {"test_report": report}
+        return {
+            "test_report": report,
+            "artifacts": tuple(dict.fromkeys((*state.artifacts, *report.artifacts))),
+        }
 
     def evaluate(state: TaskState) -> dict[str, object]:
         if state.test_report is None:
@@ -346,6 +371,8 @@ def build_task_graph(
                 iterations=state.iteration,
                 tool_calls=state.tool_calls,
                 elapsed_seconds=elapsed(state),
+                artifacts=state.artifacts,
+                failures=state.test_report.failures if state.test_report else (),
             )
         }
         if state.grant is not None and state.grant.status != "revoked":

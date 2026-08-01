@@ -14,7 +14,12 @@ pytest.importorskip("chainlit", reason="the ui dependency group is optional")
 
 from app.models import ContentPart, Message
 from app.attachments import AttachmentError
-from ui.chainlit_app import media_parts, spoken, to_message
+from ui.chainlit_app import (
+    canonical_thread_id,
+    media_parts,
+    spoken,
+    to_message,
+)
 
 
 class FakeElement:
@@ -25,9 +30,15 @@ class FakeElement:
 
 
 class FakeMessage:
-    def __init__(self, content: str = "", elements: list[FakeElement] | None = None) -> None:
+    def __init__(
+        self,
+        content: str = "",
+        elements: list[FakeElement] | None = None,
+        command: str | None = None,
+    ) -> None:
         self.content = content
         self.elements = elements or []
+        self.command = command
 
 
 def test_a_plain_message_becomes_one_text_part() -> None:
@@ -104,3 +115,9 @@ def test_spoken_joins_only_the_text_parts() -> None:
     )
 
     assert spoken(message) == "here it is"
+
+
+def test_canonical_thread_id_does_not_use_ephemeral_session_id() -> None:
+    session = type("Session", (), {"id": "socket", "thread_id": "conversation"})()
+
+    assert canonical_thread_id(session) == "conversation"

@@ -105,6 +105,12 @@ def media_parts(message: Message) -> list[ContentPart]:
     return [part for part in message.content if part.kind != "text"]
 
 
+def canonical_thread_id(session: Any) -> str:
+    """Use Chainlit's persistent conversation id, never its websocket id."""
+
+    return str(session.thread_id)
+
+
 def attachments(message: Message) -> list[Any]:
     """Show the pictures and the sound, not just the words about them.
 
@@ -173,6 +179,10 @@ async def confirm(question: list[dict[str, Any]]) -> dict[str, bool]:
     return answers
 
 
+def create_runtime() -> Agent:
+    return create_agent(agent_settings=AgentSettings())
+
+
 async def report_fill(agent: Agent) -> None:
     """State how large the last request was, counted by the model itself."""
 
@@ -206,15 +216,17 @@ async def drive(
 
 @cl.on_chat_start
 async def start() -> None:
-    agent = create_agent()
-    thread_id = cl.context.session.id
+    agent = create_runtime()
+    # The websocket session id is ephemeral and differs from the canonical
+    # thread id that Chainlit puts in its sidebar and data layer.
+    thread_id = canonical_thread_id(cl.context.session)
     cl.user_session.set("agent", agent)
     cl.user_session.set("thread_id", thread_id)
 
 
 @cl.on_chat_resume
 async def resume(thread: dict[str, Any]) -> None:
-    agent = create_agent()
+    agent = create_runtime()
     thread_id = thread["id"]
     cl.user_session.set("agent", agent)
     cl.user_session.set("thread_id", thread_id)

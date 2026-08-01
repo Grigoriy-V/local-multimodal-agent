@@ -186,3 +186,38 @@ outcomes live in `reports/ml_work.jsonl` and `reports/`, task outcomes live in
 multiplied agent work and created four points of divergence.
 
 **Rules out.** Restating a result in more than one place.
+
+## 2026-08-02: Benchmark workflows do not define the product agent
+
+**Decision.** Version 1.5 is a general autonomous harness. An ordinary request
+in agent mode enters one task loop; the model derives criteria and chooses
+governed capabilities. Browser and filesystem operations are capabilities, not
+user-invoked workflows. The Snake-specific verifier and the native `preview`
+and scripted `task` routes built during the first vertical slice are retained
+only as historical evaluation code and evidence, disconnected from Chainlit and
+from the application task runtime. The implementation record is in
+`reports/2026-08-01_v15_step1.md` through
+`reports/2026-08-02_v15_step9.md`.
+
+**Why.** The vertical slice proved that planning, grants, editing, retry and a
+browser probe can work together, but it encoded one benchmark into production
+control flow. A user should state the outcome and approve scope; the agent must
+decide which tools and evidence the task needs.
+
+**Rules out.** Per-tool UI buttons such as `preview`, special prompt contracts
+such as `/task`, filename-specific production verifiers, and accepting a
+benchmark pass as product acceptance.
+
+## 2026-08-02: Workspace confinement accepts absolute paths
+
+**Decision.** Every path-taking tool continues to resolve and validate paths
+against an explicit workspace root. Within that boundary it accepts both an
+absolute path and a path relative to the root. If the user gives only a filename
+and its directory is not already established, the agent asks for the location.
+
+**Why.** The sandbox is a permission boundary, not a requirement that humans
+translate a known Windows path into an internal relative form.
+
+**Rules out.** Rejecting safe absolute workspace paths merely because they are
+absolute, guessing a directory for an ambiguous filename, and allowing an
+absolute path to bypass root validation.

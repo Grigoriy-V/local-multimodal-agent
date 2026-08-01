@@ -68,6 +68,18 @@ def test_read_file_reaches_a_subdirectory(workspace: Path) -> None:
     assert tools(workspace)["read_file"].run(path="sub/deep.txt") == "deeper"
 
 
+def test_read_file_accepts_an_absolute_path_inside_the_root(workspace: Path) -> None:
+    target = workspace / "sub" / "deep.txt"
+
+    assert tools(workspace)["read_file"].run(path=str(target.resolve())) == "deeper"
+
+
+def test_list_files_accepts_the_absolute_workspace_root(workspace: Path) -> None:
+    listing = tools(workspace)["list_files"].run(path=str(workspace.resolve()))
+
+    assert listing.splitlines() == ["notes.txt", "sub/"]
+
+
 def test_read_file_on_a_directory_is_refused(workspace: Path) -> None:
     with pytest.raises(ToolError, match="not a file"):
         tools(workspace)["read_file"].run(path="sub")
@@ -96,6 +108,14 @@ def test_write_file_creates_a_file(workspace: Path) -> None:
 
     assert (workspace / "fresh.txt").read_text(encoding="utf-8") == "hello"
     assert result == "created fresh.txt (5 characters)"
+
+
+def test_write_file_accepts_an_absolute_path_inside_the_root(workspace: Path) -> None:
+    target = workspace / "absolute.txt"
+
+    tools(workspace)["write_file"].run(path=str(target.resolve()), content="hello")
+
+    assert target.read_text(encoding="utf-8") == "hello"
 
 
 def test_write_file_says_when_it_replaced_something(workspace: Path) -> None:

@@ -713,6 +713,7 @@ source = { editable = "." }
 agent = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
+    { name = "websockets" },
 ]
 app = [
     { name = "httpx" },
@@ -732,6 +733,7 @@ ui = [
 agent = [
     { name = "langgraph", specifier = ">=1.2" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0" },
+    { name = "websockets", specifier = ">=15.0" },
 ]
 app = [
     { name = "httpx", specifier = ">=0.28" },

@@ -19,6 +19,7 @@ app = [
 agent = [
     "langgraph>=1.2",
     "langgraph-checkpoint-sqlite>=2.0",
+    "websockets>=15.0",
 ]
 ui = [
     "chainlit>=2.0",
