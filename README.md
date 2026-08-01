@@ -52,5 +52,17 @@ reports/   evidence and the two JSONL journals
 
 ## Status
 
-Foundation only. No dependency installed, no model downloaded, no server run.
-Work proceeds one approved step at a time after an explicit human command.
+Stage 1 is closed: the model answers text, image, multi-image, audio, streaming,
+tool-call and structured-JSON requests through repository code. Stage 2, the
+agent, has not started. Work proceeds one approved step at a time after an
+explicit human command.
+
+The model server is infrastructure and lives outside this repository; the
+project reaches it over `MODEL_ENDPOINT` only. Copy `.env.example` to `.env` to
+point somewhere else.
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q            # offline, needs nothing
+.venv\Scripts\python.exe -m scripts.doctor       # can this machine run it
+.venv\Scripts\python.exe -m scripts.smoke_test   # every Stage 1 item, needs the server
+```

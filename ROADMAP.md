@@ -2,7 +2,7 @@
 
 **Updated:** 2026-08-01
 
-**Project status:** foundation created, Stage 1 not started
+**Project status:** Stage 1 closed, Stage 2 not started
 
 **Current approved step:** none
 
@@ -14,8 +14,19 @@ The human approves one step before implementation begins.
 Maximum ten bullets. When full, replace a stale fact — do not append.
 
 - The repository contains documents, the package skeleton, the `ModelBackend`
-  interface, an environment doctor, and the work-log tool.
-- No dependency has been installed, no model downloaded, and no vLLM server run.
+  interface, an OpenAI-compatible backend on `httpx`, settings, an environment
+  doctor, the Stage 1 smoke runner, and the work-log tool.
+- The model runs outside the repository: `gemma-4-12B-it-qat-w4a16-ct` weights
+  and a vLLM 0.26 server live in WSL2 `Ubuntu-22.04`, reached only over
+  `http://127.0.0.1:8000/v1`. The repository declares no inference dependency.
+- Every Stage 1 contract item is exercised by repository code and passes; see
+  `reports/2026-08-01_stage1_smoke_script.md`.
+- The fixtures carry meaning rather than bytes: three seconds of speech in wav
+  and flac, and two flat images the model can name.
+- Only `app/models/` may import a transport or provider library; importing the
+  interface package does not pull in `httpx`.
+- The Windows `.venv` holds the test tools, the `app` dependency group, and the
+  project installed editable.
 - The full target specification is fixed in `docs/CONTRACT.md`.
 
 ## Plan
@@ -25,12 +36,7 @@ criterion, not the method. A closed stage collapses to one line and a link.
 
 ### Stage 1 — Multimodal smoke test
 
-Prove that the chosen model runs locally and answers text, image, multi-image,
-and short-audio requests through an OpenAI-compatible endpoint, with streaming,
-a system prompt, structured JSON output, and one test tool call.
-
-**Closes when:** a script independent of the final UI exercises all of the above
-and records latency, VRAM, and failures.
+Closed 2026-08-01: `reports/2026-08-01_stage1_smoke_script.md`.
 
 ### Stage 2 — LangChain agent
 
@@ -55,9 +61,11 @@ tool layers were not rewritten to achieve it.
 
 Maximum three. Not authorized by being listed.
 
-1. Install the locked dependencies and run the environment doctor.
-2. Decide how the vLLM server is launched and where the model weights live.
-3. Fix the exact contents and pass/fail criteria of the Stage 1 smoke test.
+1. Carry a tool result back to the model. `Message` can hold a `tool_call_id`
+   but cannot hold the assistant's own tool calls, so no tool loop can close.
+   Stage 2 needs this on its first iteration.
+2. Build the SQLite layer before the agent — threads, messages, and facts — so
+   there is something for a conversation to survive into.
 
 ## Out of scope
 

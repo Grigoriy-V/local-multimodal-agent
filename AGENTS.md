@@ -42,7 +42,7 @@ Reviewed 2026-08-01. Update only for durable scope or safety changes.
 
 - **Goal:** local multimodal agent over Gemma 4 12B IT with a model-agnostic
   architecture; see `docs/CONTRACT.md`.
-- **Stage:** 1 of 3, not started.
+- **Stage:** 2 of 3, not started. Stage 1 is closed.
 - **Model access:** only through `ModelBackend`; the rest of the application
   must not import a provider SDK, tokenizer, or processor.
 - **Persistence:** SQLite. Memory lives outside the model.
@@ -59,7 +59,7 @@ Reviewed 2026-08-01. Update only for durable scope or safety changes.
 | Read, implement, refactor, write tests | agent |
 | Offline tests and short local checks | agent |
 | Requests against an already running model endpoint | agent |
-| Starting or stopping the vLLM server | human |
+| Starting or stopping the vLLM server | agent, once the human has permitted it |
 | Downloading model weights | human |
 | Materially expensive or long GPU work | human |
 | Deleting or migrating a populated database | human |
