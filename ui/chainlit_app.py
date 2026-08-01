@@ -18,17 +18,29 @@ from typing import Any
 import chainlit as cl
 
 from app.agent.runtime import Agent, create_agent
+from app.memory import Thread
 from app.models import ContentPart, Message
 
 IMAGE = "image"
 AUDIO = "audio"
 CONFIRM_TIMEOUT = 600
+CHOOSE_TIMEOUT = 120
+# How many past conversations to offer. Beyond a handful the list stops being a
+# choice and becomes a search problem, which this is not.
+CHOICES = 5
+OPENING_WIDTH = 48
 
 
 def part_for(path: str, mime: str | None) -> ContentPart | None:
     """Turn one attachment into a content part, or ignore what the model cannot read."""
 
-    kind = IMAGE if (mime or "").startswith("image/") else AUDIO if (mime or "").startswith("audio/") else None
+    kind = (
+        IMAGE
+        if (mime or "").startswith("image/")
+        else AUDIO
+        if (mime or "").startswith("audio/")
+        else None
+    )
     if kind is None:
         return None
     return ContentPart(kind=kind, data=Path(path).read_bytes(), media_type=mime)
@@ -48,19 +60,59 @@ def to_message(incoming: cl.Message) -> Message:
     return Message(role="user", content=parts)
 
 
+def rejected(incoming: cl.Message) -> list[str]:
+    """Attachments the model cannot read, named so the user is told rather than
+    left to wonder why the agent ignored the file."""
+
+    names = []
+    for element in incoming.elements or ():
+        path = getattr(element, "path", None)
+        if path and part_for(path, getattr(element, "mime", None)) is None:
+            names.append(getattr(element, "name", None) or Path(path).name)
+    return names
+
+
 def spoken(message: Message) -> str:
     return " ".join(part.text or "" for part in message.content).strip()
+
+
+def media_parts(message: Message) -> list[ContentPart]:
+    """The parts that have to be shown rather than said, in the order they came."""
+
+    return [part for part in message.content if part.kind != "text"]
+
+
+def attachments(message: Message) -> list[Any]:
+    """Show the pictures and the sound, not just the words about them.
+
+    Without this a reopened conversation is a transcript with holes in it: the
+    image the whole exchange is about was stored, and then not shown.
+    """
+
+    shown = []
+    for index, part in enumerate(media_parts(message)):
+        element = cl.Image if part.kind == IMAGE else cl.Audio
+        shown.append(
+            element(
+                name=f"{part.kind}-{index}",
+                content=part.data,
+                mime=part.media_type,
+                display="inline",
+            )
+        )
+    return shown
 
 
 async def replay(agent: Agent, thread_id: str) -> None:
     """Show what the store already holds, so a restart looks like a continuation."""
 
     for message in agent.history(thread_id):
-        body = spoken(message)
         if message.role == "user":
-            await cl.Message(content=body, author="you").send()
-        elif message.role == "assistant" and body:
-            await cl.Message(content=body).send()
+            await cl.Message(
+                content=spoken(message), elements=attachments(message), author="you"
+            ).send()
+        elif message.role == "assistant" and spoken(message):
+            await cl.Message(content=spoken(message)).send()
 
 
 async def render(produced: AsyncIterator[Message]) -> None:
@@ -80,14 +132,15 @@ async def render(produced: AsyncIterator[Message]) -> None:
             continue
 
         body = spoken(message)
-        if body:
-            await cl.Message(content=body).send()
+        shown = attachments(message)
+        if body or shown:
+            await cl.Message(content=body, elements=shown).send()
         for call in message.tool_calls:
             step = cl.Step(name=call.name, type="tool")
             step.input = call.arguments
             await step.send()
             steps[call.id] = step
-        if not body and not message.tool_calls:
+        if not body and not shown and not message.tool_calls:
             await cl.Message(content="(no answer)").send()
 
 
@@ -109,6 +162,48 @@ async def confirm(question: list[dict[str, Any]]) -> dict[str, bool]:
     return answers
 
 
+def summarise(thread: Thread) -> str:
+    opening = thread.opening or "(no words)"
+    if len(opening) > OPENING_WIDTH:
+        opening = opening[: OPENING_WIDTH - 1] + "…"
+    return f"{opening} · {thread.messages} messages"
+
+
+async def choose_thread(agent: Agent) -> str:
+    """Ask which conversation to open. No answer continues the most recent one."""
+
+    threads = agent.threads()
+    if not threads:
+        return cl.context.session.id
+
+    actions = [
+        cl.Action(name=thread.id, payload={"thread_id": thread.id}, label=summarise(thread))
+        for thread in threads[:CHOICES]
+    ]
+    actions.append(cl.Action(name="new", payload={"thread_id": ""}, label="New conversation"))
+    response = await cl.AskActionMessage(
+        content="Which conversation?", actions=actions, timeout=CHOOSE_TIMEOUT
+    ).send()
+    if response is None:
+        return threads[0].id
+    return response.get("payload", {}).get("thread_id") or cl.context.session.id
+
+
+async def report_fill(agent: Agent) -> None:
+    """State how large the last request was, counted by the model itself."""
+
+    fill = await agent.fill()
+    if fill is None:
+        return
+    share = fill.fraction
+    body = (
+        f"context {fill.used} / {fill.budget} tokens ({share:.0%})"
+        if share is not None
+        else f"context {fill.used} tokens"
+    )
+    await cl.Message(content=body, author="context").send()
+
+
 async def drive(
     agent: Agent, thread_id: str, produced: AsyncIterator[Message] | None = None
 ) -> None:
@@ -122,15 +217,13 @@ async def drive(
         await render(produced)
     while (question := await agent.pending(thread_id)) is not None:
         await render(agent.resume(thread_id, await confirm(question)))
+    await report_fill(agent)
 
 
 @cl.on_chat_start
 async def start() -> None:
     agent = create_agent()
-    # Continue the most recent conversation rather than opening an empty one:
-    # persistence is only visible if something is there to come back to.
-    threads = agent.threads()
-    thread_id = threads[0] if threads else cl.context.session.id
+    thread_id = await choose_thread(agent)
     cl.user_session.set("agent", agent)
     cl.user_session.set("thread_id", thread_id)
 
@@ -148,6 +241,12 @@ async def start() -> None:
 async def on_message(incoming: cl.Message) -> None:
     agent: Agent = cl.user_session.get("agent")
     thread_id: str = cl.user_session.get("thread_id")
+
+    ignored = rejected(incoming)
+    if ignored:
+        await cl.Message(
+            content=f"I can only read images and audio, so I ignored: {', '.join(ignored)}."
+        ).send()
 
     await drive(agent, thread_id, agent.steps(thread_id, to_message(incoming)))
 

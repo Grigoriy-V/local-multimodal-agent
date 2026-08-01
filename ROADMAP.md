@@ -2,7 +2,7 @@
 
 **Updated:** 2026-08-01
 
-**Project status:** Stages 1 and 2 closed, Stage 3 under way
+**Project status:** All three stages closed; version 1 is complete
 
 **Current approved step:** none
 
@@ -25,19 +25,27 @@ Maximum ten bullets. When full, replace a stale fact — do not append.
   tool result. Evidence: `reports/2026-08-01_stage3_confirmation.md`.
 - Older turns leave the verbatim window only once the rolling summary covers
   them, and a cut only lands at the start of a user turn, so no tool result is
-  ever orphaned.
+  ever orphaned. Two things fold: too many messages, or a request measured over
+  budget.
+- The request is bounded in tokens the model itself counted. `max_model_len`
+  comes from `/v1/models` and the size from `usage.prompt_tokens`; the
+  repository configures only a fraction of the limit. Evidence:
+  `reports/2026-08-01_v1.md`.
 - The file tools take their allowed root as an argument and resolve every
-  model-supplied path before comparing it against that root.
+  model-supplied path before comparing it against that root; the root defaults
+  to a `workspace/` sandbox, not to the repository.
 - The model runs outside the repository: `gemma-4-12B-it-qat-w4a16-ct` weights
   and a vLLM 0.26 server live in WSL2 `Ubuntu-22.04`, reached only over
   `http://127.0.0.1:8000/v1`. The repository declares no inference dependency.
-- The fixtures carry meaning rather than bytes: three seconds of speech in wav
-  and flac, and two flat images the model can name.
+- The UI offers the five most recent conversations on start, shows images and
+  audio in the answers, names an attachment it cannot read, and reports how full
+  the last request was.
 - `httpx` is imported only by `app/models/`, `langgraph` only by `app/agent/`,
-  and no `langchain_core` type appears anywhere in `app/`.
+  and no `langchain_core` type appears anywhere in `app/`. No tokenizer,
+  processor or provider SDK is imported anywhere.
 - The Windows `.venv` holds every dependency group and the project installed
-  editable.
-- The full target specification is fixed in `docs/CONTRACT.md`.
+  editable; the fixtures carry meaning rather than bytes; the full target
+  specification is fixed in `docs/CONTRACT.md`.
 
 ## Plan
 
@@ -54,28 +62,16 @@ Closed 2026-08-01: `reports/2026-08-01_stage2_agent.md`.
 
 ### Stage 3 — Full graph
 
-Grow the same graph to the full flow, adding explicit state, checkpoints,
-resumable sessions, context-size control, tool error handling, retry paths, and
-confirmation before destructive actions.
-
-Done: checkpoints, resumable turns, and confirmation before a destructive tool —
-`reports/2026-08-01_stage3_confirmation.md`. Still open: context-size control by
-tokens, and a retry path for a failing model call.
-
-**Closes when:** the graph runs the same flows and the inference, UI, memory, and
-tool layers were not rewritten to achieve it.
+Closed 2026-08-01 in two parts: checkpoints, resumable turns and confirmation —
+`reports/2026-08-01_stage3_confirmation.md`; then version 1's five items —
+`reports/2026-08-01_v1.md`.
 
 ## Next step candidates
 
 Maximum three. Not authorized by being listed.
 
-1. Bound the request by tokens, not by turn count — the current window counts
-   messages, so one large image can still dominate a request. The last Stage 3
-   item with no answer at all.
-2. Retry a model call that fails transiently, inside `ModelBackend`, so the
-   graph keeps one failure mode instead of two.
-3. Give the UI a thread list instead of resuming the newest thread silently, and
-   show which threads are waiting on an answer.
+1. Version 2, whose contents are listed in `docs/BACKLOG.md` and whose order the
+   human set: documents first, then policy-as-predicate with directory grants.
 
 ## Out of scope
 

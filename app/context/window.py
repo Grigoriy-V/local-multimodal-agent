@@ -28,11 +28,18 @@ DEFAULT_SYSTEM_PROMPT = (
 
 @dataclass(frozen=True)
 class ContextPolicy:
-    """How much conversation stays verbatim, and when the rest is folded away."""
+    """How much conversation stays verbatim, and when the rest is folded away.
+
+    `max_input_tokens` is the size a request may reach before the conversation
+    is folded, and is resolved at runtime from the model's own limit rather than
+    configured here. `None` means the size is unknown and only the message
+    counts bound the request.
+    """
 
     keep_recent: int = 8
     summarize_after: int = 16
     retrieved_facts: int = 5
+    max_input_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -81,9 +88,12 @@ def first_user_turn(messages: Sequence[Message], start: int) -> int:
 
     Cutting between an assistant's tool call and the tool's reply would leave an
     orphan result the provider rejects, so a cut only lands where a turn begins.
+
+    A negative `start` means the caller wanted to keep more messages than exist;
+    it is clamped rather than left to index from the end of the list.
     """
 
-    for index in range(start, len(messages)):
+    for index in range(max(0, start), len(messages)):
         if messages[index].role == "user":
             return index
     return len(messages)

@@ -1,3 +1,3 @@
-from app.memory.store import MemoryStore
+from app.memory.store import MemoryStore, Thread
 
-__all__ = ["MemoryStore"]
+__all__ = ["MemoryStore", "Thread"]

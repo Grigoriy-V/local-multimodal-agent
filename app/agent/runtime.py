@@ -8,6 +8,7 @@ own and does not know it is talking to a graph.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +22,8 @@ from app.agent.graph import build_agent
 from app.config import AgentSettings, ModelSettings
 from app.context import ContextPolicy
 from app.context.window import DEFAULT_SYSTEM_PROMPT
-from app.memory import MemoryStore
-from app.models import ContentPart, Message, ModelBackend
+from app.memory import MemoryStore, Thread
+from app.models import ContentPart, Message, ModelBackend, Usage
 from app.models.openai_compatible import OpenAICompatibleBackend
 from app.tools import Toolbox, filesystem_tools, memory_tools
 
@@ -32,8 +33,26 @@ CHECKPOINT_TYPES = [
     ("app.models.base", "Message"),
     ("app.models.base", "ContentPart"),
     ("app.models.base", "ToolCall"),
+    ("app.models.base", "Usage"),
     ("app.context.window", "Context"),
 ]
+
+
+@dataclass(frozen=True)
+class Fill:
+    """How large the last request actually was, against what it was allowed.
+
+    `used` is the model's own count, so images are counted the way the model
+    counts them. `budget` is `None` when the model does not say how much it can
+    take, in which case the size is reported and not judged.
+    """
+
+    used: int
+    budget: int | None
+
+    @property
+    def fraction(self) -> float | None:
+        return self.used / self.budget if self.budget else None
 
 
 class Agent:
@@ -57,6 +76,7 @@ class Agent:
         policy: ContextPolicy | None = None,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         checkpoints: str | Path | None = None,
+        context_fraction: float = 0.6,
     ) -> None:
         self.backend = backend
         self.store = store
@@ -64,9 +84,32 @@ class Agent:
         self.policy = policy or ContextPolicy()
         self.system_prompt = system_prompt
         self.checkpoints = checkpoints
+        self.context_fraction = context_fraction
         self._graphs: dict[str, CompiledStateGraph] = {}
         self._connection: aiosqlite.Connection | None = None
         self._saver: AsyncSqliteSaver | None = None
+        self._limit: int | None = None
+        self._asked_the_limit = False
+        self._usage = Usage()
+
+    async def budget(self) -> int | None:
+        """How many tokens a request may take, or `None` if the model is silent.
+
+        Asked once. The model behind an agent does not change while it runs, and
+        a limit that arrived late would not match the graphs already compiled
+        with the earlier one.
+        """
+
+        if not self._asked_the_limit:
+            self._limit = await self.backend.context_limit()
+            self._asked_the_limit = True
+        return int(self._limit * self.context_fraction) if self._limit else None
+
+    async def fill(self) -> Fill | None:
+        """How full the last request was, or `None` before there was one."""
+
+        used = self._usage.input_tokens
+        return None if used is None else Fill(used=used, budget=await self.budget())
 
     async def _checkpointer(self) -> AsyncSqliteSaver | None:
         """Open the checkpoint file on first use.
@@ -98,7 +141,7 @@ class Agent:
                 self.backend,
                 toolbox,
                 self.store,
-                self.policy,
+                replace(self.policy, max_input_tokens=await self.budget()),
                 self.system_prompt,
                 await self._checkpointer(),
             )
@@ -118,6 +161,9 @@ class Agent:
             for node, patch in update.items():
                 if node.startswith("__") or not isinstance(patch, dict):
                     continue
+                usage = patch.get("usage")
+                if usage is not None:
+                    self._usage = usage
                 for produced in patch.get("messages") or []:
                     yield produced
 
@@ -162,7 +208,7 @@ class Agent:
     def history(self, thread_id: str) -> list[Message]:
         return self.store.messages(thread_id)
 
-    def threads(self) -> list[str]:
+    def threads(self) -> list[Thread]:
         return self.store.threads()
 
     async def aclose(self) -> None:
@@ -190,10 +236,15 @@ def create_agent(
         summarize_after=agent_settings.summarize_after,
         retrieved_facts=agent_settings.retrieved_facts,
     )
+    workspace = Path(agent_settings.workspace)
+    # The one directory the agent may touch has to exist before it is resolved,
+    # or the first `list_files` fails on a machine that has simply never run it.
+    workspace.mkdir(parents=True, exist_ok=True)
     return Agent(
         backend=OpenAICompatibleBackend(model_settings or ModelSettings()),
         store=MemoryStore(agent_settings.database),
-        workspace=Path(agent_settings.workspace),
+        workspace=workspace,
         policy=policy,
         checkpoints=agent_settings.checkpoints,
+        context_fraction=agent_settings.context_fraction,
     )

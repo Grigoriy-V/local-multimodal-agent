@@ -39,16 +39,29 @@ async def fold_older_messages(
     store: MemoryStore,
     thread_id: str,
     policy: ContextPolicy,
+    used_tokens: int | None = None,
 ) -> str | None:
     """Summarize everything past the verbatim window. Returns the new summary.
 
-    Does nothing until the unsummarized tail is longer than `summarize_after`,
-    so a short conversation never pays for a second model call.
+    Two things can trigger a fold: too many messages, or a request that grew
+    past `max_input_tokens`. The second is what makes the bound a token bound —
+    eight short turns and eight turns carrying images are the same number of
+    messages and nothing like the same request.
+
+    `used_tokens` is what the model reported for the request just made, not an
+    estimate of it. That makes the trigger exact and one turn late, which is why
+    the budget is a fraction of the model's limit: the turn that overshoots the
+    budget still fits, and the fold happens before the next one.
     """
 
     previous, through = store.summary(thread_id)
     pending = store.messages(thread_id, after=through - 1)
-    if len(pending) <= policy.summarize_after:
+    oversized = (
+        policy.max_input_tokens is not None
+        and used_tokens is not None
+        and used_tokens > policy.max_input_tokens
+    )
+    if len(pending) <= policy.summarize_after and not oversized:
         return None
 
     cut = first_user_turn(pending, len(pending) - policy.keep_recent)

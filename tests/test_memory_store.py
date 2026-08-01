@@ -47,7 +47,27 @@ def test_threads_do_not_see_each_other(store: MemoryStore) -> None:
     store.append("t2", [user("yours")])
 
     assert [m.content[0].text for m in store.messages("t1")] == ["mine"]
-    assert set(store.threads()) == {"t1", "t2"}
+    assert {thread.id for thread in store.threads()} == {"t1", "t2"}
+
+
+def test_a_thread_carries_enough_to_be_recognised(store: MemoryStore) -> None:
+    store.append("t1", [user("how do I read a file"), user("and write one")])
+
+    [thread] = store.threads()
+
+    assert thread.opening == "how do I read a file"
+    assert thread.messages == 2
+
+
+def test_a_thread_that_opened_with_a_picture_has_no_words(store: MemoryStore) -> None:
+    store.append(
+        "t1",
+        [Message(role="user", content=[ContentPart(kind="image", data=b"\x89PNG", media_type="image/png")])],
+    )
+
+    [thread] = store.threads()
+
+    assert thread.opening == ""
 
 
 def test_tool_calls_and_ids_survive_a_round_trip(store: MemoryStore) -> None:

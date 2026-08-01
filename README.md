@@ -35,7 +35,7 @@ first; the question is checkpointed, so it can be answered after a restart.
 ```text
 app/       api, agent, context, memory, models, tools
 ui/        Chainlit entry point
-scripts/   smoke test, environment doctor
+scripts/   smoke test, live checks, environment doctor
 configs/   runtime configuration
 tests/     offline tests and fixtures
 tools/     work_log.py
@@ -53,14 +53,23 @@ reports/   evidence and the two JSONL journals
 
 ## Status
 
-Stages 1 and 2 are closed and Stage 3 is under way. The agent answers text,
-images and audio; calls `list_files`, `read_file`, `write_file`, `remember_fact`
-and `search_memory`; keeps conversations in SQLite across restarts; finds a fact
-saved in an earlier session; folds older turns into a rolling summary; and stops
-to ask before it writes a file, resuming that question even after the process
-that asked it is gone. Left in Stage 3: bounding the request by tokens and a
-retry path. Work proceeds one approved step at a time after an explicit human
-command.
+All three stages are closed; **version 1** is complete —
+`reports/2026-08-01_v1.md`. The agent answers text, images and audio; calls
+`list_files`, `read_file`, `write_file`, `remember_fact` and `search_memory`;
+keeps conversations in SQLite across restarts; finds a fact saved in an earlier
+session; folds older turns into a rolling summary once the request itself grows
+past its token budget; stops to ask before it writes a file, resuming that
+question even after the process that asked it is gone; retries a model call that
+failed transiently; offers the recent conversations on start; shows images and
+audio in its answers; and says which attachment it could not read. Version 2 is
+listed in `docs/BACKLOG.md`. Work proceeds one approved step at a time after an
+explicit human command.
+
+The request is bounded in tokens the model counted itself: the ceiling is read
+from `/v1/models`, the size from `usage.prompt_tokens`, and the project
+configures only `AGENT_CONTEXT_FRACTION` — the share of that ceiling a request
+may reach before older turns are folded. Give the agent more room by raising
+vLLM's `--max-model-len`; nothing here needs to change.
 
 The model server is infrastructure and lives outside this repository; the
 project reaches it over `MODEL_ENDPOINT` only. Copy `.env.example` to `.env` to
@@ -71,9 +80,11 @@ point somewhere else.
 .venv\Scripts\python.exe -m scripts.doctor       # can this machine run it
 .venv\Scripts\python.exe -m scripts.smoke_test   # every Stage 1 item, needs the server
 .venv\Scripts\python.exe -m scripts.stage3_live  # asking before a write, needs the server
+.venv\Scripts\python.exe -m scripts.v1_live      # every version 1 item, needs the server
 .venv\Scripts\python.exe -m chainlit run ui/chainlit_app.py -w   # the agent, needs the server
 ```
 
-The agent touches only `AGENT_WORKSPACE`, and only after you approve a write.
+The agent touches only `AGENT_WORKSPACE`, which defaults to `workspace/`, and
+only after you approve a write.
 It writes `AGENT_DATABASE`, the conversation, and `AGENT_CHECKPOINTS`, which
 holds turns still in flight and can be deleted without losing one.

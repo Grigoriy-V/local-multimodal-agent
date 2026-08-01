@@ -136,6 +136,16 @@ def test_a_cut_with_no_later_turn_lands_at_the_end() -> None:
     assert first_user_turn([user("only")], 1) == 1
 
 
+def test_a_cut_before_the_first_message_is_clamped_not_taken_from_the_end() -> None:
+    """A caller asking to keep more messages than exist passes a negative start.
+
+    Python would read that as an index from the end; here it means the beginning.
+    """
+
+    assert first_user_turn([user("only")], -4) == 0
+    assert first_user_turn([], -4) == 0
+
+
 # --- folding -----------------------------------------------------------------
 
 
@@ -198,6 +208,78 @@ async def test_folding_twice_carries_the_earlier_summary_forward(store: MemorySt
 
     body = backend.requests[1][-1].content[0].text
     assert "Earlier summary:" in body
+
+
+# --- folding because the request grew, not because it got long ---------------
+
+
+async def test_a_short_thread_that_filled_the_request_is_folded(store: MemoryStore) -> None:
+    """Eight turns of text and eight turns of images are the same message count."""
+
+    policy = ContextPolicy(keep_recent=4, summarize_after=100, max_input_tokens=1000)
+    store.append("t1", exchange(6))
+
+    result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=1200)
+
+    assert result == "they talked about files"
+    assert store.summary("t1")[1] > 0
+
+
+async def test_a_request_within_the_budget_leaves_the_thread_alone(store: MemoryStore) -> None:
+    policy = ContextPolicy(keep_recent=4, summarize_after=100, max_input_tokens=1000)
+    store.append("t1", exchange(6))
+
+    result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=400)
+
+    assert result is None
+    assert store.summary("t1") == (None, 0)
+
+
+async def test_an_oversized_thread_shorter_than_the_window_is_left_alone(
+    store: MemoryStore,
+) -> None:
+    """A request can be over budget with nothing older than the verbatim window.
+
+    Folding cannot help there — every message is one the policy says to keep —
+    and the fold must decline rather than cut at a negative position.
+    """
+
+    policy = ContextPolicy(keep_recent=8, summarize_after=100, max_input_tokens=100)
+    store.append("t1", exchange(1))
+
+    result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=5000)
+
+    assert result is None
+    assert store.summary("t1") == (None, 0)
+
+
+async def test_an_oversized_thread_folded_to_nothing_stops_folding(store: MemoryStore) -> None:
+    """Once everything foldable is folded, the next turn must not fold again.
+
+    This is what a budget too small for the system prompt alone produces: every
+    request overshoots, so the trigger fires on a `pending` that is empty.
+    """
+
+    policy = ContextPolicy(keep_recent=2, summarize_after=100, max_input_tokens=100)
+    store.append("t1", exchange(4))
+    await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=5000)
+    _, through = store.summary("t1")
+
+    result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=5000)
+
+    assert result is None
+    assert store.summary("t1")[1] == through
+
+
+async def test_without_a_known_limit_only_the_message_count_folds(store: MemoryStore) -> None:
+    """A model that does not state its context length is not guessed at."""
+
+    policy = ContextPolicy(keep_recent=4, summarize_after=100)
+    store.append("t1", exchange(6))
+
+    result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=999_999)
+
+    assert result is None
 
 
 async def test_nothing_is_lost_when_a_thread_is_folded(store: MemoryStore) -> None:

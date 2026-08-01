@@ -21,7 +21,7 @@ from langgraph.types import interrupt
 from app.context import Context, ContextPolicy, build_prelude, fold_older_messages
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import MemoryStore
-from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall
+from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall, Usage
 from app.tools import Toolbox
 
 
@@ -44,12 +44,15 @@ class AgentState:
     """One turn.
 
     `messages` are the turn's own messages and the only ones ever stored;
-    `context` is assembled per turn and deliberately not persisted.
+    `context` is assembled per turn and deliberately not persisted. `usage` is
+    what the model reported for the last request of the turn, which is how the
+    request's real size reaches both the fold and the user interface.
     """
 
     thread_id: str = "default"
     messages: Annotated[list[Message], extend] = field(default_factory=list)
     context: Context = field(default_factory=Context)
+    usage: Usage = field(default_factory=Usage)
 
 
 def assistant_message(completion: Completion) -> Message:
@@ -131,9 +134,9 @@ def build_agent(
             )
         }
 
-    async def call_model(state: AgentState) -> dict[str, list[Message]]:
+    async def call_model(state: AgentState) -> dict[str, Any]:
         completion = await backend.invoke(state.context.prompt(state.messages), tools=schemas)
-        return {"messages": [assistant_message(completion)]}
+        return {"messages": [assistant_message(completion)], "usage": completion.usage}
 
     async def run_tools(state: AgentState) -> dict[str, list[Message]]:
         calls = state.messages[-1].tool_calls
@@ -153,7 +156,9 @@ def build_agent(
 
     async def persist(state: AgentState) -> None:
         store.append(state.thread_id, state.messages)
-        await fold_older_messages(backend, store, state.thread_id, policy)
+        await fold_older_messages(
+            backend, store, state.thread_id, policy, state.usage.input_tokens
+        )
 
     def has_tool_calls(state: AgentState) -> str:
         return "tools" if state.messages[-1].tool_calls else "persist"

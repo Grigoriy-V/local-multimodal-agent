@@ -22,6 +22,34 @@ from here.
 - **FastAPI application layer.** Only when a consumer other than Chainlit
   exists. See `DECISIONS.md`.
 
+## Version 2
+
+Agreed in direction, ruled out of version 1 by `DECISIONS.md`. Ordered by the
+human's stated priority.
+
+- **Documents dropped into the chat** — `.txt`, `.md`, `.pdf`, `.docx`. The
+  human calls this the important one. Text formats are nearly free; `.pdf` and
+  `.docx` need a parsing dependency. Partial relief exists already: a text file
+  placed in the workspace is readable today through `read_file`.
+- **Policy as a predicate over `(tool, arguments)`**, replacing the boolean
+  `Tool.destructive`, together with directory grants: the user permits a
+  workspace, the grant is stored, survives a restart and can be revoked. A
+  native file-browser dialog is not available to a web UI; the realistic form is
+  a choice among allowed roots.
+- **`edit_file`** — a targeted change instead of rewriting a whole file. A 12B
+  model asked to alter one line by rewriting the file will corrupt it.
+- **Video, frame by frame.** The model has no video input; frames are images.
+  Trigger: a context of 64–128k, plus frame batching and compression. Feasible
+  on 24 GB because Gemma's sliding-window attention keeps a full KV cache only
+  on every sixth layer — roughly 8 GB at 128k, halved again by
+  `--kv-cache-dtype fp8`. The arithmetic is an estimate and has not been
+  measured.
+- **Run tracing** — every model call, tool call and context decision of a turn,
+  inspectable after the fact.
+- **An MCP server over the memory**, so Claude Code or Codex can reach this
+  project's long-term facts.
+- **An evaluation harness** for tool selection and memory retrieval.
+
 ## Directions, not tasks
 
 - **Learn fine-tuning.** A real goal of the human's, and the reason the

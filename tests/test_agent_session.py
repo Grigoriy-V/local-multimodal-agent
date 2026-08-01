@@ -245,6 +245,75 @@ async def test_answer_returns_the_intermediate_steps_and_the_answer(
     assert body(produced[-1]) == "42"
 
 
+# --- how full the request was ------------------------------------------------
+
+
+async def test_the_fill_is_the_size_the_model_reported(database: Path, workspace: Path) -> None:
+    backend = ScriptedBackend(says("hello", input_tokens=600), limit=10_000)
+    agent = Agent(backend, MemoryStore(database), workspace, context_fraction=0.5)
+
+    await agent.answer("t1", user("hi"))
+    fill = await agent.fill()
+
+    assert (fill.used, fill.budget) == (600, 5000)
+    assert fill.fraction == pytest.approx(0.12)
+
+
+async def test_a_model_that_states_no_limit_leaves_the_request_unjudged(
+    database: Path, workspace: Path
+) -> None:
+    backend = ScriptedBackend(says("hello", input_tokens=600))
+    agent = Agent(backend, MemoryStore(database), workspace)
+
+    await agent.answer("t1", user("hi"))
+    fill = await agent.fill()
+
+    assert fill.budget is None
+    assert fill.fraction is None
+
+
+async def test_there_is_no_fill_before_a_turn(database: Path, workspace: Path) -> None:
+    agent = Agent(ScriptedBackend(), MemoryStore(database), workspace)
+
+    assert await agent.fill() is None
+
+
+async def test_the_limit_is_asked_for_once(database: Path, workspace: Path) -> None:
+    backend = ScriptedBackend(default=says("ok", input_tokens=10), limit=10_000)
+    agent = Agent(backend, MemoryStore(database), workspace)
+    asked: list[int] = []
+    original = backend.context_limit
+
+    async def counted() -> int | None:
+        asked.append(1)
+        return await original()
+
+    backend.context_limit = counted
+
+    await agent.answer("t1", user("one"))
+    await agent.answer("t2", user("two"))
+    await agent.fill()
+
+    assert len(asked) == 1
+
+
+async def test_a_request_over_budget_folds_the_conversation(
+    database: Path, workspace: Path
+) -> None:
+    """The bound is a token bound: nothing here is long enough to fold by count."""
+
+    policy = ContextPolicy(keep_recent=2, summarize_after=100)
+    backend = ScriptedBackend(default=says("ok", input_tokens=9_000), limit=10_000)
+    agent = Agent(backend, MemoryStore(database), workspace, policy, context_fraction=0.6)
+
+    for turn in range(4):
+        await agent.answer("t1", user(f"turn {turn}"))
+
+    summary, through = agent.store.summary("t1")
+    assert summary == "ok"
+    assert through > 0
+
+
 async def test_the_workspace_is_the_only_readable_root(
     database: Path, workspace: Path, tmp_path: Path
 ) -> None:

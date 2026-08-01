@@ -7,6 +7,7 @@ calls — are pure functions so they can be tested without a server.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator, Sequence
@@ -24,6 +25,11 @@ AUDIO_FORMATS = {
     "audio/mpeg": "mp3",
     "audio/ogg": "ogg",
 }
+
+# Statuses that mean "later", not "no": a server still starting, a queue that is
+# full, a proxy that gave up early. A 4xx about the request itself is excluded —
+# sending the same bad request again only wastes the time it takes to refuse it.
+TRANSIENT_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 
 class BackendError(RuntimeError):
@@ -109,6 +115,21 @@ def parse_completion(payload: dict[str, Any]) -> Completion:
     )
 
 
+def parse_context_limit(payload: dict[str, Any], name: str) -> int | None:
+    """Find `max_model_len` for one model in a `/models` listing.
+
+    vLLM reports it; other OpenAI-compatible servers may not, and an unknown
+    limit is not an error — it only means the request cannot be bounded.
+    """
+
+    for entry in payload.get("data") or ():
+        if entry.get("id") != name:
+            continue
+        limit = entry.get("max_model_len")
+        return int(limit) if isinstance(limit, int) else None
+    return None
+
+
 def parse_stream_line(line: str) -> str | None:
     """Return the text carried by one server-sent-events line, if it carries any."""
 
@@ -165,18 +186,43 @@ class OpenAICompatibleBackend(ModelBackend):
             body["stream"] = True
         return body
 
+    async def _completion(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Post one request, trying again while the failure looks transient.
+
+        The graph sees one failure mode instead of two: either an answer, or a
+        server that is really not going to answer. Backoff doubles, because the
+        common case is a server that is busy, and asking it faster does not help.
+        """
+
+        attempt = 0
+        while True:
+            try:
+                response = await self._client.post("/chat/completions", json=body)
+            except httpx.HTTPError as error:
+                # A timeout carries an empty message, so the class name is named
+                # too: "could not be reached:" on its own tells nobody anything.
+                detail = f"{type(error).__name__}: {error}" if str(error) else type(error).__name__
+                failure = BackendError(
+                    f"the endpoint {self.settings.endpoint} could not be reached ({detail})"
+                )
+                transient = True
+            else:
+                if response.status_code < 400:
+                    return response.json()
+                failure = BackendError(f"HTTP {response.status_code}: {response.text}")
+                transient = response.status_code in TRANSIENT_STATUS
+            if not transient or attempt >= self.settings.retries:
+                raise failure
+            await asyncio.sleep(self.settings.retry_backoff * 2**attempt)
+            attempt += 1
+
     async def invoke(
         self,
         messages: Sequence[Message],
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> Completion:
-        response = await self._client.post(
-            "/chat/completions", json=self._body(messages, tools, response_format)
-        )
-        if response.status_code >= 400:
-            raise BackendError(f"HTTP {response.status_code}: {response.text}")
-        return parse_completion(response.json())
+        return parse_completion(await self._completion(self._body(messages, tools, response_format)))
 
     async def stream(
         self,
@@ -184,6 +230,13 @@ class OpenAICompatibleBackend(ModelBackend):
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
+        """Yield text as it arrives. Not retried: see the note below.
+
+        A stream that fails halfway has already given the caller part of an
+        answer, and there is no way to ask for the rest — retrying would repeat
+        what was said. `invoke`, which the agent uses, is retried instead.
+        """
+
         body = self._body(messages, tools, response_format, stream=True)
         async with self._client.stream("POST", "/chat/completions", json=body) as response:
             if response.status_code >= 400:
@@ -193,6 +246,22 @@ class OpenAICompatibleBackend(ModelBackend):
                 text = parse_stream_line(line)
                 if text:
                     yield text
+
+    async def context_limit(self) -> int | None:
+        """Ask the server how long a request it will take.
+
+        A server that cannot be reached or does not report the number answers
+        the same way: unknown. An unreachable server is not diagnosed here — the
+        next model call says so, loudly and with the failure that matters.
+        """
+
+        try:
+            response = await self._client.get("/models")
+        except httpx.HTTPError:
+            return None
+        if response.status_code >= 400:
+            return None
+        return parse_context_limit(response.json(), self.settings.name)
 
     async def aclose(self) -> None:
         await self._client.aclose()

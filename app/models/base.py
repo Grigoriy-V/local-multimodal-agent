@@ -99,3 +99,13 @@ class ModelBackend(ABC):
         response_format: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
         """Yield text chunks as they arrive."""
+
+    async def context_limit(self) -> int | None:
+        """The largest request this model accepts, in tokens, or `None` if unknown.
+
+        Asked of the backend rather than configured, because the number belongs
+        to the model that is actually running: a tokenizer, or a limit, copied
+        into project configuration is one that can quietly stop being true.
+        """
+
+        return None

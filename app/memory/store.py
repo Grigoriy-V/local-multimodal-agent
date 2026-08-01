@@ -16,6 +16,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self
@@ -63,6 +64,16 @@ END;
 """
 
 TOKEN = re.compile(r"\w+", re.UNICODE)
+
+
+@dataclass(frozen=True)
+class Thread:
+    """Enough about a conversation to choose it without opening it."""
+
+    id: str
+    updated_at: str
+    messages: int
+    opening: str
 
 
 def _now() -> str:
@@ -118,6 +129,14 @@ def _row_to_message(row: sqlite3.Row) -> Message:
     )
 
 
+def _opening_text(raw: str | None) -> str:
+    """The words a thread began with. A picture on its own leaves none."""
+
+    if not raw:
+        return ""
+    return " ".join(part.text or "" for part in load_content(raw) if part.kind == "text").strip()
+
+
 def match_query(query: str) -> str:
     """Turn free text into an FTS5 MATCH expression.
 
@@ -154,9 +173,29 @@ class MemoryStore:
         )
         self._db.commit()
 
-    def threads(self) -> list[str]:
-        rows = self._db.execute("SELECT id FROM threads ORDER BY updated_at DESC").fetchall()
-        return [row["id"] for row in rows]
+    def threads(self) -> list[Thread]:
+        """Every conversation, most recently touched first.
+
+        Carries what a chooser needs — how long it is and how it began — because
+        a thread identifier is a session UUID and says nothing to anyone.
+        """
+
+        rows = self._db.execute(
+            "SELECT t.id, t.updated_at,"
+            "  (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id) AS messages,"
+            "  (SELECT m.content FROM messages m WHERE m.thread_id = t.id AND m.role = 'user'"
+            "   ORDER BY m.position LIMIT 1) AS opening"
+            " FROM threads t ORDER BY t.updated_at DESC"
+        ).fetchall()
+        return [
+            Thread(
+                id=row["id"],
+                updated_at=row["updated_at"],
+                messages=row["messages"],
+                opening=_opening_text(row["opening"]),
+            )
+            for row in rows
+        ]
 
     # --- messages ------------------------------------------------------------
 

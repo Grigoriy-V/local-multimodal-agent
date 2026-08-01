@@ -12,14 +12,16 @@ import pytest
 
 pytest.importorskip("chainlit", reason="the ui dependency group is optional")
 
+from app.memory import Thread
 from app.models import ContentPart, Message
-from ui.chainlit_app import part_for, spoken, to_message
+from ui.chainlit_app import media_parts, part_for, rejected, spoken, summarise, to_message
 
 
 class FakeElement:
-    def __init__(self, path: str, mime: str | None) -> None:
+    def __init__(self, path: str, mime: str | None, name: str | None = None) -> None:
         self.path = path
         self.mime = mime
+        self.name = name
 
 
 class FakeMessage:
@@ -69,6 +71,74 @@ def test_a_message_with_nothing_usable_still_produces_a_turn(tmp_path: Path) -> 
     message = to_message(FakeMessage("", [FakeElement(str(document), "application/pdf")]))
 
     assert message.content[0].text == "(empty message)"
+
+
+def test_an_ignored_attachment_is_named_so_it_can_be_reported(tmp_path: Path) -> None:
+    """Dropping a file in silence looks like the agent read it and said nothing."""
+
+    document = tmp_path / "report.pdf"
+    document.write_bytes(b"%PDF")
+    picture = tmp_path / "shot.png"
+    picture.write_bytes(b"\x89PNG")
+
+    incoming = FakeMessage(
+        "look",
+        [FakeElement(str(document), "application/pdf"), FakeElement(str(picture), "image/png")],
+    )
+
+    assert rejected(incoming) == ["report.pdf"]
+
+
+def test_nothing_is_reported_when_everything_was_read(tmp_path: Path) -> None:
+    picture = tmp_path / "shot.png"
+    picture.write_bytes(b"\x89PNG")
+
+    assert rejected(FakeMessage("look", [FakeElement(str(picture), "image/png")])) == []
+
+
+# --- what comes back out -----------------------------------------------------
+
+
+def test_media_is_picked_out_to_be_shown_not_described() -> None:
+    """Building the Chainlit element is Chainlit's; choosing what to show is ours."""
+
+    message = Message(
+        role="user",
+        content=[
+            ContentPart(kind="text", text="what is this"),
+            ContentPart(kind="image", data=b"\x89PNG", media_type="image/png"),
+            ContentPart(kind="audio", data=b"RIFF", media_type="audio/wav"),
+        ],
+    )
+
+    assert [part.media_type for part in media_parts(message)] == ["image/png", "audio/wav"]
+
+
+def test_a_text_only_message_has_nothing_to_show() -> None:
+    message = Message(role="assistant", content=[ContentPart(kind="text", text="hi")])
+
+    assert media_parts(message) == []
+
+
+def test_a_thread_is_labelled_by_how_it_began() -> None:
+    thread = Thread(id="abc", updated_at="2026-08-01T00:00:00+00:00", messages=4, opening="hello")
+
+    assert summarise(thread) == "hello · 4 messages"
+
+
+def test_a_long_opening_is_cut_to_fit_a_button() -> None:
+    thread = Thread(id="abc", updated_at="x", messages=2, opening="word " * 40)
+
+    label = summarise(thread)
+
+    assert label.startswith("word")
+    assert "…" in label
+
+
+def test_a_thread_that_began_without_words_is_still_recognisable() -> None:
+    thread = Thread(id="abc", updated_at="x", messages=2, opening="")
+
+    assert summarise(thread) == "(no words) · 2 messages"
 
 
 def test_spoken_joins_only_the_text_parts() -> None:

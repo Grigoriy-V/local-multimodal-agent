@@ -114,6 +114,43 @@ tool that ran before the pause would run twice.
 logic inside a tool or inside Chainlit, and per-tool interrupts interleaved with
 tool execution.
 
+## 2026-08-01: Token accounting comes from the server, not from a local tokenizer
+
+**Decision.** The size of a request is measured by the model server. The actual
+size of the last request is `usage.prompt_tokens` from its response; the ceiling
+is `max_model_len` read from `/v1/models`. The repository configures only the
+fraction of that ceiling a request may occupy. Any estimate needed before
+sending lives behind `ModelBackend` with the rest of model-shaped knowledge.
+
+**Why.** A tokenizer is part of a model. Loading one in `app/context/` would make
+swapping the model a code change in the context layer, which is what
+`ModelBackend` exists to prevent — and it would also be wrong, because a local
+text tokenizer cannot count image tokens, and images are the reason the bound is
+needed at all. The server already holds the only tokenizer that matches what is
+running, and reports both numbers for free.
+
+**Rules out.** A tokenizer dependency in the repository, a `max_model_len`
+duplicated in project configuration, and any context decision that assumes a
+message count approximates a token count.
+
+## 2026-08-01: Version 1 is the closed Stage 3 and nothing more
+
+**Decision.** Version 1 is the contract's Stage 3 completed, plus what is needed
+to exercise it by hand: a token-bounded request with its fill shown, a retry
+inside `ModelBackend`, a thread list in the UI, images and audio rendered in
+answers, one fixed workspace, and an explicit refusal for a file type the agent
+cannot accept. The workspace is a single hardcoded sandbox; asking the user to
+grant a directory is not part of it.
+
+**Why.** The agent already runs, so the risk is not that version 1 is too small
+but that it never closes. Granting a directory is a scope grant that must be
+stored, revoked and survive a restart — half of a policy engine — and building
+it piecemeal now would make the policy work in version 2 harder, not easier.
+
+**Rules out.** Document ingestion, video, an `edit_file` tool, run tracing, an
+MCP server, an evaluation harness, and runtime workspace selection as version 1
+work. All are recorded in `docs/BACKLOG.md`.
+
 ## 2026-08-01: No PROJECT_LOG; this file plus the journals replace it
 
 **Decision.** There is no `PROJECT_LOG.md`. Decisions live here, measured

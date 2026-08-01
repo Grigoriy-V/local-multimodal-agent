@@ -21,6 +21,7 @@ from app.models.openai_compatible import (
     OpenAICompatibleBackend,
     build_messages,
     parse_completion,
+    parse_context_limit,
     parse_stream_line,
 )
 
@@ -319,3 +320,143 @@ async def test_an_http_error_becomes_a_backend_error() -> None:
     async with backend(handler) as client:
         with pytest.raises(BackendError, match="HTTP 400"):
             await client.invoke([Message(role="user", content=[text_part()])])
+
+
+# --- retries -----------------------------------------------------------------
+
+
+def ask(client: OpenAICompatibleBackend):
+    return client.invoke([Message(role="user", content=[text_part()])])
+
+
+async def test_a_busy_server_is_tried_again_and_the_answer_arrives() -> None:
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        if len(attempts) < 3:
+            return httpx.Response(503, text="starting up")
+        return httpx.Response(200, json=completion_payload(content="pong"))
+
+    async with backend(handler, retries=2, retry_backoff=0) as client:
+        assert (await ask(client)).text == "pong"
+
+    assert len(attempts) == 3
+
+
+async def test_a_server_that_never_recovers_fails_after_the_last_attempt() -> None:
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        return httpx.Response(503, text="still starting")
+
+    async with backend(handler, retries=2, retry_backoff=0) as client:
+        with pytest.raises(BackendError, match="HTTP 503"):
+            await ask(client)
+
+    assert len(attempts) == 3
+
+
+async def test_a_rejected_request_is_not_repeated() -> None:
+    """A 400 is about the request, and the request will not improve."""
+
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        return httpx.Response(400, json={"error": "bad request"})
+
+    async with backend(handler, retries=2, retry_backoff=0) as client:
+        with pytest.raises(BackendError, match="HTTP 400"):
+            await ask(client)
+
+    assert len(attempts) == 1
+
+
+async def test_a_dropped_connection_is_tried_again() -> None:
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        if len(attempts) < 2:
+            raise httpx.ConnectError("connection refused")
+        return httpx.Response(200, json=completion_payload(content="pong"))
+
+    async with backend(handler, retries=2, retry_backoff=0) as client:
+        assert (await ask(client)).text == "pong"
+
+    assert len(attempts) == 2
+
+
+async def test_a_server_that_stays_down_is_reported_as_unreachable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    async with backend(handler, retries=1, retry_backoff=0) as client:
+        with pytest.raises(BackendError, match="could not be reached"):
+            await ask(client)
+
+
+async def test_an_unreachable_server_is_named_and_so_is_the_failure() -> None:
+    """A timeout stringifies to nothing, so the message must not rely on it."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("")
+
+    async with backend(handler, retries=0, retry_backoff=0) as client:
+        with pytest.raises(BackendError) as raised:
+            await ask(client)
+
+    assert "ConnectTimeout" in str(raised.value)
+    assert "http://test/v1" in str(raised.value)
+
+
+# --- the context limit -------------------------------------------------------
+
+
+def test_the_limit_is_read_from_the_named_model() -> None:
+    payload = {
+        "data": [
+            {"id": "other-model", "max_model_len": 4096},
+            {"id": "test-model", "max_model_len": 16384},
+        ]
+    }
+
+    assert parse_context_limit(payload, "test-model") == 16384
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"data": [{"id": "test-model"}]},
+        {"data": [{"id": "someone-else", "max_model_len": 16384}]},
+        {},
+    ],
+    ids=["not reported", "another model", "empty listing"],
+)
+def test_a_limit_that_is_not_stated_is_unknown(payload: dict[str, Any]) -> None:
+    assert parse_context_limit(payload, "test-model") is None
+
+
+async def test_the_backend_asks_the_server_for_its_limit() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={"data": [{"id": "test-model", "max_model_len": 16384}]})
+
+    async with backend(handler) as client:
+        assert await client.context_limit() == 16384
+
+    assert seen["url"] == "http://test/v1/models"
+
+
+async def test_an_unreachable_server_leaves_the_limit_unknown() -> None:
+    """Not an error: the model call that follows is what reports a dead server."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    async with backend(handler) as client:
+        assert await client.context_limit() is None

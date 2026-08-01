@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall
+from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall, Usage
 
 
 class ScriptedBackend(ModelBackend):
@@ -19,11 +19,20 @@ class ScriptedBackend(ModelBackend):
     conversation length should not have to script the summary it triggers.
     """
 
-    def __init__(self, *completions: Completion, default: Completion | None = None) -> None:
+    def __init__(
+        self,
+        *completions: Completion,
+        default: Completion | None = None,
+        limit: int | None = None,
+    ) -> None:
         self.completions = list(completions)
         self.default = default
+        self.limit = limit
         self.requests: list[list[Message]] = []
         self.tools_seen: list[Any] = []
+
+    async def context_limit(self) -> int | None:
+        return self.limit
 
     async def invoke(
         self,
@@ -48,8 +57,10 @@ class ScriptedBackend(ModelBackend):
         yield (await self.invoke(messages, tools, response_format)).text
 
 
-def says(text: str) -> Completion:
-    return Completion(text=text, finish_reason="stop")
+def says(text: str, input_tokens: int | None = None) -> Completion:
+    return Completion(
+        text=text, usage=Usage(input_tokens=input_tokens), finish_reason="stop"
+    )
 
 
 def calls(name: str, **arguments: Any) -> Completion:
