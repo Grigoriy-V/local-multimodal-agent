@@ -27,9 +27,8 @@ Chainlit -> LangGraph agent -> ModelBackend -> vLLM -> Gemma 4 12B IT
 
 The graph is `load -> model -> tools -> model -> persist`: context is assembled
 from four layers, the model answers or asks for a tool, and only the turn's own
-messages are written back. Stage 3 grows the same graph — checkpoints, resumable
-sessions, retries, confirmation before destructive actions — without touching the
-inference, UI, memory, or tool layers.
+messages are written back. A tool marked destructive stops the turn and asks
+first; the question is checkpointed, so it can be answered after a restart.
 
 ## Layout
 
@@ -54,12 +53,14 @@ reports/   evidence and the two JSONL journals
 
 ## Status
 
-Stages 1 and 2 are closed. The agent runs: it answers text, images and audio,
-calls `list_files`, `read_file`, `remember_fact` and `search_memory`, keeps
-conversations in SQLite across restarts, finds a fact saved in an earlier
-session, and folds older turns into a rolling summary. Stage 3 — checkpoints,
-resumable sessions, confirmation before destructive actions — has not started.
-Work proceeds one approved step at a time after an explicit human command.
+Stages 1 and 2 are closed and Stage 3 is under way. The agent answers text,
+images and audio; calls `list_files`, `read_file`, `write_file`, `remember_fact`
+and `search_memory`; keeps conversations in SQLite across restarts; finds a fact
+saved in an earlier session; folds older turns into a rolling summary; and stops
+to ask before it writes a file, resuming that question even after the process
+that asked it is gone. Left in Stage 3: bounding the request by tokens and a
+retry path. Work proceeds one approved step at a time after an explicit human
+command.
 
 The model server is infrastructure and lives outside this repository; the
 project reaches it over `MODEL_ENDPOINT` only. Copy `.env.example` to `.env` to
@@ -69,7 +70,10 @@ point somewhere else.
 .venv\Scripts\python.exe -m pytest -q            # offline, needs nothing
 .venv\Scripts\python.exe -m scripts.doctor       # can this machine run it
 .venv\Scripts\python.exe -m scripts.smoke_test   # every Stage 1 item, needs the server
+.venv\Scripts\python.exe -m scripts.stage3_live  # asking before a write, needs the server
 .venv\Scripts\python.exe -m chainlit run ui/chainlit_app.py -w   # the agent, needs the server
 ```
 
-The agent reads only `AGENT_WORKSPACE` and writes only `AGENT_DATABASE`.
+The agent touches only `AGENT_WORKSPACE`, and only after you approve a write.
+It writes `AGENT_DATABASE`, the conversation, and `AGENT_CHECKPOINTS`, which
+holds turns still in flight and can be deleted without losing one.

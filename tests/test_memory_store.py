@@ -61,7 +61,7 @@ def test_tool_calls_and_ids_survive_a_round_trip(store: MemoryStore) -> None:
     )
 
     assistant, tool = store.messages("t1")
-    assert assistant.content == []
+    assert assistant.content == ()
     assert assistant.tool_calls == (call,)
     assert tool.tool_call_id == "call_1"
 

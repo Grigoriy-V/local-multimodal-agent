@@ -9,8 +9,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
+import aiosqlite
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 
 from app.agent.graph import build_agent
 from app.config import AgentSettings, ModelSettings
@@ -21,6 +26,15 @@ from app.models import ContentPart, Message, ModelBackend
 from app.models.openai_compatible import OpenAICompatibleBackend
 from app.tools import Toolbox, filesystem_tools, memory_tools
 
+# The checkpoint holds this project's own dataclasses, so LangGraph is told
+# which types it is allowed to reconstruct. Nothing else may come back out.
+CHECKPOINT_TYPES = [
+    ("app.models.base", "Message"),
+    ("app.models.base", "ContentPart"),
+    ("app.models.base", "ToolCall"),
+    ("app.context.window", "Context"),
+]
+
 
 class Agent:
     """A model, a memory and a set of tools, answering one thread at a time.
@@ -28,6 +42,11 @@ class Agent:
     A graph is compiled per thread because `remember_fact` records which
     conversation saved a fact. Compiling is cheap; the alternative is a mutable
     "current thread" hidden inside the toolbox.
+
+    Checkpoints live in their own file. The conversation is in the store and is
+    the durable record; a checkpoint is the state of a turn still in flight, in
+    LangGraph's schema, and deleting the file loses nothing but the ability to
+    finish an interrupted turn.
     """
 
     def __init__(
@@ -37,15 +56,37 @@ class Agent:
         workspace: Path,
         policy: ContextPolicy | None = None,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        checkpoints: str | Path | None = None,
     ) -> None:
         self.backend = backend
         self.store = store
         self.workspace = Path(workspace).resolve()
         self.policy = policy or ContextPolicy()
         self.system_prompt = system_prompt
+        self.checkpoints = checkpoints
         self._graphs: dict[str, CompiledStateGraph] = {}
+        self._connection: aiosqlite.Connection | None = None
+        self._saver: AsyncSqliteSaver | None = None
 
-    def _graph(self, thread_id: str) -> CompiledStateGraph:
+    async def _checkpointer(self) -> AsyncSqliteSaver | None:
+        """Open the checkpoint file on first use.
+
+        Lazily, because building an agent is synchronous and opening the file is
+        not; and because an agent that never runs a turn should not create one.
+        """
+
+        if self.checkpoints is None:
+            return None
+        if self._saver is None:
+            path = Path(self.checkpoints)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._connection = await aiosqlite.connect(str(path))
+            serde = JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
+            self._saver = AsyncSqliteSaver(self._connection, serde=serde)
+            await self._saver.setup()
+        return self._saver
+
+    async def _graph(self, thread_id: str) -> CompiledStateGraph:
         if thread_id not in self._graphs:
             toolbox = Toolbox(
                 [
@@ -54,9 +95,31 @@ class Agent:
                 ]
             )
             self._graphs[thread_id] = build_agent(
-                self.backend, toolbox, self.store, self.policy, self.system_prompt
+                self.backend,
+                toolbox,
+                self.store,
+                self.policy,
+                self.system_prompt,
+                await self._checkpointer(),
             )
         return self._graphs[thread_id]
+
+    async def _run(self, thread_id: str, command: Any) -> AsyncIterator[Message]:
+        """Drive the graph and yield only what the conversation gained.
+
+        An interrupt arrives here as a patch that is not a node's messages; the
+        caller learns about it from `pending`, which keeps this an iterator of
+        messages rather than of two different things.
+        """
+
+        graph = await self._graph(thread_id)
+        config = {"configurable": {"thread_id": thread_id}}
+        async for update in graph.astream(command, config=config, stream_mode="updates"):
+            for node, patch in update.items():
+                if node.startswith("__") or not isinstance(patch, dict):
+                    continue
+                for produced in patch.get("messages") or []:
+                    yield produced
 
     async def steps(self, thread_id: str, message: Message) -> AsyncIterator[Message]:
         """Yield each message as its node finishes, so a UI can show the work.
@@ -64,16 +127,35 @@ class Agent:
         The user's own message is not yielded: the caller already has it.
         """
 
-        stream = self._graph(thread_id).astream(
-            {"thread_id": thread_id, "messages": [message]}, stream_mode="updates"
-        )
-        async for update in stream:
-            for patch in update.values():
-                for produced in (patch or {}).get("messages", []):
-                    yield produced
+        async for produced in self._run(thread_id, {"thread_id": thread_id, "messages": [message]}):
+            yield produced
+
+    async def pending(self, thread_id: str) -> list[dict[str, Any]] | None:
+        """The calls this thread is waiting on an answer for, if any.
+
+        Survives a restart, which is the point: the question is in the
+        checkpoint, not in the process that asked it.
+        """
+
+        graph = await self._graph(thread_id)
+        state = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+        for task in state.tasks:
+            for stop in task.interrupts:
+                return list(stop.value)
+        return None
+
+    async def resume(self, thread_id: str, answers: dict[str, bool]) -> AsyncIterator[Message]:
+        """Answer the pending question — call id to approved — and carry on."""
+
+        async for produced in self._run(thread_id, Command(resume=answers)):
+            yield produced
 
     async def answer(self, thread_id: str, message: Message) -> list[Message]:
-        """Run one turn and return everything the agent produced for it."""
+        """Run one turn and return everything the agent produced for it.
+
+        A turn that stops to ask a question ends here; the caller answers with
+        `pending` and `resume`.
+        """
 
         return [produced async for produced in self.steps(thread_id, message)]
 
@@ -87,6 +169,8 @@ class Agent:
         close = getattr(self.backend, "aclose", None)
         if close is not None:
             await close()
+        if self._connection is not None:
+            await self._connection.close()
         self.store.close()
 
 
@@ -111,4 +195,5 @@ def create_agent(
         store=MemoryStore(agent_settings.database),
         workspace=Path(agent_settings.workspace),
         policy=policy,
+        checkpoints=agent_settings.checkpoints,
     )

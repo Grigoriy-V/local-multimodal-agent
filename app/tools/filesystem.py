@@ -1,8 +1,11 @@
-"""Reading tools, confined to one directory.
+"""File tools, confined to one directory.
 
 The root is passed in, never read from the environment by the tool itself, so a
 caller cannot accidentally hand the model the whole disk. Every path the model
 supplies is resolved and checked against that root before anything is opened.
+
+Confinement is not consent: `write_file` stays inside the root and still asks
+first, because overwriting a file the user cares about is inside the root too.
 """
 
 from __future__ import annotations
@@ -54,8 +57,19 @@ def _read_file(root: Path, path: str) -> str:
     return text
 
 
+def _write_file(root: Path, path: str, content: str) -> str:
+    target = _resolve(root, path)
+    if target.is_dir():
+        raise ToolError(f"path {path!r} is a directory")
+    existed = target.is_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    verb = "overwrote" if existed else "created"
+    return f"{verb} {path} ({len(content)} characters)"
+
+
 def filesystem_tools(root: Path) -> list[Tool]:
-    """Build `list_files` and `read_file` confined to `root`."""
+    """Build `list_files`, `read_file` and `write_file` confined to `root`."""
 
     resolved = Path(root).resolve()
     if not resolved.is_dir():
@@ -91,5 +105,28 @@ def filesystem_tools(root: Path) -> list[Tool]:
                 "required": ["path"],
             },
             run=lambda path: _read_file(resolved, path),
+        ),
+        Tool(
+            name="write_file",
+            description=(
+                "Write a UTF-8 text file inside the workspace, replacing it if it already "
+                "exists. The user is asked to approve the write before it happens."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path relative to the workspace root.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The complete new contents of the file.",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+            run=lambda path, content: _write_file(resolved, path, content),
+            destructive=True,
         ),
     ]

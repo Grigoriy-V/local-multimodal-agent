@@ -33,11 +33,18 @@ def tools(root: Path) -> dict[str, Tool]:
     "path",
     ["..", "../secret.txt", "sub/../../secret.txt", "C:/Windows/win.ini", "/etc/passwd"],
 )
-def test_paths_outside_the_root_are_refused(workspace: Path, path: str) -> None:
-    (workspace.parent / "secret.txt").write_text("must not be read", encoding="utf-8")
+@pytest.mark.parametrize("name", ["read_file", "write_file"])
+def test_paths_outside_the_root_are_refused(workspace: Path, name: str, path: str) -> None:
+    escapee = workspace.parent / "secret.txt"
+    escapee.write_text("must not be touched", encoding="utf-8")
+    arguments = {"path": path}
+    if name == "write_file":
+        arguments["content"] = "overwritten"
 
     with pytest.raises(ToolError, match="outside the allowed root"):
-        tools(workspace)["read_file"].run(path=path)
+        tools(workspace)[name].run(**arguments)
+
+    assert escapee.read_text(encoding="utf-8") == "must not be touched"
 
 
 def test_a_root_that_is_not_a_directory_is_refused(tmp_path: Path) -> None:
@@ -79,6 +86,46 @@ def test_list_files_on_a_file_is_refused(workspace: Path) -> None:
         tools(workspace)["list_files"].run(path="notes.txt")
 
 
+# --- writing -----------------------------------------------------------------
+
+
+def test_write_file_creates_a_file(workspace: Path) -> None:
+    result = tools(workspace)["write_file"].run(path="fresh.txt", content="hello")
+
+    assert (workspace / "fresh.txt").read_text(encoding="utf-8") == "hello"
+    assert result == "created fresh.txt (5 characters)"
+
+
+def test_write_file_says_when_it_replaced_something(workspace: Path) -> None:
+    result = tools(workspace)["write_file"].run(path="notes.txt", content="replaced")
+
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "replaced"
+    assert result.startswith("overwrote")
+
+
+def test_write_file_makes_the_directories_it_needs(workspace: Path) -> None:
+    tools(workspace)["write_file"].run(path="a/b/c.txt", content="deep")
+
+    assert (workspace / "a" / "b" / "c.txt").read_text(encoding="utf-8") == "deep"
+
+
+def test_write_file_on_a_directory_is_refused(workspace: Path) -> None:
+    with pytest.raises(ToolError, match="is a directory"):
+        tools(workspace)["write_file"].run(path="sub", content="x")
+
+
+def test_only_write_file_is_destructive(workspace: Path) -> None:
+    box = toolbox(workspace)
+
+    assert [name for name in box.names if box.destructive(name)] == ["write_file"]
+
+
+def test_an_unknown_tool_is_not_destructive(workspace: Path) -> None:
+    # It never runs, so there is nothing to ask about — it only produces the
+    # error that tells the model the tool does not exist.
+    assert toolbox(workspace).destructive("rm") is False
+
+
 # --- the toolbox -------------------------------------------------------------
 
 
@@ -89,7 +136,11 @@ def toolbox(workspace: Path) -> Toolbox:
 def test_schemas_describe_every_tool(workspace: Path) -> None:
     schemas = toolbox(workspace).schemas()
 
-    assert [schema["function"]["name"] for schema in schemas] == ["list_files", "read_file"]
+    assert [schema["function"]["name"] for schema in schemas] == [
+        "list_files",
+        "read_file",
+        "write_file",
+    ]
     assert schemas[1]["function"]["parameters"]["required"] == ["path"]
     assert all(schema["type"] == "function" for schema in schemas)
 

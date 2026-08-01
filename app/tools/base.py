@@ -22,10 +22,17 @@ class ToolError(RuntimeError):
 
 @dataclass(frozen=True)
 class Tool:
+    """`destructive` marks a tool that changes something outside the agent.
+
+    The flag says nothing about how consent is obtained — that is the graph's
+    business. A tool only declares that running it is not free to undo.
+    """
+
     name: str
     description: str
     parameters: dict[str, Any]
     run: Callable[..., str]
+    destructive: bool = False
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -55,6 +62,16 @@ class Toolbox:
 
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
+
+    def destructive(self, name: str) -> bool:
+        """Whether this call needs consent before it runs.
+
+        An unknown name is not destructive: it never runs, it only produces the
+        error that tells the model the tool does not exist.
+        """
+
+        tool = self._tools.get(name)
+        return tool is not None and tool.destructive
 
     def run(self, call: ToolCall) -> Message:
         """Answer one tool call with a message the model can be shown."""

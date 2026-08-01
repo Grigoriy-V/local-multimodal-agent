@@ -71,8 +71,9 @@ retrieval quality is optimized.
 ## 2026-08-01: The conversation lives in the project's own SQLite
 
 **Decision.** Threads, messages, the rolling summary, and facts are owned by
-`app/memory/store.py`. A LangGraph checkpointer, when Stage 3 adds one, records
-in-flight turn state only — it is not where the conversation is kept.
+`app/memory/store.py`. The LangGraph checkpointer records in-flight turn state
+only — it is not where the conversation is kept — and lives in its own file, so
+discarding it costs no conversation.
 
 **Why.** The conversation is the product's data: it must be readable, queryable
 and portable without LangGraph, and it must survive a framework change. A
@@ -94,6 +95,24 @@ automatically. Global visibility is the point of long-term memory — a fact sco
 to its own thread is indistinguishable from the transcript.
 
 **Rules out.** Inferring facts from model output, and per-thread fact isolation.
+
+## 2026-08-01: A tool declares that it is destructive; the graph decides consent
+
+**Decision.** `Tool.destructive` marks a tool whose effect is not free to undo.
+The graph asks the user before running one, through a single `interrupt` raised
+before any tool in the batch has run. Where a checkpointer is absent there is
+nowhere to wait, and the call is declined rather than run.
+
+**Why.** Confinement is not consent: `write_file` stays inside the workspace and
+can still destroy work that matters. Putting the flag on the tool and the asking
+in the graph means a new destructive tool inherits the behaviour by setting one
+field, and a tool never has to know that a user interface exists. Asking before
+anything runs is not a preference — a resumed node restarts from the top, so a
+tool that ran before the pause would run twice.
+
+**Rules out.** A destructive tool that runs without an explicit answer, consent
+logic inside a tool or inside Chainlit, and per-tool interrupts interleaved with
+tool execution.
 
 ## 2026-08-01: No PROJECT_LOG; this file plus the journals replace it
 

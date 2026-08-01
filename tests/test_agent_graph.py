@@ -123,7 +123,10 @@ async def test_the_tool_schemas_are_sent_on_every_request(workspace: Path, store
     await agent.ainvoke(ask("Look around."))
 
     names = [[tool["function"]["name"] for tool in seen] for seen in backend.tools_seen]
-    assert names == [["list_files", "read_file"], ["list_files", "read_file"]]
+    assert names == [
+        ["list_files", "read_file", "write_file"],
+        ["list_files", "read_file", "write_file"],
+    ]
 
 
 async def test_an_agent_without_tools_sends_none(workspace: Path, store: MemoryStore) -> None:

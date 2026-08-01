@@ -28,6 +28,9 @@ class AgentSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENT_", env_file=".env", extra="ignore")
 
     database: str = "data/memory.sqlite3"
+    # In-flight turns only, in LangGraph's own schema. Kept apart from the
+    # database so that discarding it costs no conversation.
+    checkpoints: str = "data/checkpoints.sqlite3"
     # The only directory the filesystem tools may reach. Widening it is a
     # deliberate act, which is why it is configuration and not a default guess.
     workspace: str = "."

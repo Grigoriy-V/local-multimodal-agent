@@ -52,6 +52,10 @@ class Message:
     tool_call_id: str | None = None
 
     def __post_init__(self) -> None:
+        # Callers pass lists; a checkpoint gives lists back. Normalizing here is
+        # what makes a message read out of a checkpoint equal to the one put in.
+        object.__setattr__(self, "content", tuple(self.content))
+        object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
         if not self.content and not self.tool_calls:
             raise ValueError("a message requires content or tool calls")
 
