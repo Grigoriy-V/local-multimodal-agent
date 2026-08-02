@@ -96,7 +96,9 @@ Ordered plan:
    evidence, cancellation and artifacts.
 6. Run honest app-level product checks from empty sandboxes: Snake with visual
    validation and a materially different task, with no special command,
-   scenario branch or scripted model response.
+   scenario branch or scripted model response. Capture representative app
+   screenshots from both runs as product evidence and use a concise selection
+   in the README.
 7. Run the full regression plus browser/restart product smoke and close V1.5.
 
 **Closing criterion:** through the actual app, a normal conversational request
