@@ -11,6 +11,7 @@ second consumer can be added without moving any of it.
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import secrets
 from collections.abc import AsyncIterator
@@ -47,7 +48,7 @@ import chainlit as cl
 
 from app.agent.harness import GeneralHarness
 from app.agent.runtime import Agent, create_agent
-from app.agent.task_runtime import TaskRuntime, TaskView
+from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
 from app.config import AgentSettings
 from app.memory import MemoryStore
 from app.models import ContentPart, Message
@@ -67,7 +68,12 @@ async def local_auth(_headers: Any) -> cl.User:
 
 @cl.data_layer
 def history_layer() -> MemoryStoreDataLayer:
-    return MemoryStoreDataLayer(MemoryStore(AgentSettings().database))
+    settings = AgentSettings()
+    return MemoryStoreDataLayer(
+        MemoryStore(settings.database),
+        checkpoints=settings.checkpoints,
+        task_checkpoints=settings.task_checkpoints,
+    )
 
 
 def attachment_sources(incoming: cl.Message) -> list[AttachmentSource]:
@@ -224,12 +230,14 @@ async def drive_task(
     original: Message | None = None,
     task: str | None = None,
 ) -> None:
-    view = (
-        await harness.start_task(thread_id, original, task)
-        if task is not None
-        and original is not None
-        else await harness.task_view(thread_id)
-    )
+    if task is not None and original is not None:
+        planning = cl.Step(name="Planning", type="run")
+        await planning.send()
+        view = await harness.start_task(thread_id, original, task)
+        planning.output = view.plan.summary if view.plan is not None else "Planning stopped."
+        await planning.update()
+    else:
+        view = await harness.task_view(thread_id)
     if view.interrupt is not None:
         permissions = ", ".join(view.interrupt.get("permissions", []))
         response = await cl.AskActionMessage(
@@ -245,9 +253,60 @@ async def drive_task(
             timeout=CONFIRM_TIMEOUT,
         ).send()
         approved = bool((response or {}).get("payload", {}).get("approved"))
-        view = await harness.resume_task(thread_id, approved)
+        if approved:
+            progress_step = cl.Step(name="Task progress", type="run")
+            progress_lines = ["Workspace grant approved; execution started."]
+            progress_step.output = "\n".join(progress_lines)
+            await progress_step.send()
+            async for progress in harness.resume_task_with_progress(thread_id, True):
+                progress_lines.append(task_progress_text(progress))
+                progress_step.output = "\n".join(progress_lines)
+                await progress_step.update()
+            view = await harness.task_view(thread_id)
+        else:
+            view = await harness.resume_task(thread_id, False)
     result = harness.finish_task(thread_id, view)
-    await cl.Message(content=spoken(result), elements=attachments(result)).send()
+    elements = [*attachments(result), *task_artifacts(harness, view, thread_id)]
+    await cl.Message(content=spoken(result), elements=elements).send()
+
+
+def task_progress_text(progress: TaskProgress) -> str:
+    labels = {
+        "approval": "Approval",
+        "implementation": "Implementation",
+        "validation": "Validation",
+        "evaluation": "Evaluation",
+        "repair": "Repair",
+        "finalization": "Finalization",
+    }
+    return f"{labels[progress.stage]}: {progress.detail}"
+
+
+def task_artifacts(
+    harness: GeneralHarness, view: TaskView, thread_id: str
+) -> list[Any]:
+    """Expose only real files that the application runtime resolves in scope."""
+
+    if view.outcome is None:
+        return []
+    shown = []
+    for artifact in view.outcome.artifacts:
+        try:
+            path = harness.tasks.artifact_path(view, artifact)
+        except (OSError, PermissionError, ValueError):
+            continue
+        if path.is_file():
+            shown.append(
+                cl.File(
+                    thread_id=thread_id,
+                    name=path.name,
+                    path=str(path),
+                    display="inline",
+                    mime=mimetypes.guess_type(path.name)[0]
+                    or "application/octet-stream",
+                )
+            )
+    return shown
 
 
 async def report_fill(agent: Agent) -> None:
@@ -337,3 +396,14 @@ async def end() -> None:
     harness: GeneralHarness | None = cl.user_session.get("harness")
     if harness is not None:
         await harness.aclose()
+
+
+@cl.on_stop
+async def stop() -> None:
+    harness: GeneralHarness | None = cl.user_session.get("harness")
+    thread_id: str | None = cl.user_session.get("thread_id")
+    if harness is None or thread_id is None:
+        return
+    result = await harness.cancel_task(thread_id)
+    if result is not None:
+        await cl.Message(content=spoken(result), elements=attachments(result)).send()

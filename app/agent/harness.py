@@ -9,11 +9,12 @@ is required. No interface mode or keyword contract participates in the choice.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Literal
 
 from app.agent.runtime import Agent
-from app.agent.task_runtime import TaskRuntime, TaskView
+from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
 from app.models import BackendError, ContentPart, Message
 
 ROUTE_RESPONSE_FORMAT = {
@@ -137,6 +138,15 @@ class GeneralHarness:
 
     async def resume_task(self, thread_id: str, approved: bool) -> TaskView:
         return await self.tasks.resume(thread_id, approved)
+
+    def resume_task_with_progress(
+        self, thread_id: str, approved: bool
+    ) -> AsyncIterator[TaskProgress]:
+        return self.tasks.resume_with_progress(thread_id, approved)
+
+    async def cancel_task(self, thread_id: str) -> Message | None:
+        view = await self.tasks.cancel(thread_id)
+        return self.finish_task(thread_id, view) if view is not None else None
 
     def finish_task(self, thread_id: str, view: TaskView) -> Message:
         result = task_result_message(view)

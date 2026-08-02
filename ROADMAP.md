@@ -58,6 +58,10 @@ reconsidered; this roadmap wins any conflict.
   collects real filesystem/browser evidence, evaluates every criterion and
   feeds failures back into bounded repair. Evidence:
   `reports/2026-08-02_v15_step4_task_validation.md`.
+- Chainlit now renders the general lifecycle as native planning and progress
+  steps, returns browser evidence and downloadable artifacts, persists explicit
+  cancellation, and supports deletion of chats and their resumable state.
+  Evidence: `reports/2026-08-02_v15_step5_chainlit_product_surface.md`.
 
 ## Closed stages
 
@@ -92,21 +96,24 @@ Ordered plan:
    criteria and a validation strategy, then a model evaluator judges real
    grant-governed tool evidence against every criterion. Evidence:
    `reports/2026-08-02_v15_step4_task_validation.md`.
-5. Keep Chainlit thin while showing applicable plan, scope, approval, progress,
-   evidence, cancellation and artifacts.
-6. Run honest app-level product checks from empty sandboxes: Snake with visual
-   validation and a materially different task, with no special command,
-   scenario branch or scripted model response. Capture representative app
-   screenshots from both runs as product evidence and use a concise selection
-   in the README.
-7. Run the full regression plus browser/restart product smoke and close V1.5.
+5. **Closed:** keep Chainlit thin while showing applicable plan, scope,
+   approval, progress, evidence, cancellation and artifacts. Evidence:
+   `reports/2026-08-02_v15_step5_chainlit_product_surface.md`.
+6. Finalize V1.5 in one acceptance pass. The human runs honest app-level checks
+   from empty sandboxes — Snake and a materially different task, with no special
+   command, scenario branch or scripted model response — and owns visual
+   acceptance plus representative screenshot capture. The agent consumes that
+   evidence, runs the remaining non-visual restart/persistence smoke and full
+   regression, records the result, adds a concise screenshot selection to the
+   README and closes V1.5. Agent-driven browser automation is not repeated when
+   the human has supplied the required visual evidence.
 
 **Closing criterion:** through the actual app, a normal conversational request
 is answered directly and two materially different work requests complete from
 the same entry point. The model chooses governed tools, validates against
 task-derived criteria, repairs or stops honestly, and returns evidence and
-artifacts. No mode selector, separate user-facing route or benchmark-specific
-production logic is present.
+artifacts; the human visually confirms the rendered results. No mode selector,
+separate user-facing route or benchmark-specific production logic is present.
 
 ## Version 2 — Policy-governed tool platform (deferred)
 
@@ -134,8 +141,8 @@ is not authorized.
 
 ## Next step candidates
 
-1. Approve Version 1.5 step 5: keep Chainlit thin while showing applicable plan,
-   scope, approval, progress, evidence, cancellation and artifacts.
+1. Approve Version 1.5 step 6: run the single human-visual plus agent-technical
+   acceptance pass and close V1.5.
 
 ## Out of scope
 

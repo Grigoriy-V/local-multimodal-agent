@@ -199,6 +199,24 @@ class MemoryStore:
             for row in rows
         ]
 
+    def delete_thread(self, thread_id: str) -> bool:
+        """Delete one conversation while preserving separately approved facts."""
+
+        with self._db:
+            exists = self._db.execute(
+                "SELECT 1 FROM threads WHERE id = ?", (thread_id,)
+            ).fetchone()
+            if exists is None:
+                return False
+            # Facts are account-level memory. Removing their deleted-conversation
+            # provenance avoids a dangling reference without forgetting the fact.
+            self._db.execute(
+                "UPDATE facts SET thread_id = NULL WHERE thread_id = ?", (thread_id,)
+            )
+            self._db.execute("DELETE FROM messages WHERE thread_id = ?", (thread_id,))
+            self._db.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
+        return True
+
     # --- messages ------------------------------------------------------------
 
     def append(self, thread_id: str, messages: Iterable[Message]) -> int:

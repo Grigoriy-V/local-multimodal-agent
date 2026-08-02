@@ -50,6 +50,21 @@ def test_threads_do_not_see_each_other(store: MemoryStore) -> None:
     assert {thread.id for thread in store.threads()} == {"t1", "t2"}
 
 
+def test_deleting_a_thread_removes_messages_but_preserves_approved_facts(
+    store: MemoryStore,
+) -> None:
+    store.append("deleted", [user("remove this chat")])
+    store.append("kept", [user("keep this chat")])
+    store.remember("The user prefers concise answers", thread_id="deleted")
+
+    assert store.delete_thread("deleted") is True
+
+    assert store.messages("deleted") == []
+    assert {thread.id for thread in store.threads()} == {"kept"}
+    assert store.search("concise") == ["The user prefers concise answers"]
+    assert store.delete_thread("deleted") is False
+
+
 def test_a_thread_carries_enough_to_be_recognised(store: MemoryStore) -> None:
     store.append("t1", [user("how do I read a file"), user("and write one")])
 

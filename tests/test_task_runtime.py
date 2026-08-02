@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
+
+import pytest
 
 from app.agent.task_runtime import TaskRuntime
 from app.agent.task_graph import (
@@ -11,6 +14,18 @@ from app.agent.task_graph import (
     TestReport as TaskTestReport,
 )
 from tests.fakes import ScriptedBackend, calls, says
+
+
+class BlockingImplementationBackend(ScriptedBackend):
+    def __init__(self, task_plan: str) -> None:
+        super().__init__(says(task_plan))
+        self.implementation_started = asyncio.Event()
+
+    async def invoke(self, messages, tools=None, response_format=None):
+        if self.completions:
+            return await super().invoke(messages, tools, response_format)
+        self.implementation_started.set()
+        await asyncio.Future()
 
 
 def plan(summary: str) -> str:
@@ -146,4 +161,93 @@ async def test_default_runtime_validates_real_file_evidence(tmp_path: Path) -> N
     assert completed.report is not None
     assert completed.report.checks[0].detail == "read_file returned STEP-4"
     assert (workspace / completed.subdirectory / "result.txt").read_text() == "STEP-4"
+    await runtime.aclose()
+
+
+async def test_runtime_streams_committed_lifecycle_progress(tmp_path: Path) -> None:
+    backend = ScriptedBackend(
+        says(plan("Create result.txt.")),
+        calls("write_file", path="result.txt", content="done"),
+        says("Created result.txt."),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = TaskRuntime(
+        backend,
+        workspace,
+        tmp_path / "task-checkpoints.sqlite3",
+        acceptance_placeholder,
+    )
+
+    await runtime.start("progress-chat", "Create result.txt")
+    progress = [
+        update
+        async for update in runtime.resume_with_progress("progress-chat", True)
+    ]
+
+    assert [update.stage for update in progress] == [
+        "approval",
+        "implementation",
+        "validation",
+        "evaluation",
+        "finalization",
+    ]
+    assert "1/1" in progress[2].detail
+    assert (await runtime.view("progress-chat")).outcome.status == "completed"
+    await runtime.aclose()
+
+
+async def test_cancellation_revokes_grant_and_persists_stopped_outcome(
+    tmp_path: Path,
+) -> None:
+    backend = ScriptedBackend(says(plan("Create result.txt.")))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = TaskRuntime(
+        backend,
+        workspace,
+        tmp_path / "task-checkpoints.sqlite3",
+        acceptance_placeholder,
+    )
+
+    await runtime.start("cancel-chat", "Create result.txt")
+    cancelled = await runtime.cancel("cancel-chat")
+
+    assert cancelled is not None
+    assert cancelled.outcome is not None
+    assert cancelled.outcome.status == "stopped"
+    assert cancelled.outcome.summary == "cancelled by user"
+    assert cancelled.grant is not None
+    assert cancelled.grant.status == "revoked"
+    assert cancelled.interrupt is None
+    assert await runtime.cancel("cancel-chat") is None
+    await runtime.aclose()
+
+
+async def test_cancellation_after_chainlit_interrupts_active_implementation(
+    tmp_path: Path,
+) -> None:
+    backend = BlockingImplementationBackend(plan("Create result.txt."))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = TaskRuntime(
+        backend,
+        workspace,
+        tmp_path / "task-checkpoints.sqlite3",
+        acceptance_placeholder,
+    )
+    await runtime.start("active-chat", "Create result.txt")
+    active = asyncio.create_task(runtime.resume("active-chat", True))
+    await asyncio.wait_for(backend.implementation_started.wait(), timeout=1)
+
+    active.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await active
+    cancelled = await runtime.cancel("active-chat")
+
+    assert cancelled is not None
+    assert cancelled.outcome is not None
+    assert cancelled.outcome.status == "stopped"
+    assert cancelled.grant is not None
+    assert cancelled.grant.status == "revoked"
     await runtime.aclose()

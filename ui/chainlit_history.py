@@ -28,6 +28,7 @@ from chainlit.user import PersistedUser, User
 
 from app.memory import MemoryStore, Thread
 from app.models import ContentPart, Message
+from app.conversations import delete_conversation
 
 LOCAL_USER_ID = "local-user"
 LOCAL_USER_IDENTIFIER = "local"
@@ -98,8 +99,15 @@ def _step(thread_id: str, position: int, message: Message, created_at: str) -> S
 class MemoryStoreDataLayer(BaseDataLayer):
     """Read native Chainlit history from the project's existing SQLite store."""
 
-    def __init__(self, store: MemoryStore) -> None:
+    def __init__(
+        self,
+        store: MemoryStore,
+        checkpoints: str = "data/checkpoints.sqlite3",
+        task_checkpoints: str = "data/task-checkpoints.sqlite3",
+    ) -> None:
         self.store = store
+        self.checkpoints = checkpoints
+        self.task_checkpoints = task_checkpoints
 
     async def get_user(self, identifier: str) -> PersistedUser | None:
         if identifier != LOCAL_USER_IDENTIFIER:
@@ -147,7 +155,12 @@ class MemoryStoreDataLayer(BaseDataLayer):
         return LOCAL_USER_IDENTIFIER if any(t.id == thread_id for t in self.store.threads()) else ""
 
     async def delete_thread(self, thread_id: str) -> None:
-        raise NotImplementedError("conversation deletion is not enabled")
+        await delete_conversation(
+            self.store,
+            thread_id,
+            self.checkpoints,
+            self.task_checkpoints,
+        )
 
     async def list_threads(
         self, pagination: Pagination, filters: ThreadFilter
@@ -185,7 +198,11 @@ class MemoryStoreDataLayer(BaseDataLayer):
         metadata: dict[str, Any] | None = None,
         tags: list[str] | None = None,
     ) -> None:
-        self.store.ensure_thread(thread_id)
+        # Canonical threads are created when the application stores the first
+        # message. Treating Chainlit's metadata callback as content creates
+        # phantom empty chats and can resurrect a thread immediately after its
+        # native deletion callback completed.
+        return None
 
     async def build_debug_url(self) -> str:
         return ""

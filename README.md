@@ -149,6 +149,13 @@ required validation capabilities, and a separate evaluator judges real file or
 browser evidence before retrying or finalizing. Snake remains only a regression
 benchmark.
 
+For work requests, the native chat surface shows planning, approved scope and
+capabilities, live graph progress, validation evidence and downloadable output
+files when they exist. Chainlit's stop control records a durable cancelled
+outcome instead of leaving resumable work behind. Native chat deletion removes
+the conversation and its resumable checkpoints while preserving separately
+approved account-level memory.
+
 ## Checks
 
 ```powershell

@@ -7,17 +7,22 @@ a wrong media type there fails silently against a live model.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("chainlit", reason="the ui dependency group is optional")
 
 from app.models import ContentPart, Message
+from app.agent.task_graph import TaskOutcome
+from app.agent.task_runtime import TaskProgress, TaskView
 from app.attachments import AttachmentError
 from ui.chainlit_app import (
     canonical_thread_id,
     media_parts,
     spoken,
+    task_artifacts,
+    task_progress_text,
     to_message,
 )
 
@@ -121,3 +126,42 @@ def test_canonical_thread_id_does_not_use_ephemeral_session_id() -> None:
     session = type("Session", (), {"id": "socket", "thread_id": "conversation"})()
 
     assert canonical_thread_id(session) == "conversation"
+
+
+def test_task_progress_is_rendered_from_runtime_events() -> None:
+    progress = TaskProgress("validation", "Validation collected evidence for 2/2 criteria.")
+
+    assert task_progress_text(progress) == (
+        "Validation: Validation collected evidence for 2/2 criteria."
+    )
+
+
+def test_only_existing_in_scope_artifacts_become_chainlit_files(tmp_path: Path) -> None:
+    artifact = tmp_path / "result.html"
+    artifact.write_text("done", encoding="utf-8")
+    tasks = SimpleNamespace(
+        artifact_path=lambda _view, name: artifact if name == "result.html" else tmp_path / name
+    )
+    runtime = SimpleNamespace(tasks=tasks)
+    view = TaskView(
+        subdirectory=".",
+        grant=None,
+        plan=None,
+        implementation=None,
+        outcome=TaskOutcome(
+            "completed",
+            "done",
+            1,
+            1,
+            0.1,
+            artifacts=("result.html", "missing.txt"),
+        ),
+        report=None,
+    )
+
+    shown = task_artifacts(runtime, view, "chat")
+
+    assert len(shown) == 1
+    assert shown[0].name == "result.html"
+    assert shown[0].path == str(artifact)
+    assert shown[0].mime == "text/html"

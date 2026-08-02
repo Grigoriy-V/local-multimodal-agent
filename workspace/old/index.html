@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Padlock</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #ffffff;
+        }
+
+        .padlock-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* The Shackle (U-shape) */
+        .shackle {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 1920px;
+            height: 2560px;
+            border: 384px solid #7a7a7a;
+            border-bottom: none;
+            border-radius: 960px 960px 0 0;
+            box-sizing: border-box;
+        }
+
+        /* The Body */
+        .body {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 3840px;
+            height: 2880px;
+            background-color: #d4af37; /* Gold */
+            border: 256px solid #8b7500;
+            border-radius: 256px;
+            box-shadow: 256px 256px 0px #8b7500;
+        }
+
+        /* Keyhole */
+        .keyhole {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 512px;
+            height: 1024px;
+            background-color: #333;
+            border-radius: 256px;
+        }
+
+        .keyhole::before {
+            content: '';
+            position: absolute;
+            top: -384px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 512px;
+            height: 512px;
+            background-color: #333;
+            border-radius: 256px;
+        }
+
+        /* Pixel Art details - adding some "texture" */
+        .body::after {
+            content: '';
+            position: absolute;
+            top: 256px;
+            left: 256px;
+            right: 256px;
+            bottom: 256px;
+            border: 64px solid rgba(255, 255, 255, 0.2);
+            border-radius: 128px;
+        }
+    </style>
+</head>
+<body>
+    <div class="padlock-container">
+        <div class="shackle"></div>
+        <div class="body">
+            <div class="keyhole"></div>
+        </div>
+    </div>
+</body>
+</html>

@@ -20,7 +20,7 @@ from app.agent.task_graph import (
 )
 from app.agent.task_validator import ModelTaskValidator
 from app.agent.task_worker import ModelTaskWorker, build_model_task_graph
-from app.agent.task_runtime import TaskRuntime, TaskView
+from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
 from app.agent.harness import GeneralHarness, HarnessDecision, parse_decision
 from app.agent.web_verifier import WebVerifier, node_javascript_syntax
 
@@ -41,6 +41,7 @@ __all__ = [
     "TaskRuntime",
     "TaskView",
     "TaskPlan",
+    "TaskProgress",
     "TaskState",
     "TaskStageError",
     "TestReport",
