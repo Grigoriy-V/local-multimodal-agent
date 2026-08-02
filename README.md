@@ -22,13 +22,18 @@ The application never binds to model internals. Everything goes through
 ## Architecture
 
 ```text
-Chainlit -> LangGraph agent -> ModelBackend -> vLLM -> Gemma 4 12B IT
+Chainlit (thin adapter)
+  -> GeneralHarness
+     -> answer: load -> model -> tools -> model -> persist
+     -> act: plan -> approve -> implement -> validate/evaluate -> repair/finalize
+  -> scoped capability registry (filesystem + browser)
+  -> ModelBackend -> vLLM -> Gemma 4 12B IT
 ```
 
-The graph is `load -> model -> tools -> model -> persist`: context is assembled
-from four layers, the model answers or asks for a tool, and only the turn's own
-messages are written back. A tool marked destructive stops the turn and asks
-first; the question is checkpointed, so it can be answered after a restart.
+Context is assembled from four layers, while SQLite stores canonical messages,
+summaries, approved memory and resumable graph state. The model selects governed
+capabilities from the task; workspace grants and destructive-action approval
+bound what those capabilities may do.
 
 ## Layout
 
@@ -45,8 +50,9 @@ reports/   evidence and the two JSONL journals
 
 ## Status
 
-**Version 1 is complete.** Closing evidence is in
-`reports/2026-08-01_v1_product_smoke.md`; current direction is in `ROADMAP.md`.
+**Version 1.5 is complete.** Closing engineering and product evidence is in
+[`reports/2026-08-02_v15_product_acceptance.md`](reports/2026-08-02_v15_product_acceptance.md);
+current direction is in [`ROADMAP.md`](ROADMAP.md).
 The agent answers text, images and audio; calls
 `list_files`, `read_file`, `write_file`, `edit_file`, `remember_fact` and
 `search_memory`;
@@ -155,6 +161,26 @@ files when they exist. Chainlit's stop control records a durable cancelled
 outcome instead of leaving resumable work behind. Native chat deletion removes
 the conversation and its resumable checkpoints while preserving separately
 approved account-level memory.
+
+## Version 1.5 product evidence
+
+One ordinary request enters the same harness used for direct conversation. The
+model creates the plan and criteria, chooses governed tools, iterates when
+needed, evaluates real evidence and returns the resulting artifact.
+
+<p>
+  <img src="reports/test_v1.5/1.png" width="240">
+  <img src="reports/test_v1.5/2.png" width="240">
+  <img src="reports/test_v1.5/3.png" width="240">
+</p>
+
+The generated game was also played manually: movement, scoring, collision,
+`Game Over` and restart were visually confirmed outside the agent's evaluator.
+
+<p>
+  <img src="reports/test_v1.5/4.png" width="160">
+  <img src="reports/test_v1.5/5.png" width="160">
+</p>
 
 ## Checks
 

@@ -2,7 +2,7 @@
 
 **Updated:** 2026-08-02
 
-**Project status:** Version 1 closed; Version 1.5 general harness in progress
+**Project status:** Version 1.5 general autonomous harness closed
 
 **Current approved step:** none
 
@@ -40,36 +40,27 @@ reconsidered; this roadmap wins any conflict.
 
 ## Current state
 
-- Version 1 is the closed persistent local multimodal chat baseline. Evidence:
+- Version 1 remains the persistent local multimodal chat baseline. Evidence:
   `reports/2026-08-01_v1_product_smoke.md`.
-- The task-loop foundations exist: structured plan, bounded iterations and tool
-  calls, checkpointed scoped grants, sandboxed `edit_file`, retry feedback and
-  browser-probe experiments.
-- The first Version 1.5 vertical slice incorrectly promoted Snake-specific
-  verification and manual `task`/`preview` workflows into the product. Those
-  routes are now disconnected. See the decision "Benchmark workflows do not
-  define the product agent" in `DECISIONS.md` for historical rationale.
-- Every ordinary UI request now enters one general harness. The model decides
-  whether the normal agent should answer or the bounded task lifecycle should
-  act; there is no mode selector or separate user-facing route. Evidence:
-  `reports/2026-08-02_v15_step3_unified_entry.md`.
-- Task plans now bind every acceptance criterion to a model-chosen evidence
-  strategy. The approval prompt includes the required capabilities; validation
-  collects real filesystem/browser evidence, evaluates every criterion and
-  feeds failures back into bounded repair. Evidence:
-  `reports/2026-08-02_v15_step4_task_validation.md`.
-- Chainlit now renders the general lifecycle as native planning and progress
-  steps, returns browser evidence and downloadable artifacts, persists explicit
-  cancellation, and supports deletion of chats and their resumable state.
-  Evidence: `reports/2026-08-02_v15_step5_chainlit_product_surface.md`.
+- Version 1.5 is closed. One natural-language entry point now routes direct
+  answers or autonomous work through a general harness. Work requests use
+  model-created plans and validation strategies, scoped capability grants,
+  bounded implementation/evaluation/repair, browser and filesystem evidence,
+  durable cancellation and downloadable artifacts. Chainlit remains a thin
+  adapter over the UI-agnostic application runtime.
+- Final engineering and product evidence, including the known 16,384-token
+  boundary, is in `reports/2026-08-02_v15_product_acceptance.md`; representative
+  screenshots are in `reports/test_v1.5/`.
 
 ## Closed stages
 
 - Stage 1 — multimodal smoke: `reports/2026-08-01_stage1_smoke_script.md`.
 - Stage 2 — minimal LangGraph agent: `reports/2026-08-01_stage2_agent.md`.
 - Stage 3 / Version 1 — working product: `reports/2026-08-01_v1_product_smoke.md`.
+- Version 1.5 — general autonomous harness:
+  `reports/2026-08-02_v15_product_acceptance.md`.
 
-## Version 1.5 — General autonomous agent harness
+## Version 1.5 — General autonomous agent harness (closed)
 
 **Outcome:** every ordinary request enters one general harness. The harness
 understands the request and either answers directly or, when work is required,
@@ -99,14 +90,10 @@ Ordered plan:
 5. **Closed:** keep Chainlit thin while showing applicable plan, scope,
    approval, progress, evidence, cancellation and artifacts. Evidence:
    `reports/2026-08-02_v15_step5_chainlit_product_surface.md`.
-6. Finalize V1.5 in one acceptance pass. The human runs honest app-level checks
-   from empty sandboxes — Snake and a materially different task, with no special
-   command, scenario branch or scripted model response — and owns visual
-   acceptance plus representative screenshot capture. The agent consumes that
-   evidence, runs the remaining non-visual restart/persistence smoke and full
-   regression, records the result, adds a concise screenshot selection to the
-   README and closes V1.5. Agent-driven browser automation is not repeated when
-   the human has supplied the required visual evidence.
+6. **Closed:** final human-visual and agent-technical acceptance. The actual app
+   handled direct conversation and general work requests without a special
+   command or benchmark branch; the human verified the generated Snake through
+   live play. Evidence: `reports/2026-08-02_v15_product_acceptance.md`.
 
 **Closing criterion:** through the actual app, a normal conversational request
 is answered directly and two materially different work requests complete from
@@ -141,8 +128,8 @@ is not authorized.
 
 ## Next step candidates
 
-1. Approve Version 1.5 step 6: run the single human-visual plus agent-technical
-   acceptance pass and close V1.5.
+1. Discuss and approve the next stage before implementation. Version 2 remains
+   deferred and is not authorized by this roadmap.
 
 ## Out of scope
 
