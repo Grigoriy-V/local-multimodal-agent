@@ -22,6 +22,7 @@ from app.agent.task_graph import (
     TaskPlan,
     TaskStageError,
     TestReport as Report,
+    ValidationStep,
     build_task_graph,
 )
 
@@ -116,6 +117,69 @@ async def test_the_named_route_finalizes_a_passing_task(tmp_path: Path) -> None:
     assert result["grant"].status == "revoked"
     assert result["grant"].revoked_reason == "task completed"
     assert events == ["implement:1", "test:1"]
+
+
+async def test_plan_validation_capability_is_approved_and_preserved(
+    tmp_path: Path,
+) -> None:
+    async def browser_plan(_task: str) -> TaskPlan:
+        criterion = "rendered result is correct"
+        return TaskPlan(
+            "Change and inspect it.",
+            ("implement", "inspect"),
+            (criterion,),
+            (
+                ValidationStep(
+                    criterion,
+                    "Render the artifact and inspect the screenshot.",
+                    ("browser.inspect",),
+                ),
+            ),
+        )
+
+    async def implement(_context: TaskContext) -> ImplementationResult:
+        return ImplementationResult("changed it")
+
+    async def test(context: TaskContext, _result: ImplementationResult) -> Report:
+        assert context.grant.allows("browser.inspect")
+        return Report((CheckResult("rendered result is correct", True, "seen"),))
+
+    graph = build_task_graph(
+        browser_plan,
+        implement,
+        test,
+        tmp_path,
+        checkpointer=memory_saver(),
+    )
+    run_config = config("browser-grant")
+    await graph.ainvoke(
+        {"task": "Change the rendered result", "subdirectory": "run"},
+        config=run_config,
+    )
+    snapshot = await graph.aget_state(run_config)
+    [pending] = snapshot.tasks[0].interrupts
+
+    assert pending.value["permissions"] == [
+        "filesystem.read",
+        "filesystem.write",
+        "browser.inspect",
+    ]
+
+    result = await graph.ainvoke(Command(resume=True), config=run_config)
+    assert result["outcome"].status == "completed"
+    assert result["grant"].permissions[-1] == "browser.inspect"
+
+
+async def test_validation_tool_calls_count_toward_the_task_budget(tmp_path: Path) -> None:
+    async def implement(_context: TaskContext) -> ImplementationResult:
+        return ImplementationResult("changed it", tool_calls=2)
+
+    async def test(_context: TaskContext, _result: ImplementationResult) -> Report:
+        return Report((CheckResult("artifact", True, "read"),), tool_calls=3)
+
+    result = await approve(graph_over(tmp_path, implement, test))
+
+    assert result["outcome"].tool_calls == 5
 
 
 async def test_a_failed_report_returns_to_implementation_with_feedback(

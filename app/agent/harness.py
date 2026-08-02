@@ -82,6 +82,7 @@ def task_result_message(view: TaskView) -> Message:
             "",
             f"Status: {view.outcome.status}; iterations: {view.outcome.iterations}; "
             f"tool calls: {view.outcome.tool_calls}.",
+            f"Outcome: {view.outcome.summary.rstrip('.')}.",
         ]
         if view.report is not None:
             lines.extend(["", "Available checks:"])
@@ -92,15 +93,16 @@ def task_result_message(view: TaskView) -> Message:
         if view.outcome.artifacts:
             lines.extend(["", "Artifacts:"])
             lines.extend(f"- {artifact}" for artifact in view.outcome.artifacts)
-        lines.extend(
-            [
-                "",
-                "Current validation checks only that changed artifacts exist and are "
-                "non-empty; task-specific semantic validation is planned for the next step.",
-            ]
-        )
         body = "\n".join(lines)
-    return Message(role="assistant", content=[ContentPart(kind="text", text=body)])
+    evidence = (
+        [part for part in view.report.evidence if isinstance(part, ContentPart)]
+        if view.report is not None
+        else []
+    )
+    return Message(
+        role="assistant",
+        content=[ContentPart(kind="text", text=body), *evidence],
+    )
 
 
 class GeneralHarness:

@@ -53,8 +53,11 @@ reconsidered; this roadmap wins any conflict.
   whether the normal agent should answer or the bounded task lifecycle should
   act; there is no mode selector or separate user-facing route. Evidence:
   `reports/2026-08-02_v15_step3_unified_entry.md`.
-- The task lifecycle still validates only artifact existence by default.
-  Task-specific semantic validation remains open in step 4.
+- Task plans now bind every acceptance criterion to a model-chosen evidence
+  strategy. The approval prompt includes the required capabilities; validation
+  collects real filesystem/browser evidence, evaluates every criterion and
+  feeds failures back into bounded repair. Evidence:
+  `reports/2026-08-02_v15_step4_task_validation.md`.
 
 ## Closed stages
 
@@ -85,8 +88,10 @@ Ordered plan:
    is required. Evidence: `reports/2026-08-02_v15_step3_unified_entry.md`. The
    previous selector implementation and `reports/2026-08-02_v15_step3.md` remain
    rejected evidence, not acceptance.
-4. On the `act` branch, make planning produce task-specific acceptance criteria
-   and a validation strategy, then evaluate real tool evidence against them.
+4. **Closed:** on the `act` branch, planning produces task-specific acceptance
+   criteria and a validation strategy, then a model evaluator judges real
+   grant-governed tool evidence against every criterion. Evidence:
+   `reports/2026-08-02_v15_step4_task_validation.md`.
 5. Keep Chainlit thin while showing applicable plan, scope, approval, progress,
    evidence, cancellation and artifacts.
 6. Run honest app-level product checks from empty sandboxes: Snake with visual
@@ -127,8 +132,8 @@ is not authorized.
 
 ## Next step candidates
 
-1. Approve Version 1.5 step 4: derive task-specific acceptance criteria and a
-   validation strategy, then evaluate real tool evidence against them.
+1. Approve Version 1.5 step 5: keep Chainlit thin while showing applicable plan,
+   scope, approval, progress, evidence, cancellation and artifacts.
 
 ## Out of scope
 

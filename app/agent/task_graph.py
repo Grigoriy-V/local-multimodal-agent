@@ -2,8 +2,8 @@
 
 The graph stores decisions that can be inspected and resumed: a concise plan,
 acceptance criteria, implementation summaries and test reports. It never asks
-for or stores private chain-of-thought. Concrete model/tool adapters arrive in
-later Version 1.5 steps; this module owns only lifecycle and budgets.
+for or stores private chain-of-thought. Concrete model/tool adapters remain
+outside this module; it owns only lifecycle and budgets.
 """
 
 from __future__ import annotations
@@ -37,18 +37,56 @@ class TaskBudget:
 
 
 @dataclass(frozen=True)
+class ValidationStep:
+    criterion: str
+    evidence: str
+    capabilities: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "capabilities", tuple(dict.fromkeys(self.capabilities))
+        )
+        if not self.criterion.strip() or not self.evidence.strip():
+            raise ValueError("a validation step requires a criterion and evidence")
+        if not self.capabilities or any(
+            not capability.strip() for capability in self.capabilities
+        ):
+            raise ValueError("a validation step requires non-empty capabilities")
+
+
+@dataclass(frozen=True)
 class TaskPlan:
     summary: str
     steps: tuple[str, ...]
     acceptance_criteria: tuple[str, ...]
+    validation_strategy: tuple[ValidationStep, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "steps", tuple(self.steps))
         object.__setattr__(self, "acceptance_criteria", tuple(self.acceptance_criteria))
+        object.__setattr__(self, "validation_strategy", tuple(self.validation_strategy))
         if not self.summary.strip() or not self.steps or not self.acceptance_criteria:
             raise ValueError("a plan requires a summary, steps and acceptance criteria")
         if any(not item.strip() for item in (*self.steps, *self.acceptance_criteria)):
             raise ValueError("plan steps and acceptance criteria cannot be empty")
+        if self.validation_strategy:
+            criteria = tuple(step.criterion for step in self.validation_strategy)
+            if len(set(criteria)) != len(criteria):
+                raise ValueError("validation criteria cannot be duplicated")
+            if set(criteria) != set(self.acceptance_criteria):
+                raise ValueError(
+                    "validation strategy must cover every acceptance criterion exactly"
+                )
+
+    @property
+    def validation_capabilities(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                capability
+                for step in self.validation_strategy
+                for capability in step.capabilities
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -113,12 +151,17 @@ class CheckResult:
 class TestReport:
     checks: tuple[CheckResult, ...]
     artifacts: tuple[str, ...] = ()
+    evidence: tuple[object, ...] = ()
+    tool_calls: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "checks", tuple(self.checks))
         object.__setattr__(self, "artifacts", tuple(self.artifacts))
+        object.__setattr__(self, "evidence", tuple(self.evidence))
         if not self.checks:
             raise ValueError("a test report requires at least one check")
+        if self.tool_calls < 0:
+            raise ValueError("test report tool calls cannot be negative")
 
     @property
     def passed(self) -> bool:
@@ -260,6 +303,7 @@ def build_task_graph(
                 "grant": TaskGrant(
                     state.grant.subdirectory,
                     status="revoked",
+                    permissions=state.grant.permissions,
                     revoked_reason="no checkpoint available for explicit approval",
                 ),
                 "stop_reason": "task grant cannot be approved without a checkpoint",
@@ -280,13 +324,18 @@ def build_task_graph(
                 "grant": TaskGrant(
                     state.grant.subdirectory,
                     status="revoked",
+                    permissions=state.grant.permissions,
                     revoked_reason="user declined task grant",
                 ),
                 "stop_reason": "user declined task grant",
                 "started_at": clock(),
             }
         return {
-            "grant": TaskGrant(state.grant.subdirectory, status="active"),
+            "grant": TaskGrant(
+                state.grant.subdirectory,
+                status="active",
+                permissions=state.grant.permissions,
+            ),
             "started_at": clock(),
         }
 
@@ -297,7 +346,15 @@ def build_task_graph(
             return {"stop_reason": "time budget exhausted during planning"}
         except TaskStageError as error:
             return {"stop_reason": str(error)}
-        return {"plan": task_plan}
+        if state.grant is None:
+            raise RuntimeError("task reached planning without a pending grant")
+        permissions = tuple(
+            dict.fromkeys((*state.grant.permissions, *task_plan.validation_capabilities))
+        )
+        return {
+            "plan": task_plan,
+            "grant": TaskGrant(state.grant.subdirectory, permissions=permissions),
+        }
 
     async def implement(state: TaskState) -> dict[str, object]:
         iteration = state.iteration + 1
@@ -332,8 +389,11 @@ def build_task_graph(
             return {"stop_reason": "time budget exhausted during testing"}
         except TaskStageError as error:
             return {"stop_reason": str(error)}
+        if report.tool_calls > budget.max_tool_calls - state.tool_calls:
+            return {"stop_reason": "tool-call budget exceeded during validation"}
         return {
             "test_report": report,
+            "tool_calls": state.tool_calls + report.tool_calls,
             "artifacts": tuple(dict.fromkeys((*state.artifacts, *report.artifacts))),
         }
 
@@ -360,7 +420,7 @@ def build_task_graph(
             and state.test_report.passed
         )
         if completed:
-            summary = "all available checks passed"
+            summary = "all acceptance criteria passed against collected evidence"
         else:
             summary = state.stop_reason or "iteration budget exhausted with failing checks"
         patch: dict[str, object] = {
@@ -378,6 +438,7 @@ def build_task_graph(
             patch["grant"] = TaskGrant(
                 state.grant.subdirectory,
                 status="revoked",
+                permissions=state.grant.permissions,
                 revoked_reason="task completed" if completed else summary,
             )
         return patch

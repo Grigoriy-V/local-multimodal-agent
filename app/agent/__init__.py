@@ -15,8 +15,10 @@ from app.agent.task_graph import (
     TaskState,
     TaskStageError,
     TestReport,
+    ValidationStep,
     build_task_graph,
 )
+from app.agent.task_validator import ModelTaskValidator
 from app.agent.task_worker import ModelTaskWorker, build_model_task_graph
 from app.agent.task_runtime import TaskRuntime, TaskView
 from app.agent.harness import GeneralHarness, HarnessDecision, parse_decision
@@ -31,6 +33,7 @@ __all__ = [
     "GeneralHarness",
     "HarnessDecision",
     "ModelTaskWorker",
+    "ModelTaskValidator",
     "TaskBudget",
     "TaskContext",
     "TaskGrant",
@@ -41,6 +44,7 @@ __all__ = [
     "TaskState",
     "TaskStageError",
     "TestReport",
+    "ValidationStep",
     "WebVerifier",
     "build_task_graph",
     "build_model_task_graph",

@@ -36,6 +36,7 @@ CHECKPOINT_TYPES = [
     ("app.models.base", "Usage"),
     ("app.context.window", "Context"),
     ("app.agent.task_graph", "TaskPlan"),
+    ("app.agent.task_graph", "ValidationStep"),
     ("app.agent.task_graph", "TaskGrant"),
     ("app.agent.task_graph", "ImplementationResult"),
     ("app.agent.task_graph", "CheckResult"),

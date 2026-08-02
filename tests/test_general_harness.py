@@ -8,9 +8,19 @@ from typing import Any
 
 import pytest
 
-from app.agent.harness import GeneralHarness, HarnessDecision, parse_decision
+from app.agent.harness import (
+    GeneralHarness,
+    HarnessDecision,
+    parse_decision,
+    task_result_message,
+)
 from app.agent.runtime import Agent
-from app.agent.task_graph import ImplementationResult, TaskOutcome
+from app.agent.task_graph import (
+    CheckResult,
+    ImplementationResult,
+    TaskOutcome,
+    TestReport as TaskTestReport,
+)
 from app.agent.task_runtime import TaskView
 from app.memory import MemoryStore
 from app.models import BackendError, ContentPart, Message
@@ -197,6 +207,34 @@ async def test_task_input_and_result_join_the_canonical_conversation() -> None:
     assert result.role == "assistant"
     assert "result.txt" in result.content[0].text
     assert agent.recorded[-1] == ("thread", [result])
+
+
+def test_task_result_includes_validation_verdict_and_visual_evidence() -> None:
+    screenshot = ContentPart(kind="image", data=b"png", media_type="image/png")
+    view = TaskView(
+        subdirectory=".",
+        grant=None,
+        plan=None,
+        implementation=ImplementationResult("Changed page.html"),
+        outcome=TaskOutcome(
+            "completed",
+            "all acceptance criteria passed against collected evidence",
+            1,
+            3,
+            0.1,
+        ),
+        report=TaskTestReport(
+            (CheckResult("page is blue", True, "screenshot shows blue"),),
+            evidence=(screenshot,),
+            tool_calls=1,
+        ),
+    )
+
+    result = task_result_message(view)
+
+    assert "page is blue" in (result.content[0].text or "")
+    assert "all acceptance criteria passed" in (result.content[0].text or "")
+    assert result.content[1] == screenshot
 
 
 def test_chainlit_source_has_no_mode_selector_or_settings_route() -> None:

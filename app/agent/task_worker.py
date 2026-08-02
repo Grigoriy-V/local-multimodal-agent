@@ -2,8 +2,8 @@
 
 The worker has no provider imports and no UI assumptions. It plans through the
 `ModelBackend`, then implements against filesystem tools rooted at the active
-task grant. Test/evaluation remain graph concerns and receive the actual
-workspace state through a separate verifier in the next Version 1.5 step.
+task grant. Test/evaluation remain graph concerns and receive real evidence
+through the separate task validator.
 """
 
 from __future__ import annotations
@@ -23,10 +23,18 @@ from app.agent.task_graph import (
     TaskPlan,
     TaskStageError,
     Tester,
+    ValidationStep,
     build_task_graph,
 )
 from app.models import BackendError, ContentPart, Message, ModelBackend, ToolCall
-from app.tools import CapabilityRegistry, FILESYSTEM_READ, FILESYSTEM_WRITE
+from app.tools import (
+    BROWSER_INSPECT,
+    CapabilityRegistry,
+    FILESYSTEM_READ,
+    FILESYSTEM_WRITE,
+)
+
+VALIDATION_CAPABILITIES = (FILESYSTEM_READ, BROWSER_INSPECT)
 
 PLAN_RESPONSE_FORMAT = {
     "type": "json_schema",
@@ -42,8 +50,32 @@ PLAN_RESPONSE_FORMAT = {
                     "type": "array",
                     "items": {"type": "string"},
                 },
+                "validation_strategy": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "criterion": {"type": "string"},
+                            "evidence": {"type": "string"},
+                            "capabilities": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": list(VALIDATION_CAPABILITIES),
+                                },
+                            },
+                        },
+                        "required": ["criterion", "evidence", "capabilities"],
+                        "additionalProperties": False,
+                    },
+                },
             },
-            "required": ["summary", "steps", "acceptance_criteria"],
+            "required": [
+                "summary",
+                "steps",
+                "acceptance_criteria",
+                "validation_strategy",
+            ],
             "additionalProperties": False,
         },
     },
@@ -52,7 +84,13 @@ PLAN_RESPONSE_FORMAT = {
 PLANNER_SYSTEM_PROMPT = (
     "Create a concise implementation plan for the task. Return only the requested "
     "structured object. Store observable steps and acceptance criteria, never private "
-    "reasoning or chain-of-thought."
+    "reasoning or chain-of-thought. Define exactly one validation_strategy item for "
+    "each acceptance criterion, copying the criterion text exactly. The model chooses "
+    "the minimum evidence capabilities required by the criterion: filesystem.read can "
+    "list and read sandbox files; browser.inspect can render a self-contained local HTML "
+    "file and return page facts, console errors and a screenshot. Use browser.inspect only "
+    "when rendered appearance or browser behavior is material. Evidence instructions must "
+    "describe what to observe, not claim that it already passed."
 )
 
 IMPLEMENTER_SYSTEM_PROMPT = (
@@ -77,10 +115,17 @@ def parse_plan(text: str) -> TaskPlan:
     try:
         payload: Any = json.loads(text)
     except json.JSONDecodeError as error:
-        raise TaskStageError(f"planning failed: model returned invalid JSON ({error.msg})") from error
+        raise TaskStageError(
+            f"planning failed: model returned invalid JSON ({error.msg})"
+        ) from error
     if not isinstance(payload, dict):
         raise TaskStageError("planning failed: model plan is not an object")
-    expected = {"summary", "steps", "acceptance_criteria"}
+    expected = {
+        "summary",
+        "steps",
+        "acceptance_criteria",
+        "validation_strategy",
+    }
     if set(payload) != expected:
         raise TaskStageError("planning failed: model plan has missing or unexpected fields")
     if not isinstance(payload["summary"], str):
@@ -90,11 +135,40 @@ def parse_plan(text: str) -> TaskPlan:
             isinstance(item, str) for item in payload[field]
         ):
             raise TaskStageError(f"planning failed: {field} must be a list of text")
+    if not isinstance(payload["validation_strategy"], list):
+        raise TaskStageError("planning failed: validation_strategy must be a list")
+    strategy: list[ValidationStep] = []
+    for item in payload["validation_strategy"]:
+        if not isinstance(item, dict) or set(item) != {
+            "criterion",
+            "evidence",
+            "capabilities",
+        }:
+            raise TaskStageError("planning failed: validation strategy item is invalid")
+        if not isinstance(item["criterion"], str) or not isinstance(item["evidence"], str):
+            raise TaskStageError("planning failed: validation strategy text is invalid")
+        capabilities = item["capabilities"]
+        if not isinstance(capabilities, list) or not all(
+            isinstance(capability, str) and capability in VALIDATION_CAPABILITIES
+            for capability in capabilities
+        ):
+            raise TaskStageError("planning failed: validation capabilities are invalid")
+        try:
+            strategy.append(
+                ValidationStep(
+                    criterion=item["criterion"],
+                    evidence=item["evidence"],
+                    capabilities=tuple(capabilities),
+                )
+            )
+        except ValueError as error:
+            raise TaskStageError(f"planning failed: {error}") from error
     try:
         return TaskPlan(
             summary=payload["summary"],
             steps=tuple(payload["steps"]),
             acceptance_criteria=tuple(payload["acceptance_criteria"]),
+            validation_strategy=tuple(strategy),
         )
     except ValueError as error:
         raise TaskStageError(f"planning failed: {error}") from error
@@ -103,6 +177,11 @@ def parse_plan(text: str) -> TaskPlan:
 def implementation_prompt(context: TaskContext, listing: str) -> str:
     steps = "\n".join(f"- {step}" for step in context.plan.steps)
     criteria = "\n".join(f"- {item}" for item in context.plan.acceptance_criteria)
+    validation = "\n".join(
+        f"- {step.criterion}: {step.evidence} "
+        f"(capabilities: {', '.join(step.capabilities)})"
+        for step in context.plan.validation_strategy
+    )
     feedback = context.feedback or "none; this is the first attempt"
     return (
         f"Task: {context.task}\n"
@@ -112,6 +191,7 @@ def implementation_prompt(context: TaskContext, listing: str) -> str:
         f"Attempt: {context.iteration}\n"
         f"Plan:\n{steps}\n"
         f"Acceptance criteria:\n{criteria}\n"
+        f"Validation strategy:\n{validation}\n"
         f"Previous test feedback: {feedback}\n"
         f"Current directory listing:\n{listing}\n"
         f"Tool calls remaining after this inspection: {context.remaining_tool_calls - 1}"

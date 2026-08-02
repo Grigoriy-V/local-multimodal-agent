@@ -18,21 +18,18 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from app.agent.runtime import CHECKPOINT_TYPES
+from app.agent.task_validator import ModelTaskValidator
 from app.agent.task_graph import (
-    CheckResult,
     ImplementationResult,
-    TaskContext,
     TaskBudget,
     TaskGrant,
     TaskOutcome,
     TaskPlan,
-    TaskStageError,
     Tester,
     TestReport,
 )
 from app.agent.task_worker import build_model_task_graph
 from app.models import ModelBackend
-from app.tools.filesystem import ToolError, resolve_in_root
 
 
 @dataclass(frozen=True)
@@ -44,42 +41,6 @@ class TaskView:
     outcome: TaskOutcome | None
     report: TestReport | None
     interrupt: dict[str, Any] | None = None
-
-
-def artifact_tester(workspace: Path) -> Tester:
-    """Build the limited, task-agnostic check used before roadmap step 4.
-
-    It proves only that implementation artifacts exist and are non-empty. The
-    report names that limitation instead of claiming semantic acceptance.
-    """
-
-    workspace = Path(workspace).resolve()
-
-    async def check(
-        context: TaskContext, implementation: ImplementationResult
-    ) -> TestReport:
-        if not implementation.artifacts:
-            raise TaskStageError(
-                "validation unavailable: no changed artifact was reported"
-            )
-        root = context.grant.root(workspace)
-        checks: list[CheckResult] = []
-        for artifact in implementation.artifacts:
-            try:
-                target = resolve_in_root(root, artifact)
-            except ToolError as error:
-                checks.append(CheckResult(artifact, False, str(error)))
-                continue
-            passed = target.is_file() and target.stat().st_size > 0
-            detail = (
-                f"exists and is non-empty ({target.stat().st_size} bytes)"
-                if passed
-                else "missing or empty"
-            )
-            checks.append(CheckResult(artifact, passed, detail))
-        return TestReport(tuple(checks), artifacts=implementation.artifacts)
-
-    return check
 
 
 class TaskRuntime:
@@ -96,7 +57,7 @@ class TaskRuntime:
         self.backend = backend
         self.workspace = Path(workspace).resolve()
         self.checkpoints = Path(checkpoints)
-        self.tester = tester or artifact_tester(self.workspace)
+        self.tester = tester or ModelTaskValidator(backend, self.workspace)
         self.budget = budget or TaskBudget(max_seconds=300.0)
         if not self.workspace.is_dir():
             raise ValueError(f"task workspace {self.workspace} is not a directory")

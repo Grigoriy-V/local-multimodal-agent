@@ -206,9 +206,15 @@ def task_plan_text(view: TaskView) -> str:
         return "Task planning did not produce a plan."
     steps = "\n".join(f"{index}. {step}" for index, step in enumerate(view.plan.steps, 1))
     criteria = "\n".join(f"- {item}" for item in view.plan.acceptance_criteria)
+    validation = "\n".join(
+        f"- **{step.criterion}** — {step.evidence} "
+        f"(`{', '.join(step.capabilities)}`)"
+        for step in view.plan.validation_strategy
+    )
     return (
         f"**Plan**\n\n{view.plan.summary}\n\n{steps}\n\n"
-        f"**Acceptance criteria**\n\n{criteria}"
+        f"**Acceptance criteria**\n\n{criteria}\n\n"
+        f"**Validation strategy**\n\n{validation}"
     )
 
 

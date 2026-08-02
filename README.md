@@ -143,8 +143,11 @@ HTML file in installed Chrome/Edge, blocks external network and file URLs, and
 returns visible text, console errors and a screenshot to both model and UI.
 Every ordinary message now enters the same general harness, which asks the model
 whether to answer through the normal agent or enter the bounded task lifecycle;
-there is no user-facing mode selector. Task-specific semantic validation remains
-in development. Snake remains only a regression benchmark.
+there is no user-facing mode selector. On the task path, the model derives
+acceptance criteria and an evidence strategy, the approval prompt includes the
+required validation capabilities, and a separate evaluator judges real file or
+browser evidence before retrying or finalizing. Snake remains only a regression
+benchmark.
 
 ## Checks
 

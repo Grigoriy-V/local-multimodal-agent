@@ -52,6 +52,13 @@ def plan_json() -> str:
             "summary": "Create one game file.",
             "steps": ["inspect", "implement"],
             "acceptance_criteria": ["game.html exists"],
+            "validation_strategy": [
+                {
+                    "criterion": "game.html exists",
+                    "evidence": "Read game.html from the granted directory.",
+                    "capabilities": ["filesystem.read"],
+                }
+            ],
         }
     )
 
@@ -63,6 +70,8 @@ async def test_planning_uses_structured_output(tmp_path: Path) -> None:
     result = await worker.plan("Create game.html")
 
     assert result.steps == ("inspect", "implement")
+    assert result.validation_capabilities == ("filesystem.read",)
+    assert result.validation_strategy[0].evidence.startswith("Read game.html")
     assert backend.formats_seen == [PLAN_RESPONSE_FORMAT]
     assert backend.tools_seen == [None]
 
