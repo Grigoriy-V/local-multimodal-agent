@@ -97,11 +97,7 @@ Ordered plan:
 6. Run honest app-level product checks from empty sandboxes: Snake with visual
    validation and a materially different task, with no special command,
    scenario branch or scripted model response.
-7. Load applicable workspace `AGENTS.md` instructions without expanding sandbox
-   scope or tool permissions.
-8. Make SQLite memory inspectable/editable and separate proposed memories from
-   user-approved memory.
-9. Run the full regression plus browser/restart product smoke and close V1.5.
+7. Run the full regression plus browser/restart product smoke and close V1.5.
 
 **Closing criterion:** through the actual app, a normal conversational request
 is answered directly and two materially different work requests complete from
@@ -119,11 +115,15 @@ comparable tracing, statistics and graph/tool evaluations.
 Provisional plan:
 
 1. Define one inspectable policy predicate and durable grant lifecycle.
-2. Put document ingestion and later capabilities behind that boundary.
-3. Expose governed tools and memory through MCP, including evaluation of a
+2. Load applicable workspace `AGENTS.md` instructions without expanding sandbox
+   scope or tool permissions.
+3. Make SQLite memory inspectable/editable and separate proposed memories from
+   user-approved memory.
+4. Put document ingestion and later capabilities behind the policy boundary.
+5. Expose governed tools and memory through MCP, including evaluation of a
    Codex app-server model route without nesting incompatible agent loops.
-4. Record comparable model, graph, policy and tool traces and statistics.
-5. Build reproducible evaluations for tool choice, policy compliance, memory
+6. Record comparable model, graph, policy and tool traces and statistics.
+7. Build reproducible evaluations for tool choice, policy compliance, memory
    retrieval and graph regressions.
 
 This roadmap contains the complete active Version 2 direction. Related future
