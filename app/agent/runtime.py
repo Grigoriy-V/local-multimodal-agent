@@ -7,7 +7,7 @@ own and does not know it is talking to a graph.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -18,9 +18,9 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
-from app.agent.graph import build_agent
+from app.agent.graph import build_agent, latest_text
 from app.config import AgentSettings, ModelSettings
-from app.context import ContextPolicy
+from app.context import Context, ContextPolicy, build_prelude
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import MemoryStore, Thread
 from app.models import ContentPart, Message, ModelBackend, Usage
@@ -184,6 +184,24 @@ class Agent:
 
         async for produced in self._run(thread_id, {"thread_id": thread_id, "messages": [message]}):
             yield produced
+
+    def context_prompt(
+        self,
+        thread_id: str,
+        messages: Sequence[Message],
+        system_prompt: str | None = None,
+    ) -> list[Message]:
+        """Assemble the same bounded conversation layers for an internal decision."""
+
+        summary, through = self.store.summary(thread_id)
+        history = self.store.messages(thread_id, after=through - 1)
+        query = latest_text(list(messages))
+        facts = self.store.search(query, limit=self.policy.retrieved_facts) if query else []
+        context = Context(
+            prelude=build_prelude(summary, facts, system_prompt or self.system_prompt),
+            history=history,
+        )
+        return context.prompt(messages)
 
     async def pending(self, thread_id: str) -> list[dict[str, Any]] | None:
         """The calls this thread is waiting on an answer for, if any.

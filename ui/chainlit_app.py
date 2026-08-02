@@ -45,6 +45,7 @@ os.environ.setdefault("CHAINLIT_AUTH_SECRET", _auth_secret())
 
 import chainlit as cl
 
+from app.agent.harness import GeneralHarness
 from app.agent.runtime import Agent, create_agent
 from app.agent.task_runtime import TaskRuntime, TaskView
 from app.config import AgentSettings
@@ -55,8 +56,6 @@ from ui.chainlit_history import LOCAL_USER_IDENTIFIER, MemoryStoreDataLayer
 IMAGE = "image"
 AUDIO = "audio"
 CONFIRM_TIMEOUT = 600
-CONVERSATION_MODE = "Conversation"
-AGENT_MODE = "Agent"
 
 
 @cl.header_auth_callback
@@ -189,30 +188,17 @@ def create_runtime() -> Agent:
     return create_agent(agent_settings=AgentSettings())
 
 
-def create_task_runtime(agent: Agent) -> TaskRuntime:
+def create_harness() -> GeneralHarness:
+    agent = create_runtime()
     settings = AgentSettings()
-    return TaskRuntime(
-        backend=agent.backend,
-        workspace=agent.workspace,
-        checkpoints=settings.task_checkpoints,
+    return GeneralHarness(
+        agent,
+        TaskRuntime(
+            backend=agent.backend,
+            workspace=agent.workspace,
+            checkpoints=settings.task_checkpoints,
+        ),
     )
-
-
-async def send_mode_settings(initial: str = CONVERSATION_MODE) -> None:
-    await cl.ChatSettings(
-        [
-            cl.input_widget.Select(
-                id="Mode",
-                label="Mode",
-                values=[CONVERSATION_MODE, AGENT_MODE],
-                initial_value=initial,
-                description=(
-                    "Conversation answers normally. Agent plans and executes a task "
-                    "inside the configured workspace."
-                ),
-            )
-        ]
-    ).send()
 
 
 def task_plan_text(view: TaskView) -> str:
@@ -226,47 +212,24 @@ def task_plan_text(view: TaskView) -> str:
     )
 
 
-async def render_task_result(view: TaskView) -> None:
-    if view.outcome is None:
-        await cl.Message(content="The task stopped without an outcome.").send()
-        return
-    lines = [
-        view.implementation.summary if view.implementation else view.outcome.summary,
-        "",
-        f"Status: **{view.outcome.status}**; iterations: {view.outcome.iterations}; "
-        f"tool calls: {view.outcome.tool_calls}.",
-    ]
-    if view.report is not None:
-        lines.extend(["", "**Available checks**"])
-        lines.extend(
-            f"- {'passed' if check.passed else 'failed'} — {check.name}: {check.detail}"
-            for check in view.report.checks
-        )
-    if view.outcome.artifacts:
-        lines.extend(["", "**Artifacts**"])
-        lines.extend(f"- `{artifact}`" for artifact in view.outcome.artifacts)
-    lines.extend(
-        [
-            "",
-            "Semantic and task-specific validation is not enabled yet; this mode currently "
-            "checks only that changed artifacts exist and are non-empty.",
-        ]
-    )
-    await cl.Message(content="\n".join(lines)).send()
-
-
-async def drive_task(runtime: TaskRuntime, thread_id: str, task: str | None = None) -> None:
+async def drive_task(
+    harness: GeneralHarness,
+    thread_id: str,
+    original: Message | None = None,
+    task: str | None = None,
+) -> None:
     view = (
-        await runtime.start(thread_id, task, subdirectory=".")
+        await harness.start_task(thread_id, original, task)
         if task is not None
-        else await runtime.view(thread_id)
+        and original is not None
+        else await harness.task_view(thread_id)
     )
     if view.interrupt is not None:
         permissions = ", ".join(view.interrupt.get("permissions", []))
         response = await cl.AskActionMessage(
             content=(
                 f"{task_plan_text(view)}\n\n"
-                f"**Scope:** configured workspace (`{runtime.workspace}`)\n\n"
+                f"**Scope:** configured workspace (`{harness.tasks.workspace}`)\n\n"
                 f"**Capabilities:** {permissions}\n\nRun this plan?"
             ),
             actions=[
@@ -276,8 +239,9 @@ async def drive_task(runtime: TaskRuntime, thread_id: str, task: str | None = No
             timeout=CONFIRM_TIMEOUT,
         ).send()
         approved = bool((response or {}).get("payload", {}).get("approved"))
-        view = await runtime.resume(thread_id, approved)
-    await render_task_result(view)
+        view = await harness.resume_task(thread_id, approved)
+    result = harness.finish_task(thread_id, view)
+    await cl.Message(content=spoken(result), elements=attachments(result)).send()
 
 
 async def report_fill(agent: Agent) -> None:
@@ -313,50 +277,33 @@ async def drive(
 
 @cl.on_chat_start
 async def start() -> None:
-    agent = create_runtime()
-    task_runtime = create_task_runtime(agent)
+    harness = create_harness()
     # The websocket session id is ephemeral and differs from the canonical
     # thread id that Chainlit puts in its sidebar and data layer.
     thread_id = canonical_thread_id(cl.context.session)
-    cl.user_session.set("agent", agent)
-    cl.user_session.set("task_runtime", task_runtime)
+    cl.user_session.set("harness", harness)
     cl.user_session.set("thread_id", thread_id)
-    cl.user_session.set("mode", CONVERSATION_MODE)
-    await send_mode_settings()
 
 
 @cl.on_chat_resume
 async def resume(thread: dict[str, Any]) -> None:
-    agent = create_runtime()
-    task_runtime = create_task_runtime(agent)
+    harness = create_harness()
     thread_id = thread["id"]
-    cl.user_session.set("agent", agent)
-    cl.user_session.set("task_runtime", task_runtime)
+    cl.user_session.set("harness", harness)
     cl.user_session.set("thread_id", thread_id)
-    cl.user_session.set("mode", CONVERSATION_MODE)
-    task_view = await task_runtime.view(thread_id)
+    task_view = await harness.task_view(thread_id)
     if task_view.interrupt is not None:
-        cl.user_session.set("mode", AGENT_MODE)
-        await send_mode_settings(AGENT_MODE)
         await cl.Message(content="This task stopped waiting for workspace approval.").send()
-        await drive_task(task_runtime, thread_id)
+        await drive_task(harness, thread_id)
         return
-    await send_mode_settings()
-    if await agent.pending(thread_id) is not None:
+    if await harness.agent.pending(thread_id) is not None:
         await cl.Message(content="This conversation stopped waiting for an answer.").send()
-        await drive(agent, thread_id)
-
-
-@cl.on_settings_update
-async def settings_update(settings: dict[str, Any]) -> None:
-    mode = settings.get("Mode", CONVERSATION_MODE)
-    cl.user_session.set("mode", AGENT_MODE if mode == AGENT_MODE else CONVERSATION_MODE)
+        await drive(harness.agent, thread_id)
 
 
 @cl.on_message
 async def on_message(incoming: cl.Message) -> None:
-    agent: Agent = cl.user_session.get("agent")
-    task_runtime: TaskRuntime = cl.user_session.get("task_runtime")
+    harness: GeneralHarness = cl.user_session.get("harness")
     thread_id: str = cl.user_session.get("thread_id")
 
     try:
@@ -367,26 +314,20 @@ async def on_message(incoming: cl.Message) -> None:
         ).send()
         return
 
-    if cl.user_session.get("mode") == AGENT_MODE:
-        if media_parts(message):
-            await cl.Message(
-                content=(
-                    "Agent mode currently accepts text tasks only. Use Conversation mode "
-                    "for image or audio attachments."
-                )
-            ).send()
-            return
-        await drive_task(task_runtime, thread_id, spoken(message))
+    decision = await harness.decide(thread_id, message)
+    if decision.route == "act":
+        await drive_task(harness, thread_id, message, decision.task)
         return
 
-    await drive(agent, thread_id, agent.steps(thread_id, message))
+    await drive(
+        harness.agent,
+        thread_id,
+        harness.agent.steps(thread_id, message),
+    )
 
 
 @cl.on_chat_end
 async def end() -> None:
-    agent: Agent | None = cl.user_session.get("agent")
-    task_runtime: TaskRuntime | None = cl.user_session.get("task_runtime")
-    if task_runtime is not None:
-        await task_runtime.aclose()
-    if agent is not None:
-        await agent.aclose()
+    harness: GeneralHarness | None = cl.user_session.get("harness")
+    if harness is not None:
+        await harness.aclose()

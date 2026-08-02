@@ -49,13 +49,12 @@ reconsidered; this roadmap wins any conflict.
   verification and manual `task`/`preview` workflows into the product. Those
   routes are now disconnected. See the decision "Benchmark workflows do not
   define the product agent" in `DECISIONS.md` for historical rationale.
-- The general autonomous harness is not complete. The current UI contains a
-  rejected `Conversation` / `Agent` selector and two separate entry paths. This
-  is not accepted product behavior and must be removed in step 3.
-- The intended interface has no mode selector: every ordinary request enters
-  one harness, which decides whether to answer directly or plan and perform
-  work. Tool use and validation are internal agent decisions; the user approves
-  scope or consequential actions, not an operating mode.
+- Every ordinary UI request now enters one general harness. The model decides
+  whether the normal agent should answer or the bounded task lifecycle should
+  act; there is no mode selector or separate user-facing route. Evidence:
+  `reports/2026-08-02_v15_step3_unified_entry.md`.
+- The task lifecycle still validates only artifact existence by default.
+  Task-specific semantic validation remains open in step 4.
 
 ## Closed stages
 
@@ -80,11 +79,12 @@ Ordered plan:
 2. **Closed:** add a grant-governed capability registry for filesystem and
    browser operations. The model selects capabilities; the user approves
    scoped side effects. Evidence: `reports/2026-08-02_v15_step2.md`.
-3. **Reopened:** replace the split conversational/task entry paths with one
+3. **Closed:** replace the split conversational/task entry paths with one
    natural-language entry point. The harness decides `answer` versus `act`; no
    `Conversation` / `Agent` selector, slash-command contract or per-tool control
-   is required. The previous selector implementation and
-   `reports/2026-08-02_v15_step3.md` are rejected evidence, not acceptance.
+   is required. Evidence: `reports/2026-08-02_v15_step3_unified_entry.md`. The
+   previous selector implementation and `reports/2026-08-02_v15_step3.md` remain
+   rejected evidence, not acceptance.
 4. On the `act` branch, make planning produce task-specific acceptance criteria
    and a validation strategy, then evaluate real tool evidence against them.
 5. Keep Chainlit thin while showing applicable plan, scope, approval, progress,
@@ -127,7 +127,8 @@ is not authorized.
 
 ## Next step candidates
 
-1. Approve the reopened Version 1.5 step 3.
+1. Approve Version 1.5 step 4: derive task-specific acceptance criteria and a
+   validation strategy, then evaluate real tool evidence against them.
 
 ## Out of scope
 

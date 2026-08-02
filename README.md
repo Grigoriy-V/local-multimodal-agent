@@ -141,8 +141,10 @@ registry: read/write filesystem capabilities and the model-selected
 `inspect_page` browser capability. `inspect_page` opens a self-contained local
 HTML file in installed Chrome/Edge, blocks external network and file URLs, and
 returns visible text, console errors and a screenshot to both model and UI.
-The unified plan/act/validate harness is in development. Snake remains only a
-regression benchmark.
+Every ordinary message now enters the same general harness, which asks the model
+whether to answer through the normal agent or enter the bounded task lifecycle;
+there is no user-facing mode selector. Task-specific semantic validation remains
+in development. Snake remains only a regression benchmark.
 
 ## Checks
 

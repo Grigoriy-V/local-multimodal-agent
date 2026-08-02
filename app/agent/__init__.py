@@ -19,6 +19,7 @@ from app.agent.task_graph import (
 )
 from app.agent.task_worker import ModelTaskWorker, build_model_task_graph
 from app.agent.task_runtime import TaskRuntime, TaskView
+from app.agent.harness import GeneralHarness, HarnessDecision, parse_decision
 from app.agent.web_verifier import WebVerifier, node_javascript_syntax
 
 __all__ = [
@@ -27,6 +28,8 @@ __all__ = [
     "BrowserVerifier",
     "ImplementationResult",
     "LayeredWebVerifier",
+    "GeneralHarness",
+    "HarnessDecision",
     "ModelTaskWorker",
     "TaskBudget",
     "TaskContext",
@@ -43,4 +46,5 @@ __all__ = [
     "build_model_task_graph",
     "find_chromium_browser",
     "node_javascript_syntax",
+    "parse_decision",
 ]
