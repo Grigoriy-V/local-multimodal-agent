@@ -6,7 +6,8 @@ returns text. Nothing here knows about a provider or a graph.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+import inspect
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,7 +32,7 @@ class Tool:
     name: str
     description: str
     parameters: dict[str, Any]
-    run: Callable[..., str]
+    run: Callable[..., str | Sequence[ContentPart] | Awaitable[str | Sequence[ContentPart]]]
     destructive: bool = False
 
     def schema(self) -> dict[str, Any]:
@@ -116,32 +117,69 @@ class Toolbox:
                 return f"argument {name!r} must contain at least {minimum} character(s)"
         return None
 
-    def run(self, call: ToolCall) -> Message:
-        """Answer one tool call with a message the model can be shown."""
-
+    def _prepare(self, call: ToolCall) -> tuple[Tool | None, Message | None]:
         tool = self._tools.get(call.name)
         if tool is None:
-            result = f"error: unknown tool {call.name!r}; available: {', '.join(self.names)}"
+            return None, self._message(
+                call, f"error: unknown tool {call.name!r}; available: {', '.join(self.names)}"
+            )
+        validation_error = self.validation_error(call)
+        if validation_error:
+            return None, self._message(
+                call, f"error: bad arguments for {call.name}: {validation_error}"
+            )
+        return tool, None
+
+    @staticmethod
+    def _message(call: ToolCall, result: str | Sequence[ContentPart]) -> Message:
+        if isinstance(result, str):
+            content = [ContentPart(kind="text", text=result or "(empty)")]
         else:
-            validation_error = self.validation_error(call)
-            if validation_error:
-                result = f"error: bad arguments for {call.name}: {validation_error}"
-                return Message(
-                    role="tool",
-                    content=[ContentPart(kind="text", text=result)],
-                    tool_call_id=call.id,
-                )
-            try:
-                result = tool.run(**call.arguments)
-            except ToolError as error:
-                result = f"error: {error}"
-            except TypeError as error:
-                result = f"error: bad arguments for {call.name}: {error}"
-            except OSError as error:
-                detail = error.strerror or str(error) or type(error).__name__
-                result = f"error: {call.name} failed: {detail}"
+            content = list(result) or [ContentPart(kind="text", text="(empty)")]
         return Message(
             role="tool",
-            content=[ContentPart(kind="text", text=result or "(empty)")],
+            content=content,
             tool_call_id=call.id,
         )
+
+    @staticmethod
+    def _failure(call: ToolCall, error: Exception) -> Message:
+        if isinstance(error, ToolError):
+            result = f"error: {error}"
+        elif isinstance(error, TypeError):
+            result = f"error: bad arguments for {call.name}: {error}"
+        else:
+            detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
+            result = f"error: {call.name} failed: {detail}"
+        return Toolbox._message(call, result)
+
+    def run(self, call: ToolCall) -> Message:
+        """Run a synchronous tool and return the message shown to the model."""
+
+        tool, refused = self._prepare(call)
+        if refused is not None:
+            return refused
+        try:
+            result = tool.run(**call.arguments)  # type: ignore[union-attr]
+            if inspect.isawaitable(result):
+                close = getattr(result, "close", None)
+                if close is not None:
+                    close()
+                raise RuntimeError(f"tool {call.name!r} is async; use Toolbox.run_async")
+            return self._message(call, result)
+        except (ToolError, TypeError, OSError) as error:
+            return self._failure(call, error)
+
+    async def run_async(self, call: ToolCall) -> Message:
+        """Run either a synchronous or asynchronous tool."""
+
+        tool, refused = self._prepare(call)
+        if refused is not None:
+            return refused
+        try:
+            result = tool.run(**call.arguments)  # type: ignore[union-attr]
+            if inspect.isawaitable(result):
+                result = await result
+            return self._message(call, result)
+        except (ToolError, TypeError, OSError) as error:
+            return self._failure(call, error)

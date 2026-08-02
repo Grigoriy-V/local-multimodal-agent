@@ -3,6 +3,11 @@
 Architecture and scope decisions only. Not a work log, not a task ledger, not a
 place for results.
 
+This file preserves rationale and history. `ROADMAP.md` is the only source of
+current product direction, state, order and approved work, and wins every
+conflict. Read only the relevant decision when `ROADMAP.md` links it or when an
+architectural choice is explicitly being reconsidered.
+
 Write an entry when a choice constrains future work: a component selected or
 rejected, a boundary moved, an invariant introduced or dropped. Do not write one
 for a completed task, a metric, or a bug fix — those belong in `reports/` and the
@@ -89,10 +94,10 @@ conversation content outside `MemoryStore`.
 `remember_fact`. The thread is recorded as provenance, but retrieval is global:
 a fact saved in one conversation is visible in every later one.
 
-**Why.** The contract forbids storing model-generated facts as trusted memory
-without an explicit save decision, so nothing may be harvested from an answer
-automatically. Global visibility is the point of long-term memory — a fact scoped
-to its own thread is indistinguishable from the transcript.
+**Why.** The project invariant forbids storing model-generated facts as trusted
+memory without an explicit save decision, so nothing may be harvested from an
+answer automatically. Global visibility is the point of long-term memory — a
+fact scoped to its own thread is indistinguishable from the transcript.
 
 **Rules out.** Inferring facts from model output, and per-thread fact isolation.
 
@@ -135,9 +140,9 @@ message count approximates a token count.
 
 ## 2026-08-01: Version 1 is the closed Stage 3 and nothing more
 
-**Decision.** Version 1 is the contract's Stage 3 completed, plus what is needed
-to exercise it by hand: a token-bounded request with its fill shown, a retry
-inside `ModelBackend`, a thread list in the UI, images and audio rendered in
+**Decision.** Version 1 is the then-current Stage 3 completed, plus what is
+needed to exercise it by hand: a token-bounded request with its fill shown, a
+retry inside `ModelBackend`, a thread list in the UI, images and audio rendered in
 answers, one fixed workspace, and an explicit refusal for a file type the agent
 cannot accept. The workspace is a single hardcoded sandbox; asking the user to
 grant a directory is not part of it.
@@ -154,8 +159,8 @@ work. All are recorded in `docs/BACKLOG.md`.
 ## 2026-08-01: Version 1 is reopened for product completion
 
 **Decision.** The earlier Version 1 closure is superseded. Its functional core
-and evidence remain valid, but Version 1 closes only against the product
-acceptance criteria in `docs/CONTRACT.md`: normal persistent chat history,
+and evidence remain valid, but Version 1 closes only against the then-current
+product acceptance criteria: normal persistent chat history,
 bounded and honest attachment handling, tool failures that remain inside the
 turn, recoverable or clearly refused context overflow, and an end-to-end
 browser/restart smoke without regressions to the existing agent.
@@ -189,13 +194,14 @@ multiplied agent work and created four points of divergence.
 
 ## 2026-08-02: Benchmark workflows do not define the product agent
 
-**Decision.** Version 1.5 is a general autonomous harness. An ordinary request
-in agent mode enters one task loop; the model derives criteria and chooses
-governed capabilities. Browser and filesystem operations are capabilities, not
+**Decision.** Version 1.5 is a general autonomous harness. Every ordinary
+request enters one harness, which decides whether to answer directly or
+continue into a task loop; the model derives criteria and chooses governed
+capabilities. Browser and filesystem operations are capabilities, not
 user-invoked workflows. The Snake-specific verifier and the native `preview`
 and scripted `task` routes built during the first vertical slice are retained
-only as historical evaluation code and evidence, disconnected from Chainlit and
-from the application task runtime. The implementation record is in
+only as historical evaluation code and evidence, disconnected from Chainlit
+and from the application task runtime. The implementation record is in
 `reports/2026-08-01_v15_step1.md` through
 `reports/2026-08-02_v15_step9.md`.
 
@@ -221,3 +227,19 @@ translate a known Windows path into an internal relative form.
 **Rules out.** Rejecting safe absolute workspace paths merely because they are
 absolute, guessing a directory for an ambiguous filename, and allowing an
 absolute path to bypass root validation.
+
+## 2026-08-02: One interface; the harness decides whether to act
+
+**Decision.** Every ordinary natural-language request enters one general
+harness. The harness decides whether to answer directly or to plan, use tools,
+validate and repair. There is no user-selected conversational versus agent
+mode. This supersedes the `in agent mode` wording in the earlier benchmark
+workflow decision.
+
+**Why.** Tool use is part of the model's work, not a separate product selected
+by the user. A mode switch exposes an implementation split and makes the user
+decide what the agent is supposed to infer.
+
+**Rules out.** A `Conversation` / `Agent` selector, separate user-facing entry
+paths for answers and tasks, and requiring a slash command or tool control to
+obtain autonomous behavior.

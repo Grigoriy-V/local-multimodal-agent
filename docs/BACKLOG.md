@@ -11,7 +11,7 @@ useful detail here until implementation or a later decision makes it stale.
 
 ## Deferred with a known trigger
 
-- **Import-graph test for layer boundaries.** Would prove the contract's claim
+- **Import-graph test for layer boundaries.** Would prove the architecture's claim
   that swapping the model does not require rewriting other layers, and would
   mechanically catch a `langchain_core` import leaking out of `app/models/`.
   The boundary currently passes a static audit. Automate it when a second
@@ -20,7 +20,7 @@ useful detail here until implementation or a later decision makes it stale.
   retrieval is working and measured.
 - **Docker packaging.** Only when there is something worth shipping.
 - **Transformers + BitsAndBytes fallback backend.** Only if vLLM proves
-  unworkable on 24 GB, with the failure recorded. Removed from the contract's
+  unworkable on 24 GB, with the failure recorded. Removed from the active
   stack on 2026-08-01: it would put an inference dependency inside a repository
   that deliberately has none.
 - **FastAPI application layer.** Only when a consumer other than Chainlit
@@ -151,7 +151,7 @@ order are deliberately not fixed before Version 1 closes.
 - **Learn fine-tuning.** A real goal of the human's, and the reason the
   BitsAndBytes fallback was originally in the plan. It is a separate stack —
   PEFT/LoRA, a dataset, a training loop — and a separate repository. The
-  contract rules fine-tuning out of this project; that stands.
+  current project scope rules fine-tuning out of this repository; that stands.
 
 ## Ideas
 

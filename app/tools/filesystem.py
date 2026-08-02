@@ -20,7 +20,7 @@ MAX_ENTRIES = 200
 MAX_CHARS = 20_000
 
 
-def _resolve(root: Path, path: str) -> Path:
+def resolve_in_root(root: Path, path: str) -> Path:
     """Resolve a model-supplied path inside the root, or refuse it.
 
     Resolution happens before the check, so `..` segments, absolute paths and
@@ -39,7 +39,7 @@ def _resolve(root: Path, path: str) -> Path:
 
 
 def _list_files(root: Path, path: str = ".") -> str:
-    target = _resolve(root, path)
+    target = resolve_in_root(root, path)
     if not target.is_dir():
         raise ToolError(f"path {path!r} is not a directory")
     entries = sorted(
@@ -55,7 +55,7 @@ def _list_files(root: Path, path: str = ".") -> str:
 
 
 def _read_file(root: Path, path: str) -> str:
-    target = _resolve(root, path)
+    target = resolve_in_root(root, path)
     if not target.is_file():
         raise ToolError(f"path {path!r} is not a file")
     text = target.read_text(encoding="utf-8", errors="replace")
@@ -65,7 +65,7 @@ def _read_file(root: Path, path: str) -> str:
 
 
 def _write_file(root: Path, path: str, content: str) -> str:
-    target = _resolve(root, path)
+    target = resolve_in_root(root, path)
     if target.is_dir():
         raise ToolError(f"path {path!r} is a directory")
     existed = target.is_file()
@@ -76,7 +76,7 @@ def _write_file(root: Path, path: str, content: str) -> str:
 
 
 def _edit_file(root: Path, path: str, old_text: str, new_text: str) -> str:
-    target = _resolve(root, path)
+    target = resolve_in_root(root, path)
     if not target.is_file():
         raise ToolError(f"path {path!r} is not a file")
     if not old_text:

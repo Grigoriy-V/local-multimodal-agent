@@ -39,17 +39,9 @@ scripts/   smoke test, live checks, environment doctor
 configs/   runtime configuration
 tests/     offline tests and fixtures
 tools/     work_log.py
-docs/      CONTRACT, AGENT_PROTOCOL, BACKLOG
+docs/      detailed deferred and possible future direction
 reports/   evidence and the two JSONL journals
 ```
-
-## Entry points
-
-- `AGENTS.md` — the working contract. `CLAUDE.md` imports it.
-- `ROADMAP.md` — current state, the three-stage plan, the approved step.
-- `DECISIONS.md` — architecture and scope decisions.
-- `HANDOFF.md` — first-session bootstrap.
-- `docs/CONTRACT.md` — the full target specification.
 
 ## Status
 
@@ -64,8 +56,7 @@ measured over budget; stops to ask before it writes a file, resuming that
 question even after the process that asked it is gone; retries a model call that
 failed transiently; provides native persistent chat history; enforces explicit
 upload limits; recovers once from context overflow; and shows images and audio
-in its answers. Version 1.5 and Version 2 are summarized in `ROADMAP.md` and
-detailed in `docs/BACKLOG.md`.
+in its answers. Current development status is published in `ROADMAP.md`.
 
 The server reports the ceiling through `/v1/models` and the completed request
 size through `usage.prompt_tokens`. `AGENT_CONTEXT_FRACTION` decides when an
@@ -137,16 +128,21 @@ With the model server running, start Chainlit from Windows PowerShell:
 Open <http://127.0.0.1:8100>. Stop the UI with `Ctrl+C`; conversations remain
 in the local SQLite database and are restored on the next start.
 
-The product target is a general autonomous agent, not a menu of individual
-tools. In agent mode, an ordinary request should cause the model to plan,
-choose governed filesystem/browser capabilities, validate the result and repair
-or finalize. Permission prompts approve scoped side effects; users should not
-have to select `read_file`, `preview`, `browser` or another implementation tool.
+The product target is one general autonomous interface, not a menu of modes or
+individual tools. An ordinary request is answered directly when that is enough;
+otherwise the same harness plans, chooses governed filesystem/browser
+capabilities, validates the result and repairs or finalizes. Permission prompts
+approve scope or consequential effects, not an operating mode or tool choice.
 
 The rejected experimental `task`/`preview` controls and Snake-specific verifier
-are disconnected from the UI and application task runtime. Until the general
-agent-mode harness replaces them, the app exposes the normal conversational
-agent and its governed tools. Snake remains only a regression benchmark.
+are disconnected from the UI and application task runtime. The Version 1
+baseline exposes its conversational graph through a grant-filtered capability
+registry: read/write filesystem capabilities and the model-selected
+`inspect_page` browser capability. `inspect_page` opens a self-contained local
+HTML file in installed Chrome/Edge, blocks external network and file URLs, and
+returns visible text, console errors and a screenshot to both model and UI.
+The unified plan/act/validate harness is in development. Snake remains only a
+regression benchmark.
 
 ## Checks
 

@@ -27,7 +27,7 @@ from app.agent.task_graph import (
 
 def context(permissions: tuple[str, ...] | None = None) -> TaskContext:
     grant = (
-        TaskGrant("run", status="active")
+        TaskGrant("run", status="active", permissions=("browser_verify",))
         if permissions is None
         else TaskGrant("run", status="active", permissions=permissions)
     )
@@ -166,10 +166,29 @@ async def test_preview_artifact_reaches_the_final_task_outcome(tmp_path: Path) -
     saver = InMemorySaver(
         serde=JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
     )
+    verifier = BrowserVerifier(tmp_path, browser=browser, probe=passing_probe)
+
+    async def historical_browser_test(
+        task_context: TaskContext, result: ImplementationResult
+    ):
+        browser_context = TaskContext(
+            task=task_context.task,
+            plan=task_context.plan,
+            iteration=task_context.iteration,
+            feedback=task_context.feedback,
+            remaining_tool_calls=task_context.remaining_tool_calls,
+            grant=TaskGrant(
+                task_context.grant.subdirectory,
+                status="active",
+                permissions=("browser_verify",),
+            ),
+        )
+        return await verifier(browser_context, result)
+
     graph = build_task_graph(
         planner,
         implement,
-        BrowserVerifier(tmp_path, browser=browser, probe=passing_probe),
+        historical_browser_test,
         tmp_path,
         checkpointer=saver,
     )

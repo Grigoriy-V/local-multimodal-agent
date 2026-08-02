@@ -20,6 +20,7 @@ from app.agent.task_graph import (
     TaskBudget,
     TaskContext,
     TaskPlan,
+    TaskStageError,
     TestReport as Report,
     build_task_graph,
 )
@@ -83,7 +84,7 @@ async def approve(graph, task: str = "Create an artifact", subdirectory: str = "
     assert pending.value == {
         "kind": "task_grant",
         "subdirectory": subdirectory,
-        "permissions": ["write_file", "edit_file", "browser_verify"],
+        "permissions": ["filesystem.read", "filesystem.write"],
         "plan": "Create and verify one artifact.",
         "acceptance_criteria": ["artifact passes its check"],
     }
@@ -95,8 +96,8 @@ async def test_the_named_route_finalizes_a_passing_task(tmp_path: Path) -> None:
 
     async def implement(context: TaskContext) -> ImplementationResult:
         assert context.grant.status == "active"
-        assert context.grant.allows("write_file")
-        assert context.grant.allows("edit_file")
+        assert context.grant.allows("filesystem.read")
+        assert context.grant.allows("filesystem.write")
         assert context.grant.root(tmp_path) == tmp_path / "run"
         events.append(f"implement:{context.iteration}")
         return ImplementationResult("created artifact", tool_calls=2)
@@ -190,6 +191,24 @@ async def test_tool_call_budget_stops_before_testing(tmp_path: Path) -> None:
     assert result["outcome"].summary == "tool-call budget exceeded during implementation"
 
 
+async def test_unavailable_validation_stops_honestly_without_retry(tmp_path: Path) -> None:
+    attempts = 0
+
+    async def implement(context: TaskContext) -> ImplementationResult:
+        nonlocal attempts
+        attempts += 1
+        return ImplementationResult("answered without an artifact")
+
+    async def unavailable(context: TaskContext, result: ImplementationResult) -> Report:
+        raise TaskStageError("validation unavailable: no evidence")
+
+    result = await approve(graph_over(tmp_path, implement, unavailable))
+
+    assert result["outcome"].status == "stopped"
+    assert result["outcome"].summary == "validation unavailable: no evidence"
+    assert attempts == 1
+
+
 async def test_a_failed_check_stops_when_the_tool_budget_is_spent(tmp_path: Path) -> None:
     async def implement(context: TaskContext) -> ImplementationResult:
         return ImplementationResult("used the final allowed call", tool_calls=1)
@@ -259,7 +278,7 @@ async def test_declining_revokes_the_grant_without_running_handlers(tmp_path: Pa
     assert result["grant"].revoked_reason == "user declined task grant"
 
 
-@pytest.mark.parametrize("subdirectory", ["", ".", "..", "../escape", "C:/Windows"])
+@pytest.mark.parametrize("subdirectory", ["", "..", "../escape", "C:/Windows"])
 async def test_invalid_grant_scopes_never_ask_or_run(
     tmp_path: Path, subdirectory: str
 ) -> None:
@@ -275,6 +294,22 @@ async def test_invalid_grant_scopes_never_ask_or_run(
 
     assert result["outcome"].status == "stopped"
     assert (await graph.aget_state(run_config)).tasks == ()
+
+
+async def test_workspace_root_is_a_valid_explicit_grant_scope(tmp_path: Path) -> None:
+    async def forbidden(*args):
+        raise AssertionError("execution must wait for approval")
+
+    graph = graph_over(tmp_path, forbidden, forbidden)
+    run_config = config()
+    await graph.ainvoke(
+        {"task": "Edit an existing workspace file", "subdirectory": "."},
+        config=run_config,
+    )
+
+    snapshot = await graph.aget_state(run_config)
+    assert snapshot.values["grant"].subdirectory == "."
+    assert snapshot.tasks[0].interrupts[0].value["subdirectory"] == "."
 
 
 async def test_without_a_checkpointer_the_grant_is_refused(tmp_path: Path) -> None:

@@ -55,7 +55,7 @@ class TaskPlan:
 class TaskGrant:
     subdirectory: str
     status: Literal["pending", "active", "revoked"] = "pending"
-    permissions: tuple[str, ...] = ("write_file", "edit_file", "browser_verify")
+    permissions: tuple[str, ...] = ("filesystem.read", "filesystem.write")
     revoked_reason: str | None = None
 
     def __post_init__(self) -> None:
@@ -71,7 +71,7 @@ class TaskGrant:
             raise PermissionError("task grant is not active")
         workspace = Path(workspace).resolve()
         target = (workspace / self.subdirectory).resolve()
-        if target == workspace or workspace not in target.parents:
+        if target != workspace and workspace not in target.parents:
             raise PermissionError("task grant is outside the workspace")
         return target
 
@@ -236,9 +236,6 @@ def build_task_graph(
                 scope = target.relative_to(workspace).as_posix()
             except (OSError, RuntimeError, ValueError):
                 stop_reason = "task grant subdirectory is outside the workspace"
-            else:
-                if target == workspace:
-                    stop_reason = "task grant must target a workspace subdirectory"
         return {
             "task": task,
             "subdirectory": scope,
@@ -333,6 +330,8 @@ def build_task_graph(
             report = await bounded(tester(context(state), state.implementation), state)
         except TimeoutError:
             return {"stop_reason": "time budget exhausted during testing"}
+        except TaskStageError as error:
+            return {"stop_reason": str(error)}
         return {
             "test_report": report,
             "artifacts": tuple(dict.fromkeys((*state.artifacts, *report.artifacts))),
@@ -361,7 +360,7 @@ def build_task_graph(
             and state.test_report.passed
         )
         if completed:
-            summary = "all acceptance checks passed"
+            summary = "all available checks passed"
         else:
             summary = state.stop_reason or "iteration budget exhausted with failing checks"
         patch: dict[str, object] = {

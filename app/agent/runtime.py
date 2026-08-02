@@ -25,7 +25,7 @@ from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import MemoryStore, Thread
 from app.models import ContentPart, Message, ModelBackend, Usage
 from app.models.openai_compatible import OpenAICompatibleBackend
-from app.tools import Toolbox, filesystem_tools, memory_tools
+from app.tools import CapabilityGrant, CapabilityRegistry, memory_tools
 
 # The checkpoint holds this project's own dataclasses, so LangGraph is told
 # which types it is allowed to reconstruct. Nothing else may come back out.
@@ -84,6 +84,8 @@ class Agent:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         checkpoints: str | Path | None = None,
         context_fraction: float = 0.6,
+        capability_registry: CapabilityRegistry | None = None,
+        capability_grant: CapabilityGrant | None = None,
     ) -> None:
         self.backend = backend
         self.store = store
@@ -92,6 +94,8 @@ class Agent:
         self.system_prompt = system_prompt
         self.checkpoints = checkpoints
         self.context_fraction = context_fraction
+        self.capability_registry = capability_registry or CapabilityRegistry(self.workspace)
+        self.capability_grant = capability_grant or self.capability_registry.grant()
         self._graphs: dict[str, CompiledStateGraph] = {}
         self._connection: aiosqlite.Connection | None = None
         self._saver: AsyncSqliteSaver | None = None
@@ -138,11 +142,9 @@ class Agent:
 
     async def _graph(self, thread_id: str) -> CompiledStateGraph:
         if thread_id not in self._graphs:
-            toolbox = Toolbox(
-                [
-                    *filesystem_tools(self.workspace),
-                    *memory_tools(self.store, thread_id, self.policy.retrieved_facts),
-                ]
+            toolbox = self.capability_registry.toolbox(
+                self.capability_grant,
+                memory_tools(self.store, thread_id, self.policy.retrieved_facts),
             )
             self._graphs[thread_id] = build_agent(
                 self.backend,

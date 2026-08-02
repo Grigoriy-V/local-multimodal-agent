@@ -19,15 +19,20 @@ from langgraph.types import Command
 
 from app.agent.runtime import CHECKPOINT_TYPES
 from app.agent.task_graph import (
+    CheckResult,
+    ImplementationResult,
+    TaskContext,
     TaskBudget,
     TaskGrant,
     TaskOutcome,
     TaskPlan,
+    TaskStageError,
     Tester,
     TestReport,
 )
 from app.agent.task_worker import build_model_task_graph
 from app.models import ModelBackend
+from app.tools.filesystem import ToolError, resolve_in_root
 
 
 @dataclass(frozen=True)
@@ -35,9 +40,46 @@ class TaskView:
     subdirectory: str
     grant: TaskGrant | None
     plan: TaskPlan | None
+    implementation: ImplementationResult | None
     outcome: TaskOutcome | None
     report: TestReport | None
     interrupt: dict[str, Any] | None = None
+
+
+def artifact_tester(workspace: Path) -> Tester:
+    """Build the limited, task-agnostic check used before roadmap step 4.
+
+    It proves only that implementation artifacts exist and are non-empty. The
+    report names that limitation instead of claiming semantic acceptance.
+    """
+
+    workspace = Path(workspace).resolve()
+
+    async def check(
+        context: TaskContext, implementation: ImplementationResult
+    ) -> TestReport:
+        if not implementation.artifacts:
+            raise TaskStageError(
+                "validation unavailable: no changed artifact was reported"
+            )
+        root = context.grant.root(workspace)
+        checks: list[CheckResult] = []
+        for artifact in implementation.artifacts:
+            try:
+                target = resolve_in_root(root, artifact)
+            except ToolError as error:
+                checks.append(CheckResult(artifact, False, str(error)))
+                continue
+            passed = target.is_file() and target.stat().st_size > 0
+            detail = (
+                f"exists and is non-empty ({target.stat().st_size} bytes)"
+                if passed
+                else "missing or empty"
+            )
+            checks.append(CheckResult(artifact, passed, detail))
+        return TestReport(tuple(checks), artifacts=implementation.artifacts)
+
+    return check
 
 
 class TaskRuntime:
@@ -48,13 +90,13 @@ class TaskRuntime:
         backend: ModelBackend,
         workspace: Path,
         checkpoints: str | Path,
-        tester: Tester,
+        tester: Tester | None = None,
         budget: TaskBudget | None = None,
     ) -> None:
         self.backend = backend
         self.workspace = Path(workspace).resolve()
         self.checkpoints = Path(checkpoints)
-        self.tester = tester
+        self.tester = tester or artifact_tester(self.workspace)
         self.budget = budget or TaskBudget(max_seconds=300.0)
         if not self.workspace.is_dir():
             raise ValueError(f"task workspace {self.workspace} is not a directory")
@@ -87,10 +129,12 @@ class TaskRuntime:
             )
         return self._graph
 
-    async def start(self, thread_id: str, task: str) -> TaskView:
+    async def start(
+        self, thread_id: str, task: str, subdirectory: str | None = None
+    ) -> TaskView:
         graph = await self._compiled()
         await graph.ainvoke(
-            {"task": task, "subdirectory": self.subdirectory(thread_id)},
+            {"task": task, "subdirectory": subdirectory or self.subdirectory(thread_id)},
             config=self._config(thread_id),
         )
         return await self.view(thread_id)
@@ -114,6 +158,7 @@ class TaskRuntime:
             subdirectory=values.get("subdirectory", self.subdirectory(thread_id)),
             grant=values.get("grant"),
             plan=values.get("plan"),
+            implementation=values.get("implementation"),
             outcome=values.get("outcome"),
             report=values.get("test_report"),
             interrupt=interrupt,
@@ -122,7 +167,7 @@ class TaskRuntime:
     def artifact_path(self, view: TaskView, artifact: str) -> Path:
         grant_root = (self.workspace / view.subdirectory).resolve()
         target = (grant_root / artifact).resolve()
-        if grant_root not in target.parents:
+        if target != grant_root and grant_root not in target.parents:
             raise PermissionError("task artifact is outside the granted directory")
         return target
 

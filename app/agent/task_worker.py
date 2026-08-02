@@ -26,7 +26,7 @@ from app.agent.task_graph import (
     build_task_graph,
 )
 from app.models import BackendError, ContentPart, Message, ModelBackend, ToolCall
-from app.tools import Toolbox, filesystem_tools
+from app.tools import CapabilityRegistry, FILESYSTEM_READ, FILESYSTEM_WRITE
 
 PLAN_RESPONSE_FORMAT = {
     "type": "json_schema",
@@ -59,8 +59,9 @@ IMPLEMENTER_SYSTEM_PROMPT = (
     "Implement the task inside the provided sandbox. Inspect files instead of guessing. "
     "Use write_file to create or fully replace a file, edit_file for an exact unique "
     "repair, and read_file after a failure or whenever current contents matter. Tool paths "
-    "are relative to the granted task directory; choose filenames from the task and never "
-    "prefix a tool path with the granted directory. Tool results and test feedback are "
+    "may be relative to the granted directory or absolute when they resolve inside it. "
+    "Choose paths from the task and do not guess the location of an ambiguous bare filename. "
+    "Tool results and test feedback are "
     "authoritative; repair every reported failure that is within the task. When the "
     "implementation attempt is complete, answer with a concise factual summary."
 )
@@ -106,8 +107,8 @@ def implementation_prompt(context: TaskContext, listing: str) -> str:
     return (
         f"Task: {context.task}\n"
         f"Granted directory: {context.grant.subdirectory}\n"
-        "Tool path rule: paths are relative to the granted directory; do not repeat that "
-        "directory in a tool path.\n"
+        "Tool path rule: relative paths resolve from the granted directory; absolute paths "
+        "are allowed only when they resolve inside it.\n"
         f"Attempt: {context.iteration}\n"
         f"Plan:\n{steps}\n"
         f"Acceptance criteria:\n{criteria}\n"
@@ -122,7 +123,7 @@ def repeats_grant_directory(path: str, subdirectory: str) -> bool:
 
     requested = PurePosixPath(path.replace("\\", "/")).parts
     granted = PurePosixPath(subdirectory.replace("\\", "/")).parts
-    return len(requested) > len(granted) and requested[: len(granted)] == granted
+    return bool(granted) and len(requested) > len(granted) and requested[: len(granted)] == granted
 
 
 class ModelTaskWorker:
@@ -148,14 +149,20 @@ class ModelTaskWorker:
         return parse_plan(completion.text)
 
     async def implement(self, context: TaskContext) -> ImplementationResult:
-        if not context.grant.allows("write_file") or not context.grant.allows("edit_file"):
+        if not context.grant.allows(FILESYSTEM_WRITE):
             raise TaskStageError("implementation refused: task grant is not active")
         if context.remaining_tool_calls < 1:
             raise TaskStageError("implementation stopped: tool-call budget is exhausted")
 
         root = context.grant.root(self.workspace)
         root.mkdir(parents=True, exist_ok=True)
-        toolbox = Toolbox(filesystem_tools(root))
+        registry = CapabilityRegistry(root)
+        capabilities = tuple(
+            capability
+            for capability in (FILESYSTEM_READ, FILESYSTEM_WRITE)
+            if context.grant.allows(capability)
+        )
+        toolbox = registry.toolbox(registry.grant(capabilities=capabilities))
         inspection = toolbox.run(ToolCall("task_inspect", "list_files", {}))
         listing = inspection.content[0].text or "(empty)"
         used = 1
@@ -194,7 +201,9 @@ class ModelTaskWorker:
                     result = Message(
                         role="tool", content=result.content, tool_call_id=call.id
                     )
-                elif toolbox.destructive(call.name) and not context.grant.allows(call.name):
+                elif toolbox.destructive(call.name) and not context.grant.allows(
+                    FILESYSTEM_WRITE
+                ):
                     result = text_message(
                         "tool", f"error: task grant does not allow {call.name}"
                     )

@@ -209,9 +209,12 @@ def build_agent(
             # before the pause would run a second time.
             answers = interrupt([describe_call(call) for call in risky])
             allowed.update({call.id: bool(answers.get(call.id)) for call in risky})
-        return {
-            "messages": [toolbox.run(call) if allowed[call.id] else declined(call) for call in calls]
-        }
+        messages = []
+        for call in calls:
+            messages.append(
+                await toolbox.run_async(call) if allowed[call.id] else declined(call)
+            )
+        return {"messages": messages}
 
     async def persist(state: AgentState) -> None:
         store.append(state.thread_id, state.messages)
