@@ -86,12 +86,18 @@ MAX_MODEL_LEN = 16384
 # cumem allocator and no double count. So this is not a tuning knob inherited
 # from the baseline; it is the cost of the optimization being attempted.
 #
-# 0.83 rather than the observed default of 0.92: the failed boot was 1.72 GiB
-# short with 947 MiB free, so roughly 2 GiB must come off a 22.06 GiB card. That
-# should still leave a KV cache above the baseline's working 10.03 GiB, so 16384
-# tokens stay safe. It is an estimate from one failure, not a measurement, and
-# the next boot is what confirms or refutes it.
-GPU_MEMORY_UTILIZATION = 0.83
+# 0.80 rather than the observed default of 0.92. The failed boot was 1.72 GiB
+# short with 947 MiB free, so about 2 GiB has to come off a 22.06 GiB card;
+# 0.80 removes roughly 2.65 GiB, which clears the shortfall with margin instead
+# of landing on it. The KV cache should still come out near 11 GiB, above the
+# baseline's working 10.03 GiB, so 16384 tokens stay safe.
+#
+# Deliberately the cautious end: raising this later costs one boot, while
+# another OOM costs a boot plus whatever Modal's automatic retry burns before
+# the App is stopped. It remains an estimate from one failure, and the next boot
+# is what confirms or refutes it — read `Available KV cache memory` from the log
+# rather than inferring success from the absence of a crash.
+GPU_MEMORY_UTILIZATION = 0.80
 
 # How long the GPU stays warm after the last request. This is the idle-GPU dial
 # and the whole reason the deployment is worth doing. It can also be changed
