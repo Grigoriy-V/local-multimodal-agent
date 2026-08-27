@@ -4,11 +4,14 @@ The GPU half of the deployed profile: vLLM serving Gemma 4 12B behind an
 OpenAI-compatible API, scaled to zero so no GPU runs while the assistant is
 idle.
 
-The live `assistant-llm` App is the unsnapshotted baseline measured in
-`reports/2026-08-28_v2_step3a_model_endpoint.md`. The current `model_app.py` is
-an unverified CPU+GPU snapshot candidate. Before it is deployed, it must receive
-a new App identity and the remaining readiness/autoscaling fixes listed in
-`ROADMAP.md` step 3b. Do not deploy it over the measured baseline.
+Two App identities, on purpose. The live `assistant-llm` is the unsnapshotted
+baseline measured in `reports/2026-08-28_v2_step3a_model_endpoint.md`, and it is
+not defined by this file any more. `model_app.py` now defines
+**`assistant-llm-v2`**, the CPU+GPU snapshot replacement: written, checked
+offline, and never deployed or invoked. Its cold start is unmeasured, so no
+claim about it is available yet.
+
+Every command below that would start a container is a separate human gate.
 
 This directory is infrastructure. Nothing in `app/` imports it, and nothing here
 imports `app/`. The only connection is the URL in `MODEL_ENDPOINT`, which is the
@@ -22,12 +25,17 @@ Install the deploy dependency once with `uv sync --all-groups`.
 # 1. Fill the weights Volume. CPU only, runs once, cents.
 .venv\Scripts\python.exe -m modal run deploy/modal/model_app.py::fetch_weights
 
-# 2. Deploy only after step 3b names the replacement App and the human approves.
-# Deployment does not authorize the paid invocations needed to create/verify snapshots.
+# 2. Prove the engine configuration parses, on CPU, before any GPU is involved.
+.venv\Scripts\python.exe -m modal run deploy/modal/model_app.py::preflight
+
+# 3. Deploy `assistant-llm-v2`. Human gate. Deploying does not authorize the
+# paid invocations that create and verify the snapshot — those are gated again.
 .venv\Scripts\python.exe -m modal deploy deploy/modal/model_app.py
 
-# 3. Change the idle window without deploying.
+# 4. Change the idle window without deploying. `--app` defaults to the identity
+# in model_app.py, so name the baseline explicitly to touch the baseline.
 .venv\Scripts\python.exe deploy/modal/autoscale.py --window 300
+.venv\Scripts\python.exe deploy/modal/autoscale.py --app assistant-llm --window 30
 ```
 
 On Windows, prefix with `$env:PYTHONIOENCODING="utf-8"` if the console rejects
@@ -80,7 +88,7 @@ Never commit the token. `.env` is ignored; `.env.example` holds the shape only.
 | Change | Cost |
 |---|---|
 | `MODEL_MAX_TOKENS`, `AGENT_CONTEXT_FRACTION` | none — `.env`, no restart |
-| Idle window | seconds — `autoscale.py`, no deploy; planned default is 600 s |
+| Idle window | seconds — `autoscale.py`, no deploy; the deployed default is 600 s |
 | `MAX_MODEL_LEN`, GPU type | seconds — deploy, no image rebuild, weights stay |
 | vLLM version, weights | minutes — image rebuild or Volume refill |
 
@@ -96,3 +104,15 @@ The replacement starts explicitly at `min_containers=0`, `max_containers=1`.
 The zero preserves scale-to-zero; the one caps cost for the initial private
 service. The baseline App remains available until text, multimodal, backend and
 Telegram acceptance pass on the replacement.
+
+## Readiness
+
+`start` and `resume` both wait on vLLM's `/health`, not on an open port —
+uvicorn binds before the engine can answer, so a TCP connect proves the wrong
+thing. Each wait is bounded and prints how long it took, which is where the
+restore-to-health number for step 3b comes from. A failure says which of the
+three things happened: vLLM exited (with its return code, its traceback being in
+this container's logs), the budget expired with the server still running (with
+the last `/health` result), or it became healthy. `tests/test_model_endpoint.py`
+covers those paths offline, because the alternative way to find a mistake in
+them is a GPU container.

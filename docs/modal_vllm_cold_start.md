@@ -15,12 +15,15 @@ this file is neither.
 The deployed `assistant-llm` is the measured, unsnapshotted baseline. A read-only
 Modal audit on 2026-08-28 confirmed that its launch command has no
 `--enable-sleep-mode`, and its logs contain no `/sleep`, `/wake_up` or snapshot
-restore. The CPU+GPU snapshot implementation in `deploy/modal/model_app.py` is a
-local candidate: it imports and registers with the installed Modal client, but
-it has not been deployed or exercised.
+restore.
 
-The replacement must use a new Modal App identity. Do not overwrite the baseline
-that produced the measurements below; keep it until the replacement is accepted.
+`deploy/modal/model_app.py` now defines a different App, `assistant-llm-v2`, so
+a deploy of this file can no longer overwrite the baseline that produced the
+measurements below. The CPU+GPU snapshot implementation there is complete and
+checked offline — it registers with the installed Modal client, its readiness
+paths are unit-tested, and its scaling bounds are asserted — but it has never
+been deployed or invoked. Nothing below the "Expectations" heading is a claim
+about it; it has no measurements at all.
 
 ## What is being optimized
 
@@ -107,9 +110,19 @@ vLLM and the model:
 - **Weights preloaded** into a Volume by a CPU function, so GPU time is never
   spent downloading.
 
-Before deployment the candidate still needs bounded `/health` readiness with
-subprocess failure reporting, a new App name, and explicit autoscaling:
-`min_containers=0`, `max_containers=1`, `scaledown_window=600`.
+- **Bounded readiness on `/health`.** Both `@modal.enter` hooks wait for vLLM to
+  report healthy rather than for the port to bind, under a deadline
+  (`START_READY_TIMEOUT` 600 s, `WAKE_READY_TIMEOUT` 300 s) that sits inside the
+  15-minute container timeout. Each wait prints its elapsed seconds, which is
+  where restore-to-health comes from, and each failure names its cause: the
+  subprocess exited with a return code, or the budget expired while it was still
+  running. Covered offline by `tests/test_model_endpoint.py`.
+- **A separate App identity**, `assistant-llm-v2`, so deploying this file cannot
+  replace the measured baseline.
+- **Explicit autoscaling**: `min_containers=0` keeps scale-to-zero a stated
+  decision rather than a platform default, `max_containers=1` caps the cost of a
+  private service, and `scaledown_window=600` stops the GPU from being dropped
+  between two messages of one conversation while a wake still costs minutes.
 
 ## Not applied, and why
 
@@ -153,9 +166,12 @@ fallback rather than an assumed improvement.
 Each deploy and every action that creates a worker remains a separate human
 gate.
 
-1. Finish the local definition: new App identity, bounded health readiness,
+1. **Done.** The local definition: new App identity, bounded health readiness,
    explicit 0→1 scaling and a ten-minute idle window.
-2. Run static/offline checks and the CPU `preflight`; do not call the model.
+2. Static and offline checks are done — the module registers with the Modal
+   client, `tests/test_model_endpoint.py` covers the readiness paths and the
+   scaling bounds, and the full suite and `ruff` are clean. The CPU `preflight`
+   remains: it starts a container, so it is a human gate like the rest.
 3. Deploy the replacement without changing `MODEL_ENDPOINT`.
 4. With explicit permission, invoke it once to create a snapshot and record the
    full first-boot log.

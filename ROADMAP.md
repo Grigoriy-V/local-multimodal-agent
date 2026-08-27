@@ -4,7 +4,7 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none
+**Current approved step:** 3b implementation only — no deploy, no worker start
 
 This is the only source for current product direction, development state,
 order and approved work. The human approves one step before implementation.
@@ -59,8 +59,10 @@ reconsidered; this roadmap wins any conflict.
   in `reports/test_v1.5/`.
 - The Version 2 direction is agreed and recorded below. Step 1 is closed and
   step 2 is implemented; the local database is at schema version 1 and both
-  conversations and files are scoped by user. Step 3 is split into 3a and 3b;
-  neither is authorized.
+  conversations and files are scoped by user. Step 3a is closed. Step 3b is
+  implemented and unmeasured: `assistant-llm-v2` exists as a definition only,
+  has never been deployed or invoked, and no claim about its cold start is
+  available. Step 3c is not authorized.
 
 ## Closed stages
 
@@ -124,19 +126,24 @@ Ordered plan:
       deployed App does not use memory snapshots.
       Evidence: `reports/2026-08-28_v2_step3a_model_endpoint.md`.
 
-   b. **Optimized replacement model deployment.** Planned, not authorized for
-      implementation or deployment. Build and validate a new App identity
-      rather than overwriting `assistant-llm`:
+   b. **Optimized replacement model deployment.** Implementation authorized and
+      done; deployment is not. A new App identity is built and validated
+      offline rather than overwriting `assistant-llm`:
 
-      1. finish the snapshot candidate in `deploy/modal/model_app.py`: bounded
-         `/health` readiness, subprocess failure reporting, explicit
-         `min_containers=0`, `max_containers=1`, and an initial ten-minute
-         `scaledown_window`;
+      1. **Done.** `deploy/modal/model_app.py` defines `assistant-llm-v2`, so a
+         deploy of that file can no longer replace the measured baseline. Both
+         `@modal.enter` hooks wait on vLLM's `/health` under a deadline instead
+         of on an open port, print elapsed seconds, and distinguish a
+         subprocess exit with its return code from an expired budget. Scaling
+         is explicit: `min_containers=0`, `max_containers=1`,
+         `scaledown_window=600`. `tests/test_model_endpoint.py` covers the
+         readiness paths and asserts the identity and bounds offline.
       2. retain the proven CUDA-devel image, pinned model/vLLM/transformers,
          protected OpenAI-compatible endpoint, preloaded weights Volume and
          compile-cache Volume; do not optimize the image or add weight
          prefetch before measurements justify either;
-      3. run offline/static checks and the CPU preflight before any deploy;
+      3. offline and static checks are done; the CPU preflight remains and is
+         itself a human gate, because it starts a container;
       4. deploy under a new name. Deployment is a human gate; creation of each
          paid GPU worker is a separate human gate;
       5. create and verify CPU+GPU memory snapshots using vLLM sleep/wake, then
@@ -193,8 +200,8 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Authorize step 3b implementation only: finish and validate the replacement
-   deployment definition without deploying or starting a worker.
+1. Authorize the CPU `preflight` run against `assistant-llm-v2`. Cents, one CPU
+   container, no GPU; it is the last check that costs nothing meaningful.
 2. Separately authorize the new deployment and each paid snapshot/benchmark
    invocation described in step 3b.
 3. Accept step 2 against the accepted endpoint: one conversational turn and one

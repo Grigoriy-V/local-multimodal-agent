@@ -23,7 +23,14 @@ from __future__ import annotations
 
 import modal
 
-APP_NAME = "assistant-llm"
+# A separate identity from the measured baseline. `assistant-llm` is the
+# unsnapshotted deployment behind the numbers in
+# `reports/2026-08-28_v2_step3a_model_endpoint.md`; deploying this file over it
+# would destroy both the comparison and the rollback. The name says "second
+# deployment" rather than "snapshot" on purpose: if snapshots fail and the
+# fallback is `FAST_BOOT`, this identity survives that change, while a
+# technique-shaped name would have to be renamed and lose its own history.
+APP_NAME = "assistant-llm-v2"
 
 # Google's own QAT checkpoint in compressed-tensors format, built for vLLM. This
 # is the same repository the local server was validated against, so behaviour is
@@ -70,7 +77,38 @@ MAX_MODEL_LEN = 16384
 # and the whole reason the deployment is worth doing. It can also be changed
 # without deploying — see `autoscale.py` — but a deploy resets it to this value,
 # so this constant is the intended default and not merely a starting point.
-SCALEDOWN_WINDOW = 30
+#
+# Ten minutes, up from the baseline's 30 s. The baseline's window was chosen to
+# observe scale-to-zero quickly; this one is chosen for a person. A wake costs
+# minutes today, so dropping the GPU while someone reads an answer and types the
+# next message pays that cost repeatedly inside one conversation. Revisit it
+# against observed traffic and cost, not taste.
+SCALEDOWN_WINDOW = 600
+
+# Scale-to-zero is the product requirement, so the floor is stated rather than
+# inherited from a platform default that could change. The ceiling caps cost:
+# one A10 serves the initial private group, and `@modal.concurrent` already
+# gives one container 32 concurrent inputs.
+MIN_CONTAINERS = 0
+MAX_CONTAINERS = 1
+
+# Readiness budgets. The cold path may legitimately take minutes — the measured
+# baseline needed about 172 s from `vllm serve` to a listening server, and this
+# App adds warmup on top — while a restored container should be ready in
+# seconds. Both are bounded well inside the function timeout so that a hung
+# start fails with a diagnosis here instead of being killed anonymously by
+# Modal.
+START_READY_TIMEOUT = 10 * MINUTES
+WAKE_READY_TIMEOUT = 5 * MINUTES
+
+# Seconds between readiness polls. A refused connection fails instantly, so
+# without a pause the wait would spin a core for the entire cold start.
+POLL_INTERVAL = 2.0
+
+# Sleep and wake move roughly ten gigabytes between GPU and CPU memory. Generous
+# so it never trips on a slow transfer, bounded so a wedged endpoint cannot hang
+# the container until Modal kills it without explanation.
+SLEEP_TIMEOUT = 5 * MINUTES
 
 # The reference example's switch, kept by name. `--enforce-eager` skips CUDA
 # graph capture: a shorter cold start for lower steady-state throughput. For an
@@ -144,25 +182,68 @@ with image.imports():
 def _sleep(level: int = 1) -> None:
     """Move the GPU's contents into CPU memory so a snapshot can capture it."""
 
-    requests.post(f"http://localhost:{VLLM_PORT}/sleep?level={level}").raise_for_status()
+    requests.post(
+        f"http://localhost:{VLLM_PORT}/sleep?level={level}", timeout=SLEEP_TIMEOUT
+    ).raise_for_status()
 
 
 def _wake_up() -> None:
-    requests.post(f"http://localhost:{VLLM_PORT}/wake_up").raise_for_status()
+    requests.post(f"http://localhost:{VLLM_PORT}/wake_up", timeout=SLEEP_TIMEOUT).raise_for_status()
 
 
-def _wait_ready(process) -> None:
-    """Block until vLLM is listening, and fail loudly if it died instead."""
+def _wait_ready(process, timeout: float, stage: str) -> float:
+    """Block until vLLM reports itself healthy, or fail with what went wrong.
 
-    import socket
+    Readiness is `/health`, not an open socket. Uvicorn binds the port before
+    the engine can answer anything, so a TCP connect says "the process reached
+    the HTTP server", which is not the question. `/health` returns 200 only once
+    the engine is serving, which is what both a snapshot warmup and a restored
+    wake actually need.
+
+    Three ways this ends, and each says which one it was:
+
+    - ready: returns the elapsed seconds, which is the measurement step 3b asks
+      for at both cold start and restore;
+    - the subprocess exited: reported with its return code, because the useful
+      detail is vLLM's own traceback and that is already in the Modal logs;
+    - the budget expired with the process still alive: reported with the last
+      thing `/health` did, which distinguishes "still loading" from "wedged".
+    """
+
+    import time
+
+    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    last_seen = "no connection yet"
 
     while True:
+        code = process.poll()
+        if code is not None:
+            raise RuntimeError(
+                f"{stage}: vLLM exited with code {code} after "
+                f"{time.monotonic() - started:.1f}s; see this container's logs "
+                f"for its traceback"
+            )
+
         try:
-            socket.create_connection(("localhost", VLLM_PORT), timeout=1).close()
-            return
-        except OSError:
-            if process.poll() is not None:
-                raise RuntimeError(f"vLLM exited with {process.returncode}") from None
+            response = requests.get(f"http://localhost:{VLLM_PORT}/health", timeout=5)
+            if response.status_code == 200:
+                elapsed = time.monotonic() - started
+                print(f"{stage}: healthy after {elapsed:.1f}s", flush=True)
+                return elapsed
+            last_seen = f"/health returned {response.status_code}"
+        except requests.RequestException as error:
+            last_seen = f"{type(error).__name__}"
+
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"{stage}: vLLM was still not healthy after {timeout:.0f}s and is "
+                f"still running; last attempt: {last_seen}"
+            )
+
+        # Poll rather than spin. A refused connection returns immediately, so
+        # without this the loop would burn a CPU core for the whole cold start.
+        time.sleep(POLL_INTERVAL)
 
 
 def _warmup() -> None:
@@ -266,6 +347,8 @@ def preflight() -> None:
         "/root/.cache/vllm": vllm_cache,
     },
     scaledown_window=SCALEDOWN_WINDOW,
+    min_containers=MIN_CONTAINERS,
+    max_containers=MAX_CONTAINERS,
     timeout=15 * MINUTES,
     # The whole point of this shape. The snapshot is taken after vLLM has
     # started, been warmed up and been put to sleep, so a later wake restores a
@@ -321,7 +404,7 @@ class Server:
         print(*command, flush=True)
 
         self.process = subprocess.Popen(command)
-        _wait_ready(self.process)
+        _wait_ready(self.process, START_READY_TIMEOUT, "start")
         # Real requests, so torch.compile and CUDA graph capture happen now and
         # land inside the snapshot rather than on every wake.
         _warmup()
@@ -329,10 +412,14 @@ class Server:
 
     @modal.enter(snap=False)
     def resume(self) -> None:
-        """Restore from the snapshot: wake the sleeping server and serve."""
+        """Restore from the snapshot: wake the sleeping server and serve.
+
+        The elapsed time this prints is restore-to-health, which is the number
+        step 3b compares against the baseline's ~172 s server start.
+        """
 
         _wake_up()
-        _wait_ready(self.process)
+        _wait_ready(self.process, WAKE_READY_TIMEOUT, "resume")
 
     @modal.web_server(
         port=VLLM_PORT,
@@ -347,4 +434,9 @@ class Server:
 
     @modal.exit()
     def stop(self) -> None:
-        self.process.terminate()
+        # `start` can raise before the attribute exists — a failed preflight
+        # assumption, a vLLM that dies on launch. Shutdown must not replace that
+        # diagnosis with an AttributeError from the exit hook.
+        process = getattr(self, "process", None)
+        if process is not None:
+            process.terminate()

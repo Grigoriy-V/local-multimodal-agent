@@ -1,0 +1,189 @@
+"""Offline checks on the Modal model endpoint definition.
+
+`deploy/modal/` is infrastructure and nothing in `app/` imports it, so this is
+not a test of product behaviour. It exists because the alternative way to
+discover a mistake in the readiness loop or the deployment identity is a GPU
+container, and that costs money and a human gate every time.
+
+Two things are checked, and both are cheap:
+
+- the readiness wait, whose three outcomes must each be distinguishable — a
+  container that hangs silently or reports the wrong cause is exactly what step
+  3b needs not to happen while measuring cold starts;
+- the constants that keep this file from being deployed over the measured
+  baseline App.
+
+Nothing here starts a container, opens a socket or reads a credential.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+import unittest
+from pathlib import Path
+
+SOURCE = Path(__file__).resolve().parents[1] / "deploy" / "modal" / "model_app.py"
+
+try:
+    import modal  # noqa: F401 - presence is the condition, not the import
+except ImportError:  # pragma: no cover - the deploy group is optional
+    model_app = None
+else:
+    spec = importlib.util.spec_from_file_location("model_app_under_test", SOURCE)
+    model_app = importlib.util.module_from_spec(spec)
+    sys.modules["model_app_under_test"] = model_app
+    spec.loader.exec_module(model_app)
+
+
+class FakeResponse:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+
+class FakeRequestException(Exception):
+    pass
+
+
+class FakeRequests:
+    """Stands in for the `requests` the container gets from `image.imports()`.
+
+    Locally that import does not bind, so the module global is absent rather
+    than real — which is what makes this substitution honest instead of a
+    monkeypatch over a working library.
+    """
+
+    RequestException = FakeRequestException
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.calls = []
+
+    def get(self, url, timeout=None):
+        self.calls.append(url)
+        # The last reply repeats rather than defaulting to healthy, so a test
+        # about never becoming ready cannot pass by running out of script.
+        reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+class FakeProcess:
+    """A subprocess that is alive until it has been polled `dies_after` times."""
+
+    def __init__(self, dies_after=None, returncode=1):
+        self.polls = 0
+        self.dies_after = dies_after
+        self.returncode = returncode
+
+    def poll(self):
+        self.polls += 1
+        if self.dies_after is not None and self.polls > self.dies_after:
+            return self.returncode
+        return None
+
+
+@unittest.skipIf(model_app is None, "the deploy dependency group is not installed")
+class WaitReadyTests(unittest.TestCase):
+    def setUp(self):
+        self.original_requests = getattr(model_app, "requests", None)
+        self.original_interval = model_app.POLL_INTERVAL
+        # Real polling would make every retry case take seconds.
+        model_app.POLL_INTERVAL = 0.0
+
+    def tearDown(self):
+        model_app.POLL_INTERVAL = self.original_interval
+        if self.original_requests is None:
+            model_app.__dict__.pop("requests", None)
+        else:
+            model_app.requests = self.original_requests
+
+    def use(self, replies):
+        fake = FakeRequests(replies)
+        model_app.requests = fake
+        return fake
+
+    def test_returns_elapsed_time_once_health_answers(self):
+        fake = self.use([FakeResponse(200)])
+
+        elapsed = model_app._wait_ready(FakeProcess(), timeout=10, stage="start")
+
+        self.assertGreaterEqual(elapsed, 0.0)
+        self.assertTrue(fake.calls[0].endswith("/health"))
+
+    def test_keeps_waiting_through_refusals_and_unhealthy_replies(self):
+        # A bound port that is not serving yet is the normal cold-start shape:
+        # connection errors first, then 503 from a live server, then ready.
+        fake = self.use(
+            [
+                FakeRequestException("connection refused"),
+                FakeResponse(503),
+                FakeResponse(200),
+            ]
+        )
+
+        model_app._wait_ready(FakeProcess(), timeout=10, stage="start")
+
+        self.assertEqual(len(fake.calls), 3)
+
+    def test_reports_the_return_code_when_vllm_exits(self):
+        self.use([FakeRequestException("connection refused")])
+        process = FakeProcess(dies_after=1, returncode=3)
+
+        with self.assertRaises(RuntimeError) as raised:
+            model_app._wait_ready(process, timeout=10, stage="start")
+
+        message = str(raised.exception)
+        self.assertIn("start", message)
+        self.assertIn("code 3", message)
+
+    def test_reports_the_last_health_result_when_the_budget_expires(self):
+        self.use([FakeResponse(503)])
+
+        with self.assertRaises(RuntimeError) as raised:
+            model_app._wait_ready(FakeProcess(), timeout=0, stage="resume")
+
+        message = str(raised.exception)
+        self.assertIn("resume", message)
+        self.assertIn("503", message)
+        self.assertIn("still running", message)
+
+    def test_a_hung_server_cannot_wait_forever(self):
+        # The failure this replaces: an unbounded loop that Modal eventually
+        # kills on the function timeout with no indication of the cause. A
+        # positive budget against a server that never becomes healthy is what
+        # proves the deadline governs the loop rather than merely predating it.
+        import time
+
+        fake = self.use([FakeResponse(503)])
+
+        started = time.monotonic()
+        with self.assertRaises(RuntimeError):
+            model_app._wait_ready(FakeProcess(), timeout=0.05, stage="start")
+
+        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertGreater(len(fake.calls), 1)
+
+
+@unittest.skipIf(model_app is None, "the deploy dependency group is not installed")
+class DeploymentIdentityTests(unittest.TestCase):
+    def test_does_not_deploy_over_the_measured_baseline(self):
+        self.assertNotEqual(model_app.APP_NAME, "assistant-llm")
+
+    def test_scales_to_zero_with_an_explicit_ceiling(self):
+        self.assertEqual(model_app.MIN_CONTAINERS, 0)
+        self.assertEqual(model_app.MAX_CONTAINERS, 1)
+
+    def test_readiness_budgets_stay_inside_the_container_timeout(self):
+        container_timeout = 15 * model_app.MINUTES
+        self.assertLess(model_app.START_READY_TIMEOUT, container_timeout)
+        self.assertLess(model_app.WAKE_READY_TIMEOUT, container_timeout)
+
+    def test_video_stays_unset_so_audio_is_never_the_profiled_modality(self):
+        # The crash recorded in reports/2026-08-28_v2_step3a_model_endpoint.md.
+        self.assertNotIn("video", model_app.MM_LIMITS)
+
+
+if __name__ == "__main__":
+    unittest.main()

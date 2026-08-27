@@ -20,6 +20,7 @@ it.
 |---|---|---|
 | `assistant-control` | CPU app: Telegram webhook, worker function, LangGraph, tool routing | Deploys often; must not re-version the GPU app |
 | `assistant-llm` | GPU app: vLLM behind an OpenAI-compatible HTTP server | Deploys rarely; owns the expensive image and weights |
+| `assistant-llm-v2` | The same shape with CPU+GPU snapshots; defined, not deployed | A measured configuration is not silently redefined, so the replacement is a second identity until it is accepted |
 | `assistant-sandbox` | Modal Sandboxes for ephemeral coding work | Created at runtime, not deployed |
 | Postgres | External managed provider | Modal has no managed Postgres |
 | Modal Volume | Model weights, vLLM compile cache, task artifacts | Write-once-read-many only |
