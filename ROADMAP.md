@@ -142,8 +142,13 @@ Ordered plan:
          protected OpenAI-compatible endpoint, preloaded weights Volume and
          compile-cache Volume; do not optimize the image or add weight
          prefetch before measurements justify either;
-      3. offline and static checks are done; the CPU preflight remains and is
-         itself a human gate, because it starts a container;
+      3. **Done.** Offline and static checks, and the CPU preflight, which
+         passed against `assistant-llm-v2` on 2026-08-28 with `vllm 0.26.0 /
+         transformers 5.14.1` and `head_size=512`, no GPU and no model call.
+         That run also showed that `modal run` cannot validate the snapshot
+         path at all — Modal disables memory snapshots for ephemeral apps — so
+         deployment is a precondition of the first snapshot measurement rather
+         than something it can follow;
       4. deploy under a new name. Deployment is a human gate; creation of each
          paid GPU worker is a separate human gate;
       5. create and verify CPU+GPU memory snapshots using vLLM sleep/wake, then
@@ -200,10 +205,11 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Authorize the CPU `preflight` run against `assistant-llm-v2`. Cents, one CPU
-   container, no GPU; it is the last check that costs nothing meaningful.
-2. Separately authorize the new deployment and each paid snapshot/benchmark
-   invocation described in step 3b.
+1. Authorize deploying `assistant-llm-v2`. Every check that can be run without
+   a GPU has passed, and snapshots cannot be validated any other way. Deploying
+   starts no container by itself and authorizes no invocation.
+2. Separately authorize each paid GPU invocation described in step 3b: one to
+   create the snapshot, then at least two restored cold wakes.
 3. Accept step 2 against the accepted endpoint: one conversational turn and one
    work request through Telegram. The baseline endpoint can prove integration,
    but the optimized replacement should become the normal product endpoint.

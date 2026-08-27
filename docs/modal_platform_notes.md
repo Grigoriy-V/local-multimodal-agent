@@ -192,6 +192,14 @@ not validate the optimization; inspect the Containers view or the log message
 `Snapshot created. Restoring Function from memory snapshot.` and measure
 multiple restored wakes.
 
+**Snapshots require a deployed app.** Observed directly on 2026-08-28 while
+running `preflight` on `assistant-llm-v2`: `modal run` creates an ephemeral app,
+and Modal answered `Memory snapshots are disabled for ephemeral apps. Deploy
+your app with modal deploy to enable memory snapshots.` So there is no cheap
+`modal run` route to validating the snapshot path — the first evidence about it
+can only come from a deployed app, which makes deployment a precondition of the
+measurement rather than a consequence of it.
+
 ## Project-specific scaling decision
 
 The private-assistant replacement starts with explicit bounds rather than Modal

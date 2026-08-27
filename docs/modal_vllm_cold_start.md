@@ -168,10 +168,13 @@ gate.
 
 1. **Done.** The local definition: new App identity, bounded health readiness,
    explicit 0→1 scaling and a ten-minute idle window.
-2. Static and offline checks are done — the module registers with the Modal
+2. **Done.** Static and offline checks — the module registers with the Modal
    client, `tests/test_model_endpoint.py` covers the readiness paths and the
-   scaling bounds, and the full suite and `ruff` are clean. The CPU `preflight`
-   remains: it starts a container, so it is a human gate like the rest.
+   scaling bounds, and the full suite and `ruff` are clean — plus the CPU
+   `preflight`, which passed on `assistant-llm-v2` on 2026-08-28: `vllm 0.26.0 /
+   transformers 5.14.1`, `head_size=512`, `video` still unset. No GPU was
+   involved and no model was called. That run also established that snapshots
+   cannot be validated by `modal run`; see `modal_platform_notes.md`.
 3. Deploy the replacement without changing `MODEL_ENDPOINT`.
 4. With explicit permission, invoke it once to create a snapshot and record the
    full first-boot log.
