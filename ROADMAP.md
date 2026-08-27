@@ -152,12 +152,16 @@ Ordered plan:
          than something it can follow;
       4. **Done.** `assistant-llm-v2` is deployed as of 2026-08-28, in 5 s from
          cached image layers, at zero containers. `assistant-llm` is untouched
-         and also at zero. Its web URL printed as
-         `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run`, which
-         differs in shape from the baseline's recorded `.modal.direct` URL; the
-         working URL and the 401-at-edge behaviour are both unverified on this
-         App and get confirmed at the first authorized invocation. Creation of
-         each paid GPU worker remains a separate human gate;
+         and also at zero. Its web URL is
+         `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run`. The
+         domain differs from the baseline's `.modal.direct` because the snapshot
+         hooks forced `@app.cls` + `@modal.web_server` in place of
+         `app.server()`, not because protection differs — but that also changes
+         the documented credential mechanism to `Modal-Key` / `Modal-Secret`
+         headers, so step 3a's finding that a proxy token doubles as a bearer
+         token is **not carried over** and must be retested here before
+         `MODEL_ENDPOINT` moves. Creation of each paid GPU worker remains a
+         separate human gate;
       5. create and verify CPU+GPU memory snapshots using vLLM sleep/wake, then
          measure at least two restored cold starts because Modal may create
          several snapshots for one GPU type;
@@ -169,8 +173,11 @@ Ordered plan:
          removal of the two inherited WSL environment variables are later,
          one-variable A/B tests;
       8. switch `MODEL_ENDPOINT` only after the replacement passes the same
-         backend and Telegram acceptance checks. Retiring the baseline App is
-         a later destructive human gate, not part of deployment.
+         backend and Telegram acceptance checks — which now includes proving
+         how `OpenAICompatibleBackend` authenticates against a `.modal.run`
+         proxy-auth endpoint, since the bearer-token equivalence was only ever
+         shown for `.modal.direct`. Retiring the baseline App is a later
+         destructive human gate, not part of deployment.
 
       Target: a reproducible scale-to-zero endpoint whose restored cold start
       is short enough for a private interactive assistant. No target number is

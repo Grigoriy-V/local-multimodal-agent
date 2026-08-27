@@ -192,6 +192,29 @@ not validate the optimization; inspect the Containers view or the log message
 `Snapshot created. Restoring Function from memory snapshot.` and measure
 multiple restored wakes.
 
+**`app.server()` and `web_server()` produce different domains and different
+auth.** Verified against the installed client on 2026-08-28, not guessed:
+`@modal.web_server` documents its subdomain as
+`<workspace>--<label>.modal.run` and its `requires_proxy_auth` as "Require
+Modal-Key and Modal-Secret HTTP Headers on requests", while `modal curl` fetches
+a token only for `.modal.direct` hosts, which it comments are `app.server()`
+functions. So the baseline's `.modal.direct` URL and the replacement's
+`.modal.run` URL differ because the snapshot lifecycle forced `@app.cls` with
+`@modal.enter(snap=…)` hooks, which `app.server()` cannot express — not because
+one of them is unprotected.
+
+The consequence is not cosmetic. Step 3a's headline result was that a proxy
+token doubles as an ordinary bearer token, so `OpenAICompatibleBackend` needed
+no change. That was established against `.modal.direct`. Whether the same
+equivalence holds for a `.modal.run` endpoint whose documented mechanism is two
+named headers is **unverified**, and it is the thing to test before
+`MODEL_ENDPOINT` moves. If it does not hold, the application does need the
+change this project's notes originally predicted.
+
+Proxy tokens are workspace-scoped — they are created under `modal workspace
+proxy-tokens`, not per app — so one token covers both Apps and no new
+credential is needed to reach the replacement.
+
 **Snapshots require a deployed app.** Observed directly on 2026-08-28 while
 running `preflight` on `assistant-llm-v2`: `modal run` creates an ephemeral app,
 and Modal answered `Memory snapshots are disabled for ephemeral apps. Deploy
