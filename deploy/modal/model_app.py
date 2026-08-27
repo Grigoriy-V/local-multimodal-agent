@@ -92,23 +92,41 @@ SCALEDOWN_WINDOW = 600
 MIN_CONTAINERS = 0
 MAX_CONTAINERS = 1
 
+# The real ceiling on everything the enter hooks do. Modal stops waiting for the
+# container to come up after this, so a budget that can exceed it is not a
+# budget: the container gets killed mid-diagnosis, which is exactly the anonymous
+# failure the bounded waits exist to prevent. Every timeout below is chosen so
+# that the worst case of a whole path stays under it.
+STARTUP_TIMEOUT = 15 * MINUTES
+
 # Readiness budgets. The cold path may legitimately take minutes — the measured
-# baseline needed about 172 s from `vllm serve` to a listening server, and this
-# App adds warmup on top — while a restored container should be ready in
-# seconds. Both are bounded well inside the function timeout so that a hung
-# start fails with a diagnosis here instead of being killed anonymously by
-# Modal.
-START_READY_TIMEOUT = 10 * MINUTES
+# baseline needed about 172 s from `vllm serve` to a listening server — while a
+# restored container should be ready in seconds. Seven minutes is roughly 2.4x
+# the observed start, and the shared `assistant-vllm-cache` Volume means this App
+# inherits the baseline's warm compile cache rather than paying the 78 s first
+# compilation.
+START_READY_TIMEOUT = 7 * MINUTES
 WAKE_READY_TIMEOUT = 5 * MINUTES
 
 # Seconds between readiness polls. A refused connection fails instantly, so
 # without a pause the wait would spin a core for the entire cold start.
 POLL_INTERVAL = 2.0
 
-# Sleep and wake move roughly ten gigabytes between GPU and CPU memory. Generous
-# so it never trips on a slow transfer, bounded so a wedged endpoint cannot hang
-# the container until Modal kills it without explanation.
-SLEEP_TIMEOUT = 5 * MINUTES
+# Sleep and wake move roughly ten gigabytes between GPU and CPU memory.
+SLEEP_TIMEOUT = 3 * MINUTES
+
+# One warmup answer is 16 tokens, and the baseline answered 24 tokens in 1.8-2.4 s
+# warm. Ninety seconds is generous for the first one, which may still be capturing
+# CUDA graphs, and three of them cannot crowd out the readiness budget.
+WARMUP_TIMEOUT = 90
+WARMUP_REQUESTS = 3
+
+# Worst case, `start` is READY + WARMUP*REQUESTS + SLEEP and `resume` is
+# SLEEP(wake) + WAKE_READY. Both must fit under what Modal allows, and
+# `tests/test_model_endpoint.py` asserts it so a later timeout edit cannot
+# quietly reintroduce the anonymous kill.
+assert START_READY_TIMEOUT + WARMUP_TIMEOUT * WARMUP_REQUESTS + SLEEP_TIMEOUT < STARTUP_TIMEOUT
+assert SLEEP_TIMEOUT + WAKE_READY_TIMEOUT < STARTUP_TIMEOUT
 
 # The reference example's switch, kept by name. `--enforce-eager` skips CUDA
 # graph capture: a shorter cold start for lower steady-state throughput. For an
@@ -254,9 +272,11 @@ def _warmup() -> None:
         "messages": [{"role": "user", "content": "Who are you?"}],
         "max_tokens": 16,
     }
-    for _ in range(3):
+    for _ in range(WARMUP_REQUESTS):
         requests.post(
-            f"http://localhost:{VLLM_PORT}/v1/chat/completions", json=payload, timeout=300
+            f"http://localhost:{VLLM_PORT}/v1/chat/completions",
+            json=payload,
+            timeout=WARMUP_TIMEOUT,
         ).raise_for_status()
 
 
@@ -423,7 +443,7 @@ class Server:
 
     @modal.web_server(
         port=VLLM_PORT,
-        startup_timeout=15 * MINUTES,
+        startup_timeout=STARTUP_TIMEOUT,
         # Absent `requires_proxy_auth=False`, so Modal refuses an unauthorized
         # request at the edge and the GPU never wakes for it. vLLM's own
         # `--api-key` would answer 401 only after paying for a cold start.

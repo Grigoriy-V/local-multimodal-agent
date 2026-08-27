@@ -175,10 +175,21 @@ class DeploymentIdentityTests(unittest.TestCase):
         self.assertEqual(model_app.MIN_CONTAINERS, 0)
         self.assertEqual(model_app.MAX_CONTAINERS, 1)
 
-    def test_readiness_budgets_stay_inside_the_container_timeout(self):
-        container_timeout = 15 * model_app.MINUTES
-        self.assertLess(model_app.START_READY_TIMEOUT, container_timeout)
-        self.assertLess(model_app.WAKE_READY_TIMEOUT, container_timeout)
+    def test_the_whole_start_path_fits_under_what_modal_waits_for(self):
+        # Not just each budget: their sum. Readiness alone was inside the
+        # ceiling while readiness plus warmup plus sleep was double it, so a
+        # per-timeout check passed while the container could still be killed
+        # part way through reporting why it failed.
+        worst_start = (
+            model_app.START_READY_TIMEOUT
+            + model_app.WARMUP_TIMEOUT * model_app.WARMUP_REQUESTS
+            + model_app.SLEEP_TIMEOUT
+        )
+        self.assertLess(worst_start, model_app.STARTUP_TIMEOUT)
+
+    def test_the_whole_resume_path_fits_too(self):
+        worst_resume = model_app.SLEEP_TIMEOUT + model_app.WAKE_READY_TIMEOUT
+        self.assertLess(worst_resume, model_app.STARTUP_TIMEOUT)
 
     def test_video_stays_unset_so_audio_is_never_the_profiled_modality(self):
         # The crash recorded in reports/2026-08-28_v2_step3a_model_endpoint.md.
