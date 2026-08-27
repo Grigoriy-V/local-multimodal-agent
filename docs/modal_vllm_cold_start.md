@@ -10,6 +10,18 @@ Platform facts that are not specific to vLLM are in
 [`modal_platform_notes.md`](modal_platform_notes.md). `ROADMAP.md` is the plan;
 this file is neither.
 
+## Current state
+
+The deployed `assistant-llm` is the measured, unsnapshotted baseline. A read-only
+Modal audit on 2026-08-28 confirmed that its launch command has no
+`--enable-sleep-mode`, and its logs contain no `/sleep`, `/wake_up` or snapshot
+restore. The CPU+GPU snapshot implementation in `deploy/modal/model_app.py` is a
+local candidate: it imports and registers with the installed Modal client, but
+it has not been deployed or exercised.
+
+The replacement must use a new Modal App identity. Do not overwrite the baseline
+that produced the measurements below; keep it until the replacement is accepted.
+
 ## What is being optimized
 
 A wake measured **189 s** from request to ready, split by a timestamp in
@@ -17,14 +29,18 @@ A wake measured **189 s** from request to ready, split by a timestamp in
 
 | Stage | Time | What addresses it |
 |---|---|---|
-| Container scheduling, image pull, Python start | 14.6 s | nothing — already small |
-| Subprocess start, torch and vLLM imports | 77 s | memory snapshot |
-| Weight load and CUDA init | 32 s | GPU snapshot |
-| Engine init: profiling, KV cache, CUDA graphs | 58 s | GPU snapshot, or `--enforce-eager` |
+| Container scheduling, image availability, Python start | ~15–25 s | platform/cache dependent; not the first target |
+| Subprocess start, torch/vLLM imports and configuration | ~77 s | CPU+GPU memory snapshot |
+| Checkpoint read | 6.8–6.9 s | already fast; prefetch is a later A/B |
+| Engine profiling, KV cache, compilation and CUDA graphs | 58 s on the latest boot | GPU snapshot, or `--enforce-eager` fallback |
 | Route registration | 5 s | — |
 
-The image is 8% of the wake. Rebuilding it would have been wasted work; the
-target is everything vLLM does after the container exists.
+The latest recorded server process took about 172 s from `vllm serve` to a ready
+HTTP server; the earlier end-to-end wake measured 189–201 s. The exact stages do
+not sum to one universal total because they come from two recorded boots, but
+both show the same priority: rebuilding the image or relocating weights would
+target the small part. The expensive repeatable initialization after process
+start is what snapshots are meant to skip.
 
 Separately, generation measured **~13 tok/s** on an A10 for a short answer.
 
@@ -43,7 +59,7 @@ Modal:
 - [examples/vllm_throughput](https://modal.com/docs/examples/vllm_throughput) —
   in-process `vllm.LLM` with a warmup request. Not used: the snapshot template
   keeps the subprocess.
-- [guide/memory-snapshot](https://modal.com/docs/guide/memory-snapshot) —
+- [guide/memory-snapshots](https://modal.com/docs/guide/memory-snapshots) —
   `snap=True` vs `snap=False`, `experimental_options={"enable_gpu_snapshot": True}`,
   the `torch.compile` conflict and `TORCHINDUCTOR_COMPILE_THREADS=1`.
 - [guide/high-performance-llm-inference](https://modal.com/docs/guide/high-performance-llm-inference) —
@@ -69,7 +85,7 @@ vLLM and the model:
 - [google/gemma-4-12B-it-qat-q4_0-unquantized-assistant](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized-assistant) —
   a draft model for speculative decoding, not gated. Untried.
 
-## Applied
+## Implemented locally, not deployed
 
 - **GPU memory snapshot.** `@app.cls` with `enable_memory_snapshot=True` and
   `experimental_options={"enable_gpu_snapshot": True}`. `@modal.enter(snap=True)`
@@ -91,6 +107,10 @@ vLLM and the model:
 - **Weights preloaded** into a Volume by a CPU function, so GPU time is never
   spent downloading.
 
+Before deployment the candidate still needs bounded `/health` readiness with
+subprocess failure reporting, a new App name, and explicit autoscaling:
+`min_containers=0`, `max_containers=1`, `scaledown_window=600`.
+
 ## Not applied, and why
 
 - **`FAST_BOOT` / `--enforce-eager`.** The vLLM example's rule is to set it
@@ -106,7 +126,8 @@ vLLM and the model:
 - **`--async-scheduling`.** Present in the example, not carried over. Throughput,
   not cold start.
 - **`min_containers`.** Removes cold starts entirely and costs about $26/day.
-  Contradicts the reason for deploying this way.
+  A positive value contradicts the reason for deploying this way; set it
+  explicitly to zero rather than relying on a platform default.
 - **Raising `--max-model-len`.** vLLM reports room for 11.6 GiB of KV cache
   against 10.03 GiB in use at 16384 tokens, so the ceiling can rise a long way.
   Unrelated to cold start.
@@ -121,7 +142,32 @@ time against a measurement, not together.
 
 ## Expectations to hold this to
 
-Modal documents 2-10x from snapshots and notes the benefit appears **after a
-handful of cold starts, usually fewer than five**. A single wake after a deploy
-proves nothing. GPU snapshots are alpha; if they fail, a CPU-only snapshot still
-removes the 77 s of imports, which would be roughly 110 s rather than 189 s.
+Modal documents practical 3–10x improvements and notes that GPU Functions may
+create two or three worker-type-specific snapshots during their first few
+invocations. A single wake after a deploy proves nothing. GPU snapshots are
+Alpha; if they fail, `FAST_BOOT` / `--enforce-eager` becomes the measured
+fallback rather than an assumed improvement.
+
+## Ordered execution plan
+
+Each deploy and every action that creates a worker remains a separate human
+gate.
+
+1. Finish the local definition: new App identity, bounded health readiness,
+   explicit 0→1 scaling and a ten-minute idle window.
+2. Run static/offline checks and the CPU `preflight`; do not call the model.
+3. Deploy the replacement without changing `MODEL_ENDPOINT`.
+4. With explicit permission, invoke it once to create a snapshot and record the
+   full first-boot log.
+5. Let it scale to zero, then separately authorize at least two restored cold
+   wakes. Confirm snapshot creation/restore in Modal, not from latency alone.
+6. Record request-to-ready, restore-to-health, TTFT, full answer latency,
+   tokens/s, VRAM and cost against the existing baseline.
+7. Verify ordinary text, structured output/tool calling, then one image and one
+   audio input. Add multimodal snapshot warmup only if evidence shows first-use
+   initialization after restore.
+8. If snapshots fail or provide insufficient benefit, test `FAST_BOOT=True` as
+   a new run identity. Only afterward consider safetensors prefetch, image
+   changes or removing inherited WSL variables, one variable at a time.
+9. Switch the application endpoint only after backend and Telegram acceptance.
+   Keep deletion/retirement of the baseline as a later destructive gate.

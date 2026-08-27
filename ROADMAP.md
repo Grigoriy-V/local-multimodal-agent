@@ -2,7 +2,7 @@
 
 **Updated:** 2026-08-28
 
-**Project status:** Version 1.5 closed; Version 2 direction agreed, not authorized
+**Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** none
 
@@ -103,9 +103,12 @@ Ordered plan:
    `reports/2026-08-28_v2_step2_telegram_adapter.md`. Acceptance still needs a
    conversational turn, which needs a model server; the machine currently has no
    GPU.
-3. **Deployed profile.** Split in two, because the control plane cannot be
-   tested before a model can answer at all, and because the model application
-   3a deploys is carried into 3b unchanged.
+3. **Deployed profile.** The first model endpoint proved compatibility, but its
+   roughly three-minute wake is not acceptable as the assistant's normal
+   behaviour. The optimized model deployment is therefore a separate product
+   stage before the control plane. It gets a new Modal App identity; the
+   measured baseline remains available for comparison and rollback until the
+   replacement is accepted.
 
    a. **Closed.** `deploy/modal/` serves Gemma 4 12B on an A10 through vLLM's
       OpenAI-compatible API. Weights load into a Volume once from CPU, the
@@ -114,11 +117,48 @@ Ordered plan:
       unmodified `OpenAICompatibleBackend` — a proxy token is accepted as an
       ordinary bearer token, so the change this project's notes predicted was
       not needed. Nothing in `app/` changed. Scale to zero confirmed. Measured:
-      first boot ~196 s, idle to answer 201 s, answer 1.8-2.4 s warm; the wake
-      is dominated by container and image start rather than compilation.
+      first boot ~196 s, idle to answer 201 s, answer 1.8-2.4 s warm. A later
+      read-only audit of the deployed logs refined the diagnosis: weights load
+      in 6.8-6.9 s, while vLLM imports/configuration, engine profiling,
+      compilation and CUDA graph capture dominate the wake. The currently
+      deployed App does not use memory snapshots.
       Evidence: `reports/2026-08-28_v2_step3a_model_endpoint.md`.
 
-   b. **Control plane.** A second store implementation on external Postgres and
+   b. **Optimized replacement model deployment.** Planned, not authorized for
+      implementation or deployment. Build and validate a new App identity
+      rather than overwriting `assistant-llm`:
+
+      1. finish the snapshot candidate in `deploy/modal/model_app.py`: bounded
+         `/health` readiness, subprocess failure reporting, explicit
+         `min_containers=0`, `max_containers=1`, and an initial ten-minute
+         `scaledown_window`;
+      2. retain the proven CUDA-devel image, pinned model/vLLM/transformers,
+         protected OpenAI-compatible endpoint, preloaded weights Volume and
+         compile-cache Volume; do not optimize the image or add weight
+         prefetch before measurements justify either;
+      3. run offline/static checks and the CPU preflight before any deploy;
+      4. deploy under a new name. Deployment is a human gate; creation of each
+         paid GPU worker is a separate human gate;
+      5. create and verify CPU+GPU memory snapshots using vLLM sleep/wake, then
+         measure at least two restored cold starts because Modal may create
+         several snapshots for one GPU type;
+      6. record request-to-ready, restore-to-health, TTFT, warm answer latency,
+         tokens/s, VRAM and cost. Verify text first, then image and audio; extend
+         warmup only if the multimodal first request shows extra work;
+      7. if GPU snapshots fail or do not materially improve wake time, measure
+         `FAST_BOOT` / `--enforce-eager` as the fallback. Weight prefetch and
+         removal of the two inherited WSL environment variables are later,
+         one-variable A/B tests;
+      8. switch `MODEL_ENDPOINT` only after the replacement passes the same
+         backend and Telegram acceptance checks. Retiring the baseline App is
+         a later destructive human gate, not part of deployment.
+
+      Target: a reproducible scale-to-zero endpoint whose restored cold start
+      is short enough for a private interactive assistant. No target number is
+      claimed before measurement. Technical rationale and the exact evidence
+      to collect are in `docs/modal_vllm_cold_start.md`.
+
+   c. **Control plane.** A second store implementation on external Postgres and
       a matching LangGraph checkpointer; a webhook that only validates,
       persists and spawns, with the agent loop in a separate worker; and file
       tools reimplemented over an ephemeral sandbox rather than a local path.
@@ -153,13 +193,16 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Accept step 2: one answered message and one work request through the local
-   Telegram bot against the deployed endpoint. Nothing blocks this now.
-2. Reduce the 189-second wake before it becomes the assistant's normal
-   behaviour. A GPU-snapshot implementation is written and unverified; what is
-   applied, what is deliberately not, and the sources for each are in
-   `docs/modal_vllm_cold_start.md`.
-3. Step 3b, once step 2 is accepted.
+1. Authorize step 3b implementation only: finish and validate the replacement
+   deployment definition without deploying or starting a worker.
+2. Separately authorize the new deployment and each paid snapshot/benchmark
+   invocation described in step 3b.
+3. Accept step 2 against the accepted endpoint: one conversational turn and one
+   work request through Telegram. The baseline endpoint can prove integration,
+   but the optimized replacement should become the normal product endpoint.
+4. Start step 3c control-plane work after Telegram acceptance.
+5. Continue to step 4 document ingestion; it remains planned and has not been
+   removed or folded into deployment work.
 
 ## Out of scope
 

@@ -157,10 +157,33 @@ Under one dollar in total.
   audio or image request has been sent to the deployed endpoint.
 - Step 2 is not yet accepted: no conversation has gone through Telegram against
   this endpoint.
-- Cold start is measured, not addressed. `FAST_BOOT` / `--enforce-eager` and
-  memory snapshots are untried.
+- At baseline closure, cold start was measured but not addressed;
+  `FAST_BOOT` / `--enforce-eager` and memory snapshots had not been tried.
 - The two WSL environment variables are still carried without justification.
 - The 2026-08-01 report's run identity omits the `transformers` version, which
   is what made both failures hard to place. Future run identities should record
   it.
 - Nothing was committed.
+
+## Post-audit clarification — 2026-08-28
+
+This report remains the evidence for the unsnapshotted baseline; it does not
+describe the later local snapshot candidate as deployed.
+
+A read-only inspection of Modal application history, stored logs and running
+containers confirmed:
+
+- the live `assistant-llm` has zero running containers when idle;
+- its current launch command has no `--enable-sleep-mode`, and the logs contain
+  no sleep, wake or snapshot-restore evidence;
+- the latest recorded boot took about 172 seconds from `vllm serve` to HTTP
+  readiness, within the earlier 189–201 second end-to-end measurements;
+- the 9.56 GiB checkpoint read took 6.77 seconds. Weight storage and the image
+  are not the dominant optimization target; vLLM process/configuration and
+  engine initialization are;
+- the CPU+GPU snapshot version in `deploy/modal/model_app.py` is local and
+  unverified. `ROADMAP.md` step 3b requires a separately named replacement App
+  and preserves this baseline until acceptance.
+
+No endpoint was called and no worker was started during the audit, so it added
+no compute cost.

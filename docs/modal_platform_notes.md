@@ -172,15 +172,37 @@ application's own initialization. Containers are not considered warm until all
 ahead of time rather than downloading at boot, and to load independent files
 concurrently.
 
-**Memory snapshots do not fix weight loading.** `enable_memory_snapshot=True`
-with the `@modal.enter(snap=True)` / `@modal.enter(snap=False)` split typically
-gives 3–10x, and GPU state can be included via
-`experimental_options={"enable_gpu_snapshot": True}`. But the documentation is
-explicit: "if the majority of your initialization latency is spent loading
-weights, GPU Memory Snapshots will generally not improve your cold start times."
-For a 12B model that is exactly the dominant cost. Snapshots remove imports and
-JIT work, not weight loading. Caveats: incompatible with multi-GPU code, can
-fail with `torch.compile`, and randomness is preserved across restores.
+**Memory snapshots do not accelerate storage bandwidth, but that is not this
+deployment's bottleneck.** `enable_memory_snapshot=True` with the
+`@modal.enter(snap=True)` / `@modal.enter(snap=False)` split commonly gives
+3–10x, and GPU state can be included through
+`experimental_options={"enable_gpu_snapshot": True}`. Modal is explicit that a
+workload dominated by reading weights may not benefit. The measured Gemma 4
+deployment is different: its 9.56 GiB checkpoint loads in 6.8–6.9 s, while
+vLLM imports/configuration, engine profiling, compilation and CUDA graph capture
+take most of the roughly three-minute wake. That makes CPU+GPU snapshots the
+first optimization to test. Caveats: GPU snapshots are Alpha, are generally
+incompatible with multi-GPU code, can interact poorly with `torch.compile`, and
+preserve snapshotted state including random state.
+
+Modal may create two or three snapshots for one GPU type during the first few
+invocations because snapshots are worker-type-specific. A single cold wake does
+not validate the optimization; inspect the Containers view or the log message
+`Snapshot created. Restoring Function from memory snapshot.` and measure
+multiple restored wakes.
+
+## Project-specific scaling decision
+
+The private-assistant replacement starts with explicit bounds rather than Modal
+defaults:
+
+- `min_containers=0` — scale to zero remains a product requirement;
+- `max_containers=1` — one A10 is enough for initial private use and caps cost;
+- `scaledown_window=600` — ten minutes avoids paying a three-minute wake again
+  while a user reads or thinks. Revisit it from observed traffic and cost.
+
+The optimized deployment uses a new App identity. The measured baseline stays
+deployed until the replacement passes backend, multimodal and Telegram checks.
 
 ## Re-check before relying on these
 
@@ -189,7 +211,7 @@ fail with `torch.compile`, and randomness is preserved across restores.
   the default as unverified and set it explicitly.
 - Cross-app `from_name` semantics and versioning behaviour, not covered by the
   pages read.
-- Idle billing for containers inside `scaledown_window`.
+- The cost/latency tradeoff of the ten-minute idle window under real traffic.
 
 ## Regions: one is free, the other is a multiplier
 

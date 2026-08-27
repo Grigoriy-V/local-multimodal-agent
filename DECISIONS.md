@@ -299,3 +299,25 @@ not a module.
 
 **Rules out.** Building an HTTP surface with no separately hosted caller, and
 any code in `app/` that depends on a request, response or session object.
+
+## 2026-08-28: Optimize the model endpoint as a replacement, not an overwrite
+
+**Decision.** The measured `assistant-llm` deployment remains the baseline while
+a separately named Modal App validates the production model-server shape:
+protected OpenAI-compatible vLLM, preloaded immutable weights, CPU+GPU memory
+snapshots around vLLM sleep/wake, explicit `min_containers=0` and
+`max_containers=1`, and an initially ten-minute idle window. The application
+switches `MODEL_ENDPOINT` only after the replacement passes backend,
+multimodal and Telegram acceptance.
+
+**Why.** The baseline proved compatibility and scale-to-zero but wakes in about
+three minutes. Its checkpoint reads in under seven seconds; repeatable vLLM
+imports/configuration, profiling, compilation and CUDA graph capture dominate,
+so image surgery and weight relocation target the wrong stage. A new identity
+preserves honest comparison, rollback and the rule that a measured configuration
+is not silently redefined.
+
+**Rules out.** Redeploying experimental snapshot code over the baseline,
+unbounded GPU replicas, a positive warm-container floor, declaring success from
+one cold invocation, changing several performance variables in one run, and
+deleting the baseline as part of replacement deployment.

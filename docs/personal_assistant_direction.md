@@ -113,7 +113,12 @@ Modal is the current preferred infrastructure to test:
 - Modal Sandbox for temporary isolated code execution;
 - persistent storage/database outside the ephemeral GPU worker.
 
-For the current Gemma 12B QAT model, start by testing an L4 24 GB GPU. Move to a larger GPU only if measured latency, context length, multimodal usage, or concurrency requires it.
+The first working deployment uses an A10 24 GB and proves that Gemma 4 12B QAT,
+16k context and the required multimodal configuration fit. Keep A10 for the
+snapshot replacement so the cold-start comparison changes one architectural
+variable rather than GPU hardware. L4 or a larger GPU remains a later
+price/performance benchmark, justified only by measured latency, context,
+multimodal or concurrency needs.
 
 **Decision — scale-to-zero applies to the control plane too.** An always-on CPU
 container that owns a database file was considered and rejected: an idle
@@ -126,17 +131,22 @@ CPU gateway and a scale-to-zero GPU worker as two independently deployed Modal
 apps linked by name. Patterns worth reusing at step 3: dispatch by `spawn()`
 with the call id persisted and polled non-blockingly, so no request waits on the
 GPU; status polling and health that never invoke the GPU; and
-`FunctionCall.cancel()` for cancellation. Its use of CPU memory snapshots is not
-a cold-start answer for this project — see `docs/modal_platform_notes.md`, where
-the platform documentation says weight loading is what snapshots do not fix. Its
+`FunctionCall.cancel()` for cancellation. Its CPU-only snapshot does not load H3
+onto the GPU, so it is a reference for service separation rather than the
+assistant's cold-start solution. The assistant's measured Gemma checkpoint loads
+in under seven seconds; its dominant repeatable work is vLLM initialization, so
+the planned replacement tests a CPU+GPU snapshot around vLLM sleep/wake. Its
 per-job JSON files on a Volume are not a substitute for the store contract —
 they carry one writer per record and no cross-record queries — but a Volume is
 the right home for task artifacts. Reference only; no work happens in that
 repository.
 
-**Decision — cold start and latency are measured, not optimized.** The numbers
-are recorded once when the deployed profile first works. No architecture is
-built around a latency figure that has not been measured. One rejected idea is
+**Decision — optimize only after measurement, then preserve the baseline.** The
+first deployed profile measured a 189–201 second wake, which is too slow for the
+normal assistant experience. The next deployment therefore has a new identity
+and tests CPU+GPU snapshots, explicit 0→1 scaling and a longer idle window while
+the measured endpoint remains available for comparison and rollback. No target
+number is claimed before the replacement is measured. One rejected idea is
 recorded so it is not re-proposed: routing conversational turns to a second
 smaller model to keep the GPU asleep. The routing decision is itself a model
 call, so it needs a second model to answer as well — that is two assistant
