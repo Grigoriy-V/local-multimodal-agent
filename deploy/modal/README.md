@@ -7,9 +7,10 @@ idle.
 Two App identities, on purpose. The live `assistant-llm` is the unsnapshotted
 baseline measured in `reports/2026-08-28_v2_step3a_model_endpoint.md`, and it is
 not defined by this file any more. `model_app.py` now defines
-**`assistant-llm-v2`**, the CPU+GPU snapshot replacement: written, checked
-offline, and never deployed or invoked. Its cold start is unmeasured, so no
-claim about it is available yet.
+**`assistant-llm-v2`**, the CPU+GPU snapshot replacement: deployed, at zero
+containers, and never invoked. Its cold start and its snapshot are both
+unmeasured, so no claim about either is available yet, and `MODEL_ENDPOINT`
+still points at the baseline.
 
 Every command below that would start a container is a separate human gate.
 

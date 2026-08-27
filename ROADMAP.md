@@ -60,9 +60,10 @@ reconsidered; this roadmap wins any conflict.
 - The Version 2 direction is agreed and recorded below. Step 1 is closed and
   step 2 is implemented; the local database is at schema version 1 and both
   conversations and files are scoped by user. Step 3a is closed. Step 3b is
-  implemented and unmeasured: `assistant-llm-v2` exists as a definition only,
-  has never been deployed or invoked, and no claim about its cold start is
-  available. Step 3c is not authorized.
+  implemented and deployed but unmeasured: `assistant-llm-v2` is live at zero
+  containers, has never been invoked, and no claim about its cold start or its
+  snapshot is available. The baseline `assistant-llm` still serves
+  `MODEL_ENDPOINT`. Step 3c is not authorized.
 
 ## Closed stages
 
@@ -149,8 +150,14 @@ Ordered plan:
          path at all — Modal disables memory snapshots for ephemeral apps — so
          deployment is a precondition of the first snapshot measurement rather
          than something it can follow;
-      4. deploy under a new name. Deployment is a human gate; creation of each
-         paid GPU worker is a separate human gate;
+      4. **Done.** `assistant-llm-v2` is deployed as of 2026-08-28, in 5 s from
+         cached image layers, at zero containers. `assistant-llm` is untouched
+         and also at zero. Its web URL printed as
+         `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run`, which
+         differs in shape from the baseline's recorded `.modal.direct` URL; the
+         working URL and the 401-at-edge behaviour are both unverified on this
+         App and get confirmed at the first authorized invocation. Creation of
+         each paid GPU worker remains a separate human gate;
       5. create and verify CPU+GPU memory snapshots using vLLM sleep/wake, then
          measure at least two restored cold starts because Modal may create
          several snapshots for one GPU type;
@@ -205,11 +212,13 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Authorize deploying `assistant-llm-v2`. Every check that can be run without
-   a GPU has passed, and snapshots cannot be validated any other way. Deploying
-   starts no container by itself and authorizes no invocation.
-2. Separately authorize each paid GPU invocation described in step 3b: one to
-   create the snapshot, then at least two restored cold wakes.
+1. Authorize the first paid GPU invocation of `assistant-llm-v2`: one call that
+   boots vLLM, warms it, sleeps it and lets Modal create the snapshot. This is
+   the run that produces the full first-boot log and the first evidence that the
+   snapshot path works at all. Budget a full A10 boot; it may exceed the
+   baseline's ~196 s because warmup is now inside the start hook.
+2. Then separately authorize at least two restored cold wakes, since Modal may
+   build several worker-type-specific snapshots and one wake proves nothing.
 3. Accept step 2 against the accepted endpoint: one conversational turn and one
    work request through Telegram. The baseline endpoint can prove integration,
    but the optimized replacement should become the normal product endpoint.
