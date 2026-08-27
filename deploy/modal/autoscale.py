@@ -22,7 +22,6 @@ import modal
 from model_app import APP_NAME, SCALEDOWN_WINDOW
 
 SERVER_NAME = "Server"
-SERVE_METHOD = "serve"
 
 
 def main() -> int:
@@ -47,10 +46,12 @@ def main() -> int:
         print(f"refusing {arguments.window}s: Modal accepts 2-1200")
         return 1
 
-    # `@app.cls` registers the class plus one function per method. The
-    # autoscaler lives on the function, and `modal.Cls` has no
-    # `update_autoscaler`, so address the served method directly.
-    server = modal.Function.from_name(arguments.app, f"{arguments.name}.{SERVE_METHOD}")
+    # The autoscaler belongs to the class instance, not to a method. Two earlier
+    # spellings are rejected by the 1.5 client and are recorded here so they are
+    # not retried: `Function.from_name(app, "Server.serve")` raises
+    # `Invalid Function name`, and reaching the method off the instance raises
+    # `Cannot call .update_autoscaler() on a method`.
+    server = modal.Cls.from_name(arguments.app, arguments.name)()
     server.update_autoscaler(scaledown_window=arguments.window)
     print(f"{arguments.app}.{arguments.name}: scaledown_window is now {arguments.window}s")
     print("The next deploy resets it to SCALEDOWN_WINDOW in model_app.py.")
