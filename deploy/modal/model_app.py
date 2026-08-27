@@ -73,6 +73,26 @@ MINUTES = 60
 # much KV cache actually fits.
 MAX_MODEL_LEN = 16384
 
+# Sleep mode's price, discovered by paying it. `--enable-sleep-mode` switches
+# vLLM onto the cumem allocator, which maps and unmaps physical pages so that
+# GPU memory can be moved to CPU memory — the thing that makes a GPU snapshot
+# possible at all. It also breaks the memory profiler's arithmetic: on the first
+# invocation vLLM sized the KV cache at 13.77 GiB, then died allocating it with
+# `CUDA Error: out of memory at cumem_allocator.cpp:163`, reporting 24.29 GiB
+# "allocated by PyTorch" on a card with 22.06 GiB total. The profiler measures
+# an address space the allocator never fully commits.
+#
+# The baseline needed no such setting because without sleep mode there is no
+# cumem allocator and no double count. So this is not a tuning knob inherited
+# from the baseline; it is the cost of the optimization being attempted.
+#
+# 0.83 rather than the observed default of 0.92: the failed boot was 1.72 GiB
+# short with 947 MiB free, so roughly 2 GiB must come off a 22.06 GiB card. That
+# should still leave a KV cache above the baseline's working 10.03 GiB, so 16384
+# tokens stay safe. It is an estimate from one failure, not a measurement, and
+# the next boot is what confirms or refutes it.
+GPU_MEMORY_UTILIZATION = 0.83
+
 # How long the GPU stays warm after the last request. This is the idle-GPU dial
 # and the whole reason the deployment is worth doing. It can also be changed
 # without deploying — see `autoscale.py` — but a deploy resets it to this value,
@@ -404,6 +424,10 @@ class Server:
             SERVED_NAME,
             "--max-model-len",
             str(MAX_MODEL_LEN),
+            # Explicit because sleep mode's allocator makes the default overshoot
+            # physical memory. See GPU_MEMORY_UTILIZATION.
+            "--gpu-memory-utilization",
+            str(GPU_MEMORY_UTILIZATION),
             "--limit-mm-per-prompt",
             json.dumps(MM_LIMITS),
             "--enable-auto-tool-choice",

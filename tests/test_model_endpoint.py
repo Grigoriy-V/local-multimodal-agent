@@ -191,6 +191,12 @@ class DeploymentIdentityTests(unittest.TestCase):
         worst_resume = model_app.SLEEP_TIMEOUT + model_app.WAKE_READY_TIMEOUT
         self.assertLess(worst_resume, model_app.STARTUP_TIMEOUT)
 
+    def test_leaves_headroom_for_the_sleep_mode_allocator(self):
+        # The first paid invocation died at cumem_allocator.cpp:163 because the
+        # observed default of 0.92 sizes a KV cache the allocator cannot commit.
+        # Anything at or above that reintroduces the OOM.
+        self.assertLess(model_app.GPU_MEMORY_UTILIZATION, 0.92)
+
     def test_video_stays_unset_so_audio_is_never_the_profiled_modality(self):
         # The crash recorded in reports/2026-08-28_v2_step3a_model_endpoint.md.
         self.assertNotIn("video", model_app.MM_LIMITS)

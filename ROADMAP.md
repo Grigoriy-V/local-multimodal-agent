@@ -60,10 +60,12 @@ reconsidered; this roadmap wins any conflict.
 - The Version 2 direction is agreed and recorded below. Step 1 is closed and
   step 2 is implemented; the local database is at schema version 1 and both
   conversations and files are scoped by user. Step 3a is closed. Step 3b is
-  implemented and deployed but unmeasured: `assistant-llm-v2` is live at zero
-  containers, has never been invoked, and no claim about its cold start or its
-  snapshot is available. The baseline `assistant-llm` still serves
-  `MODEL_ENDPOINT`. Step 3c is not authorized.
+  implemented but **not working**: the first paid invocation failed because
+  sleep mode's cumem allocator made vLLM size a KV cache that does not fit a
+  24 GB A10, and `assistant-llm-v2` is currently stopped. Evidence and the
+  untested fix: `reports/2026-08-28_v2_step3b_first_boot_failure.md`. No cold
+  start, restore or snapshot number exists for the replacement. The baseline
+  `assistant-llm` still serves `MODEL_ENDPOINT`. Step 3c is not authorized.
 
 ## Closed stages
 
@@ -162,9 +164,16 @@ Ordered plan:
          token is **not carried over** and must be retested here before
          `MODEL_ENDPOINT` moves. Creation of each paid GPU worker remains a
          separate human gate;
-      5. create and verify CPU+GPU memory snapshots using vLLM sleep/wake, then
-         measure at least two restored cold starts because Modal may create
-         several snapshots for one GPU type;
+      5. **Attempted and failed once.** The first paid invocation never served
+         a request: sleep mode's cumem allocator invalidates vLLM's memory
+         profiling, so it sized a 13.77 GiB KV cache and died committing it on
+         a 22.06 GiB card. An explicit `--gpu-memory-utilization=0.83` is the
+         untested fix. Modal restarted the failed container, so a failed boot
+         costs more than one boot; stop the App rather than letting it retry.
+         Evidence: `reports/2026-08-28_v2_step3b_first_boot_failure.md`. Then
+         create and verify CPU+GPU snapshots and measure at least two restored
+         cold starts, because Modal may create several snapshots for one GPU
+         type;
       6. record request-to-ready, restore-to-health, TTFT, warm answer latency,
          tokens/s, VRAM and cost. Verify text first, then image and audio; extend
          warmup only if the multimodal first request shows extra work;
@@ -219,12 +228,15 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Authorize the first paid GPU invocation of `assistant-llm-v2`: one call that
-   boots vLLM, warms it, sleeps it and lets Modal create the snapshot. This is
-   the run that produces the full first-boot log and the first evidence that the
-   snapshot path works at all. Budget a full A10 boot; it may exceed the
-   baseline's ~196 s because warmup is now inside the start hook.
-2. Then separately authorize at least two restored cold wakes, since Modal may
+1. Authorize redeploying `assistant-llm-v2` with
+   `--gpu-memory-utilization=0.83` and one paid retry of the first boot. Read
+   `Available KV cache memory` from the log before concluding anything, and be
+   ready to stop the App if it fails again rather than letting Modal retry.
+2. If it fails again, decide between lowering utilization further, reducing
+   `MAX_MODEL_LEN`, or abandoning snapshots for the `FAST_BOOT` fallback. Each
+   attempt is a paid boot, so this is a decision to take deliberately rather
+   than by iteration.
+3. Then separately authorize at least two restored cold wakes, since Modal may
    build several worker-type-specific snapshots and one wake proves nothing.
 3. Accept step 2 against the accepted endpoint: one conversational turn and one
    work request through Telegram. The baseline endpoint can prove integration,
