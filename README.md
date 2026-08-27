@@ -162,6 +162,42 @@ outcome instead of leaving resumable work behind. Native chat deletion removes
 the conversation and its resumable checkpoints while preserving separately
 approved account-level memory.
 
+## Start the Telegram bot
+
+The same harness is also reachable from Telegram. Put the bot token and the
+numeric Telegram user ids allowed to use it in `.env`:
+
+```text
+TELEGRAM_TOKEN=123456:ABC...
+TELEGRAM_ALLOWED_USERS=11111111,22222222
+```
+
+Then, with the model server running:
+
+```powershell
+.venv\Scripts\python.exe -m ui.telegram.run
+```
+
+An empty `TELEGRAM_ALLOWED_USERS` means nobody: an assistant reachable by
+whoever finds the bot would spend the owner's GPU. Set `TELEGRAM_OPEN_ACCESS=true`
+to admit every account instead; the bot says so loudly at start-up, because that
+choice is paid for by the owner.
+
+Conversations, memory and files are scoped to the mapped account. Each user gets
+their own directory inside `AGENT_WORKSPACE`, so two people never see each
+other's chats, saved facts or files; what they do share is the GPU. `/new`
+starts a fresh conversation and `/stop` cancels a task waiting in that chat.
+
+A workspace created before user scope existed is moved under its owner once:
+
+```powershell
+.venv\Scripts\python.exe scripts/migrate_workspace.py --apply
+```
+
+This transport uses long polling and is the local profile. The deployed profile
+replaces it with a webhook that hands each update to a worker; the adapter
+itself does not change.
+
 ## Version 1.5 product evidence
 
 One ordinary request enters the same harness used for direct conversation. The

@@ -19,10 +19,12 @@ from app.agent.task_graph import (
     CheckResult,
     ImplementationResult,
     TaskOutcome,
+)
+from app.agent.task_graph import (
     TestReport as TaskTestReport,
 )
 from app.agent.task_runtime import TaskView
-from app.memory import MemoryStore
+from app.memory import SqliteStore
 from app.models import BackendError, ContentPart, Message
 from tests.fakes import ScriptedBackend, says, user
 
@@ -148,7 +150,7 @@ async def test_routing_sees_bounded_conversation_context(tmp_path: Path) -> None
     backend = ScriptedBackend(says('{"route":"answer","task":""}'))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    agent = Agent(backend, MemoryStore(tmp_path / "memory.sqlite3"), workspace)
+    agent = Agent(backend, SqliteStore(tmp_path / "memory.sqlite3"), workspace)
     agent.record(
         "thread",
         [

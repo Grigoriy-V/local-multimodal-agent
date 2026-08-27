@@ -2,10 +2,12 @@
 
 ## Project
 
-This repository builds a **general local multimodal autonomous agent**, not a
-collection of demo workflows or buttons that manually invoke individual tools.
-It is both a working product and a project for learning how a real agent harness
-is designed; learning benchmarks must never become the production architecture.
+This repository builds a **personal multimodal assistant with an autonomous
+harness**, not a collection of demo workflows or buttons that manually invoke
+individual tools. It runs locally on the human's own machine and deploys as a
+serverless application for a small number of people. It is both a working
+product and a project for learning how a real agent harness is designed;
+learning benchmarks must never become the production architecture.
 
 - One natural-language entry point serves direct conversation and autonomous
   work. The harness decides whether to answer or to continue through
@@ -17,21 +19,30 @@ is designed; learning benchmarks must never become the production architecture.
   browser inspection, screenshots, editing and validation are agent
   capabilities, not separate user workflows.
 - `ModelBackend` is the only model-facing application interface. The default
-  local model is Gemma 4 12B IT, but replacing it must not require an agent
-  rewrite.
-- LangGraph owns orchestration. SQLite owns conversations and memory outside the
-  model. Chainlit is a replaceable thin adapter; product behavior lives in
-  `app/`.
-- The workspace is the filesystem permission boundary, not a path-format
-  restriction. Safe relative and absolute paths inside it are accepted;
-  ambiguous filenames are clarified and escaping paths are refused.
+  model is Gemma 4 12B IT behind an OpenAI-compatible endpoint, local or
+  remote; replacing either must not require an agent rewrite.
+- The deployment target is a configuration axis, never a fork. The local and
+  deployed profiles run the same `app/`; a capability that works in only one of
+  them is unfinished.
+- LangGraph owns orchestration. Conversations and memory live outside the model
+  behind one persistence contract, implemented on SQLite locally and on a
+  networked database when deployed. Conversations, summaries and memory are
+  scoped by user.
+- Interfaces are replaceable thin adapters. An adapter maps its own transport
+  and identity onto the application's canonical identity; product behavior lives
+  in `app/` and never in an adapter callback.
+- The workspace is the permission boundary, not a path-format restriction and
+  not a fixed location: it may be a local directory or an ephemeral remote
+  sandbox. Each user gets their own, because a boundary shared by several people
+  is not one. Safe relative and absolute paths inside it are accepted; ambiguous
+  filenames are clarified and escaping paths are refused.
 - Plans derive task-specific acceptance criteria and validation from the task.
   A Snake task or another scenario may be an evaluation, never a production
   branch or sufficient product acceptance by itself.
 
 Durable exclusions are fine-tuning, multi-agent orchestration, a vector database
-before SQLite retrieval works, Open WebUI as the main UI, business logic inside
-Chainlit callbacks, silent context truncation, unrestricted filesystem access,
+before text retrieval works, Open WebUI as the main UI, business logic inside an
+interface adapter, silent context truncation, unrestricted filesystem access,
 and treating model-generated facts as trusted memory without an explicit save
 decision.
 
@@ -89,8 +100,17 @@ discovered automatically.
 Human approval is required for downloading model weights, materially expensive
 or long GPU work, deleting or migrating a populated database, changing a Git
 remote, pushing, publishing, deploying, and any destructive or externally
-mutating action. Starting or stopping the vLLM server is allowed only after the
-human has permitted it.
+mutating action. In the local profile, starting or stopping the vLLM server is
+allowed only after the human has permitted it.
+
+**Any action that starts a worker requires explicit permission every single
+time.** This covers a request that wakes a scaled-to-zero endpoint, a remote
+function or sandbox run, a container started to measure or debug something, and
+a deploy that causes any of these. Permission is per action, never per session,
+never implied by approval of the surrounding step, and never inferred from an
+earlier yes. A cheap worker and a CPU worker are still workers. When evidence
+could come from a log, a document or the human instead, ask for it rather than
+starting anything.
 
 Before a human-run command, state what it does, expected duration, VRAM cost and
 the exact command. Never expand work into another repository.

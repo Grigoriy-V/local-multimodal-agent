@@ -1,8 +1,8 @@
 # Roadmap
 
-**Updated:** 2026-08-02
+**Updated:** 2026-08-28
 
-**Project status:** Version 1.5 general autonomous harness closed
+**Project status:** Version 1.5 closed; Version 2 direction agreed, not authorized
 
 **Current approved step:** none
 
@@ -28,29 +28,39 @@ reconsidered; this roadmap wins any conflict.
   substitute manual tool selection for agent behavior.
 - Plans define task-specific acceptance criteria and validation. Production
   control flow is never specialized to Snake or another benchmark.
-- Chainlit remains a replaceable adapter; agent behavior lives in `app/`.
-- `ModelBackend` is the only model-facing application interface. Persistence is
-  SQLite, memory remains outside the model, raw conversation messages survive
-  summarization, and model-generated facts require an explicit save decision.
+- Interfaces are replaceable thin adapters. An adapter maps its own transport
+  and identity onto the application's canonical identity; agent behavior lives
+  in `app/`.
+- The local and deployed profiles run the same `app/` behind configuration.
+  Deployment is never a fork, and a capability that works in only one profile
+  is unfinished.
+- `ModelBackend` is the only model-facing application interface. Conversations
+  and memory persist outside the model behind one contract, are scoped by user,
+  survive summarization as raw messages, and record model-generated facts only
+  on an explicit save decision.
 - Messages preserve the supplied order of text, image and audio parts;
   unsupported or oversized input is refused before a model request.
-- The workspace is the permission boundary. Relative paths and absolute paths
-  inside it are valid; escaping paths are refused and ambiguous filenames are
-  clarified rather than guessed.
+- The workspace is the permission boundary, whether it is a local directory or
+  an ephemeral remote sandbox, and each user has their own. Relative paths and
+  absolute paths inside it are valid; escaping paths are refused and ambiguous
+  filenames are clarified rather than guessed.
 
 ## Current state
 
 - Version 1 remains the persistent local multimodal chat baseline. Evidence:
   `reports/2026-08-01_v1_product_smoke.md`.
-- Version 1.5 is closed. One natural-language entry point now routes direct
-  answers or autonomous work through a general harness. Work requests use
-  model-created plans and validation strategies, scoped capability grants,
-  bounded implementation/evaluation/repair, browser and filesystem evidence,
-  durable cancellation and downloadable artifacts. Chainlit remains a thin
-  adapter over the UI-agnostic application runtime.
-- Final engineering and product evidence, including the known 16,384-token
-  boundary, is in `reports/2026-08-02_v15_product_acceptance.md`; representative
-  screenshots are in `reports/test_v1.5/`.
+- Version 1.5 is closed. One natural-language entry point routes direct answers
+  or autonomous work through a general harness, with model-created plans and
+  validation strategies, scoped capability grants, bounded
+  implementation/evaluation/repair, browser and filesystem evidence, durable
+  cancellation and downloadable artifacts. Final engineering and product
+  evidence, including the known 16,384-token boundary, is in
+  `reports/2026-08-02_v15_product_acceptance.md`; representative screenshots are
+  in `reports/test_v1.5/`.
+- The Version 2 direction is agreed and recorded below. Step 1 is closed and
+  step 2 is implemented; the local database is at schema version 1 and both
+  conversations and files are scoped by user. Step 3 is split into 3a and 3b;
+  neither is authorized.
 
 ## Closed stages
 
@@ -58,84 +68,104 @@ reconsidered; this roadmap wins any conflict.
 - Stage 2 — minimal LangGraph agent: `reports/2026-08-01_stage2_agent.md`.
 - Stage 3 / Version 1 — working product: `reports/2026-08-01_v1_product_smoke.md`.
 - Version 1.5 — general autonomous harness:
-  `reports/2026-08-02_v15_product_acceptance.md`.
+  `reports/2026-08-02_v15_product_acceptance.md`. Per-step evidence is in the
+  `reports/2026-08-0[12]_v15_step*.md` series.
 
-## Version 1.5 — General autonomous agent harness (closed)
+## Version 2 — Deployable personal assistant (agreed, not authorized)
 
-**Outcome:** every ordinary request enters one general harness. The harness
-understands the request and either answers directly or, when work is required,
-continues through `plan -> act -> validate -> repair/finalize`. The model chooses
-governed filesystem/browser capabilities and task-specific evidence. When
-applicable, the UI shows scope, approval, progress and artifacts without asking
-the user to select a mode or tool.
+**Outcome:** the same harness serves a small number of people as a practical
+assistant over Telegram, deployed serverless so that no GPU runs while idle,
+while remaining fully usable as a local agent on the human's own machine.
+
+Direction and its rationale are in `docs/personal_assistant_direction.md`;
+durable architectural choices are in `DECISIONS.md`; verified platform facts and
+constraints for the deployed profile are in `docs/modal_platform_notes.md`. This
+roadmap is the plan.
 
 Ordered plan:
 
-1. **Closed:** disconnect the manual `preview`/scripted `task` product routes and
-   Snake-specific verifier; keep benchmark code only as historical evaluation
-   material.
-2. **Closed:** add a grant-governed capability registry for filesystem and
-   browser operations. The model selects capabilities; the user approves
-   scoped side effects. Evidence: `reports/2026-08-02_v15_step2.md`.
-3. **Closed:** replace the split conversational/task entry paths with one
-   natural-language entry point. The harness decides `answer` versus `act`; no
-   `Conversation` / `Agent` selector, slash-command contract or per-tool control
-   is required. Evidence: `reports/2026-08-02_v15_step3_unified_entry.md`. The
-   previous selector implementation and `reports/2026-08-02_v15_step3.md` remain
-   rejected evidence, not acceptance.
-4. **Closed:** on the `act` branch, planning produces task-specific acceptance
-   criteria and a validation strategy, then a model evaluator judges real
-   grant-governed tool evidence against every criterion. Evidence:
-   `reports/2026-08-02_v15_step4_task_validation.md`.
-5. **Closed:** keep Chainlit thin while showing applicable plan, scope,
-   approval, progress, evidence, cancellation and artifacts. Evidence:
-   `reports/2026-08-02_v15_step5_chainlit_product_surface.md`.
-6. **Closed:** final human-visual and agent-technical acceptance. The actual app
-   handled direct conversation and general work requests without a special
-   command or benchmark branch; the human verified the generated Snake through
-   live play. Evidence: `reports/2026-08-02_v15_product_acceptance.md`.
+1. **Closed.** `ConversationStore` is the persistence contract, `SqliteStore`
+   its first implementation, and conversations, summaries and facts are scoped
+   by owner. A shared contract suite is parameterised over implementations so
+   the deployed one answers to the same tests, and a `PRAGMA user_version`
+   migration carried the existing local database forward. Files followed during
+   step 2: each user now has their own workspace root, so the file tools cannot
+   read across people. Evidence:
+   `reports/2026-08-27_v2_step1_store_contract.md`.
+2. **Implemented, not yet accepted.** `ui/telegram/` is a thin adapter over the
+   same harness surface: identity is derived rather than adopted, the open
+   conversation lives in the store, consent reuses the durable interrupts, and
+   the polling transport is isolated in `run.py` so a webhook replaces it
+   without touching the adapter. Access is an explicit allow list that is empty
+   by default; `TELEGRAM_OPEN_ACCESS` admits everyone instead, and says so at
+   start-up. Real Telegram traffic reached the adapter and was recorded under a
+   derived owner with its own workspace directory. Evidence:
+   `reports/2026-08-28_v2_step2_telegram_adapter.md`. Acceptance still needs a
+   conversational turn, which needs a model server; the machine currently has no
+   GPU.
+3. **Deployed profile.** Split in two, because the control plane cannot be
+   tested before a model can answer at all, and because the model application
+   3a deploys is carried into 3b unchanged.
 
-**Closing criterion:** through the actual app, a normal conversational request
-is answered directly and two materially different work requests complete from
-the same entry point. The model chooses governed tools, validates against
-task-derived criteria, repairs or stops honestly, and returns evidence and
-artifacts; the human visually confirms the rendered results. No mode selector,
-separate user-facing route or benchmark-specific production logic is present.
+   a. **Closed.** `deploy/modal/` serves Gemma 4 12B on an A10 through vLLM's
+      OpenAI-compatible API. Weights load into a Volume once from CPU, the
+      endpoint requires Modal proxy auth and refuses an unauthorized caller at
+      the edge without waking the GPU, and the application answers through the
+      unmodified `OpenAICompatibleBackend` — a proxy token is accepted as an
+      ordinary bearer token, so the change this project's notes predicted was
+      not needed. Nothing in `app/` changed. Scale to zero confirmed. Measured:
+      first boot ~196 s, idle to answer 201 s, answer 1.8-2.4 s warm; the wake
+      is dominated by container and image start rather than compilation.
+      Evidence: `reports/2026-08-28_v2_step3a_model_endpoint.md`.
 
-## Version 2 — Policy-governed tool platform (deferred)
+   b. **Control plane.** A second store implementation on external Postgres and
+      a matching LangGraph checkpointer; a webhook that only validates,
+      persists and spawns, with the agent loop in a separate worker; and file
+      tools reimplemented over an ephemeral sandbox rather than a local path.
+      The Telegram secret token and an allowed-user list are checked in the
+      application, because platform proxy auth cannot be used for a Telegram
+      webhook. Registering the webhook retires the polling transport rather
+      than joining it: Telegram refuses `getUpdates` while a webhook is set.
 
-**Outcome:** durable policy and grants shared by every interface; governed
-documents and future tools; an MCP surface for stronger external models; and
-comparable tracing, statistics and graph/tool evaluations.
+   Constraints and their sources: `docs/modal_platform_notes.md`. Optimizing
+   the measured latency is later work.
+4. **Document ingestion.** PDF, Markdown, text and office documents as a
+   first-class capability reusable by chat, retrieval and coding work, with
+   page and section boundaries preserved. Attachments today accept images and
+   audio only.
 
-Provisional plan:
+`app/api/` stays deferred. Telegram runs in-process, so an HTTP layer would
+again have no separately hosted caller; see the amended FastAPI decision in
+`DECISIONS.md`. The trigger is a UI hosted apart from the application.
 
-1. Define one inspectable policy predicate and durable grant lifecycle.
-2. Load applicable workspace `AGENTS.md` instructions without expanding sandbox
-   scope or tool permissions.
-3. Make SQLite memory inspectable/editable and separate proposed memories from
-   user-approved memory.
-4. Put document ingestion and later capabilities behind the policy boundary.
-5. Expose governed tools and memory through MCP, including evaluation of a
-   Codex app-server model route without nesting incompatible agent loops.
-6. Record comparable model, graph, policy and tool traces and statistics.
-7. Build reproducible evaluations for tool choice, policy compliance, memory
-   retrieval and graph regressions.
+**Closing criterion:** through Telegram, a normal conversational request is
+answered and a work request completes end to end for two different users
+without either seeing the other's conversations or memory, with no GPU running
+while the assistant is idle — and the same `app/` still serves the local
+profile.
 
-This roadmap contains the complete active Version 2 direction. Related future
-ideas may exist in `docs/BACKLOG.md`, but are not development input. Version 2
-is not authorized.
+## Superseded direction
+
+The earlier Version 2 — a policy-governed, observable and testable tool
+platform with an MCP surface — is not the current plan. Its detailed material
+is preserved in `docs/BACKLOG.md`. Individual items may be promoted back into
+this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Discuss and approve the next stage before implementation. Version 2 remains
-   deferred and is not authorized by this roadmap.
+1. Accept step 2: one answered message and one work request through the local
+   Telegram bot against the deployed endpoint. Nothing blocks this now.
+2. Reduce the 189-second wake before it becomes the assistant's normal
+   behaviour. A GPU-snapshot implementation is written and unverified; what is
+   applied, what is deliberately not, and the sources for each are in
+   `docs/modal_vllm_cold_start.md`.
+3. Step 3b, once step 2 is accepted.
 
 ## Out of scope
 
-Fine-tuning, multi-agent orchestration, a vector database before SQLite
-retrieval works, and Open WebUI as the main UI. Changing scope requires a
-`ROADMAP.md` update; record the rationale in `DECISIONS.md` when the change is
+Fine-tuning, multi-agent orchestration, a vector database before text retrieval
+works, and Open WebUI as the main UI. Changing scope requires a `ROADMAP.md`
+update; record the rationale in `DECISIONS.md` when the change is
 architecturally durable.
 
 ## Maintenance

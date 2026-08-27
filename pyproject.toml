@@ -24,6 +24,12 @@ agent = [
 ui = [
     "chainlit>=2.0",
 ]
+# Only for deploying the model endpoint in `deploy/modal/`. The application
+# never imports modal; it reaches the endpoint over MODEL_ENDPOINT like any
+# other OpenAI-compatible server.
+deploy = [
+    "modal>=1.0",
+]
 
 [build-system]
 requires = ["hatchling"]

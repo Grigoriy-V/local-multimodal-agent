@@ -12,14 +12,14 @@ from chainlit.types import Pagination, ThreadFilter
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from app.memory import MemoryStore
+from app.memory import LOCAL_USER_ID, SqliteStore
 from app.models import ContentPart, Message
-from ui.chainlit_history import LOCAL_USER_ID, MemoryStoreDataLayer
+from ui.chainlit_history import MemoryStoreDataLayer
 
 
 @pytest.fixture
 def layer(tmp_path):
-    store = MemoryStore(tmp_path / "memory.sqlite3")
+    store = SqliteStore(tmp_path / "memory.sqlite3")
     return MemoryStoreDataLayer(
         store,
         checkpoints=str(tmp_path / "checkpoints.sqlite3"),
@@ -56,8 +56,8 @@ async def has_checkpoint(path: Path, thread_id: str) -> bool:
 
 @pytest.mark.asyncio
 async def test_native_history_lists_existing_threads_newest_first(layer) -> None:
-    layer.store.append("first", [Message(role="user", content=[ContentPart("text", text="old")])])
-    layer.store.append("second", [Message(role="user", content=[ContentPart("text", text="new")])])
+    layer.store.append("first", [Message(role="user", content=[ContentPart("text", text="old")])], LOCAL_USER_ID)
+    layer.store.append("second", [Message(role="user", content=[ContentPart("text", text="new")])], LOCAL_USER_ID)
 
     result = await layer.list_threads(Pagination(first=10), ThreadFilter(userId=LOCAL_USER_ID))
 
@@ -79,8 +79,7 @@ async def test_native_history_resumes_text_and_media(layer) -> None:
                 ],
             ),
             Message(role="assistant", content=[ContentPart("text", text="I see it")]),
-        ],
-    )
+        ], LOCAL_USER_ID)
 
     thread = await layer.get_thread("chat")
 
@@ -99,8 +98,7 @@ async def test_native_history_resumes_text_and_media(layer) -> None:
 async def test_native_history_paginates_and_searches(layer) -> None:
     for thread_id, opening in (("one", "alpha"), ("two", "beta"), ("three", "gamma")):
         layer.store.append(
-            thread_id, [Message(role="user", content=[ContentPart("text", text=opening)])]
-        )
+            thread_id, [Message(role="user", content=[ContentPart("text", text=opening)])], LOCAL_USER_ID)
 
     first = await layer.list_threads(Pagination(first=2), ThreadFilter())
     second = await layer.list_threads(
@@ -128,9 +126,8 @@ async def test_native_delete_removes_chat_and_resumable_state_but_keeps_memory(
     checkpoint_path = Path(layer.checkpoints)
     task_checkpoint_path = Path(layer.task_checkpoints)
     layer.store.append(
-        "chat", [Message(role="user", content=[ContentPart("text", text="remove")])]
-    )
-    layer.store.remember("Keep this approved fact", thread_id="chat")
+        "chat", [Message(role="user", content=[ContentPart("text", text="remove")])], LOCAL_USER_ID)
+    layer.store.remember("Keep this approved fact", LOCAL_USER_ID, thread_id="chat")
     await checkpoint(checkpoint_path, "chat")
     await checkpoint(checkpoint_path, "other")
     await checkpoint(task_checkpoint_path, "task:chat")
@@ -140,7 +137,7 @@ async def test_native_delete_removes_chat_and_resumable_state_but_keeps_memory(
     await layer.update_thread("chat", name="remove")
 
     assert await layer.get_thread("chat") is None
-    assert layer.store.search("approved") == ["Keep this approved fact"]
+    assert layer.store.search("approved", LOCAL_USER_ID) == ["Keep this approved fact"]
     assert not await has_checkpoint(checkpoint_path, "chat")
     assert await has_checkpoint(checkpoint_path, "other")
     assert not await has_checkpoint(task_checkpoint_path, "task:chat")

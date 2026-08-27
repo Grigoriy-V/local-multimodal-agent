@@ -7,6 +7,8 @@ own and does not know it is talking to a graph.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -22,7 +24,8 @@ from app.agent.graph import build_agent, latest_text
 from app.config import AgentSettings, ModelSettings
 from app.context import Context, ContextPolicy, build_prelude
 from app.context.window import DEFAULT_SYSTEM_PROMPT
-from app.memory import MemoryStore, Thread
+from app.memory import LOCAL_USER_ID, ConversationStore, Thread
+from app.memory.store import SqliteStore
 from app.models import ContentPart, Message, ModelBackend, Usage
 from app.models.openai_compatible import OpenAICompatibleBackend
 from app.tools import CapabilityGrant, CapabilityRegistry, memory_tools
@@ -79,7 +82,7 @@ class Agent:
     def __init__(
         self,
         backend: ModelBackend,
-        store: MemoryStore,
+        store: ConversationStore,
         workspace: Path,
         policy: ContextPolicy | None = None,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
@@ -87,9 +90,11 @@ class Agent:
         context_fraction: float = 0.6,
         capability_registry: CapabilityRegistry | None = None,
         capability_grant: CapabilityGrant | None = None,
+        user_id: str = LOCAL_USER_ID,
     ) -> None:
         self.backend = backend
         self.store = store
+        self.user_id = user_id
         self.workspace = Path(workspace).resolve()
         self.policy = policy or ContextPolicy()
         self.system_prompt = system_prompt
@@ -145,12 +150,15 @@ class Agent:
         if thread_id not in self._graphs:
             toolbox = self.capability_registry.toolbox(
                 self.capability_grant,
-                memory_tools(self.store, thread_id, self.policy.retrieved_facts),
+                memory_tools(
+                    self.store, self.user_id, thread_id, self.policy.retrieved_facts
+                ),
             )
             self._graphs[thread_id] = build_agent(
                 self.backend,
                 toolbox,
                 self.store,
+                self.user_id,
                 replace(self.policy, max_input_tokens=await self.budget()),
                 self.system_prompt,
                 await self._checkpointer(),
@@ -197,7 +205,11 @@ class Agent:
         summary, through = self.store.summary(thread_id)
         history = self.store.messages(thread_id, after=through - 1)
         query = latest_text(list(messages))
-        facts = self.store.search(query, limit=self.policy.retrieved_facts) if query else []
+        facts = (
+            self.store.search(query, self.user_id, limit=self.policy.retrieved_facts)
+            if query
+            else []
+        )
         context = Context(
             prelude=build_prelude(summary, facts, system_prompt or self.system_prompt),
             history=history,
@@ -239,10 +251,10 @@ class Agent:
     def record(self, thread_id: str, messages: list[Message]) -> None:
         """Persist UI-native work that did not pass through the chat graph."""
 
-        self.store.append(thread_id, messages)
+        self.store.append(thread_id, messages, self.user_id)
 
     def threads(self) -> list[Thread]:
-        return self.store.threads()
+        return self.store.threads(self.user_id)
 
     async def aclose(self) -> None:
         close = getattr(self.backend, "aclose", None)
@@ -257,9 +269,32 @@ def text_message(text: str, role: str = "user") -> Message:
     return Message(role=role, content=[ContentPart(kind="text", text=text)])
 
 
+# A directory name that cannot climb, hide or collide. Identifiers that already
+# look like this are used unchanged so a workspace stays readable to a human;
+# anything else is hashed, because sanitizing by substitution would let two
+# different people land in one directory.
+SAFE_SCOPE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def user_workspace(root: str | Path, user_id: str) -> Path:
+    """The directory one person's files live in.
+
+    The workspace is the permission boundary, and a boundary shared by several
+    people is not one: the conversational file tools are rooted here, so a
+    single directory would let anyone read what anyone else created. Every
+    caller that turns a user into an agent goes through this function.
+    """
+
+    scope = user_id if SAFE_SCOPE.match(user_id) and user_id not in {".", ".."} else ""
+    if not scope:
+        scope = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:32]
+    return Path(root).resolve() / scope
+
+
 def create_agent(
     model_settings: ModelSettings | None = None,
     agent_settings: AgentSettings | None = None,
+    user_id: str = LOCAL_USER_ID,
 ) -> Agent:
     """Build the default agent from configuration."""
 
@@ -269,15 +304,18 @@ def create_agent(
         summarize_after=agent_settings.summarize_after,
         retrieved_facts=agent_settings.retrieved_facts,
     )
-    workspace = Path(agent_settings.workspace)
-    # The one directory the agent may touch has to exist before it is resolved,
-    # or the first `list_files` fails on a machine that has simply never run it.
+    # Each person gets their own root inside the configured workspace. The
+    # directory the agent may touch has to exist before it is resolved, or the
+    # first `list_files` fails on a machine that has simply never run it.
+    Path(agent_settings.workspace).mkdir(parents=True, exist_ok=True)
+    workspace = user_workspace(agent_settings.workspace, user_id)
     workspace.mkdir(parents=True, exist_ok=True)
     return Agent(
         backend=OpenAICompatibleBackend(model_settings or ModelSettings()),
-        store=MemoryStore(agent_settings.database),
+        store=SqliteStore(agent_settings.database),
         workspace=workspace,
         policy=policy,
         checkpoints=agent_settings.checkpoints,
         context_fraction=agent_settings.context_fraction,
+        user_id=user_id,
     )

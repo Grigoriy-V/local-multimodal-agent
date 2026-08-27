@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.agent.runtime import Agent
-from app.memory import MemoryStore
+from app.memory import SqliteStore
 from app.models import ContentPart, ToolCall
 from app.tools import (
     BROWSER_INSPECT,
@@ -84,7 +84,7 @@ async def test_browser_screenshot_reaches_the_next_model_call(tmp_path: Path) ->
     backend = ScriptedBackend(calls("inspect_page", path="page.html"), says("Looks good."))
     agent = Agent(
         backend,
-        MemoryStore(tmp_path / "memory.sqlite3"),
+        SqliteStore(tmp_path / "memory.sqlite3"),
         workspace,
         capability_registry=registry,
         capability_grant=registry.grant(capabilities=(BROWSER_INSPECT,)),

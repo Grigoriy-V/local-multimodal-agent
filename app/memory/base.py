@@ -1,0 +1,128 @@
+"""The persistence contract, apart from any one database.
+
+Conversations, summaries and long-term facts outlive the process and the model.
+This module says what a store must do; `store.py` says how SQLite does it, and a
+second implementation for the deployed profile answers the same questions.
+
+Scope is part of the contract, not a convention on top of it. Every operation
+that can reach across conversations — listing threads, saving a fact, searching
+facts — takes the owning user explicitly and has no default. A store that let a
+caller omit the owner would answer one person's question with another person's
+memory, so the omission is made impossible rather than discouraged.
+
+Operations keyed by a thread do not repeat the user: a thread belongs to exactly
+one owner from the moment it is created, so the thread identifier already
+carries the scope. `thread_owner` is how a caller checks that ownership before
+acting on a thread it was handed.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Self
+
+from app.models import Message
+
+# The single owner of everything created by the local profile. The deployed
+# profile passes real identifiers instead; this constant is the answer to
+# "whose is it" on a machine where the question has only one answer.
+LOCAL_USER_ID = "local-user"
+
+
+@dataclass(frozen=True)
+class Thread:
+    """Enough about a conversation to choose it without opening it."""
+
+    id: str
+    user_id: str
+    created_at: str
+    updated_at: str
+    messages: int
+    opening: str
+
+
+class ConversationStore(ABC):
+    """Durable conversations, summaries and facts for one deployment."""
+
+    # --- threads -------------------------------------------------------------
+
+    @abstractmethod
+    def ensure_thread(self, thread_id: str, user_id: str) -> None:
+        """Create the thread under this owner if it does not exist yet.
+
+        An existing thread keeps its original owner; ownership is decided once,
+        when the conversation first appears.
+        """
+
+    @abstractmethod
+    def threads(self, user_id: str) -> list[Thread]:
+        """This user's conversations, most recently touched first."""
+
+    @abstractmethod
+    def thread_owner(self, thread_id: str) -> str | None:
+        """Who owns this thread, or `None` if there is no such thread."""
+
+    @abstractmethod
+    def delete_thread(self, thread_id: str) -> bool:
+        """Delete one conversation, preserving separately approved facts."""
+
+    # --- messages ------------------------------------------------------------
+
+    @abstractmethod
+    def append(self, thread_id: str, messages: Iterable[Message], user_id: str) -> int:
+        """Append messages, creating the thread under `user_id` if it is new.
+
+        Returns the new message count.
+        """
+
+    @abstractmethod
+    def messages(
+        self, thread_id: str, after: int = -1, limit: int | None = None
+    ) -> list[Message]:
+        """Messages of a thread in order, optionally only those past a position."""
+
+    @abstractmethod
+    def message_count(self, thread_id: str) -> int:
+        ...
+
+    # --- rolling summary -----------------------------------------------------
+
+    @abstractmethod
+    def summary(self, thread_id: str) -> tuple[str | None, int]:
+        """The thread's summary and the position it covers through."""
+
+    @abstractmethod
+    def set_summary(self, thread_id: str, text: str, through: int) -> None:
+        """Replace the summary of an existing thread.
+
+        Raises `KeyError` for an unknown thread: a summary of a conversation
+        that was never stored would have no owner and no messages to cover.
+        """
+
+    # --- facts ---------------------------------------------------------------
+
+    @abstractmethod
+    def remember(self, text: str, user_id: str, thread_id: str | None = None) -> int:
+        """Save one durable fact for this user. `thread_id` is provenance only."""
+
+    @abstractmethod
+    def search(self, query: str, user_id: str, limit: int = 5) -> list[str]:
+        """Full-text search over this user's facts, best match first."""
+
+    @abstractmethod
+    def facts(self, user_id: str, limit: int = 50) -> list[str]:
+        """This user's most recently saved facts."""
+
+    # --- lifecycle -----------------------------------------------------------
+
+    @abstractmethod
+    def close(self) -> None:
+        ...
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exception: object) -> None:
+        self.close()

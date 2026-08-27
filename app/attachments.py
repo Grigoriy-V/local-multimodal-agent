@@ -41,6 +41,39 @@ class AttachmentSource:
     name: str
 
 
+@dataclass(frozen=True)
+class AttachmentBytes:
+    """An upload an interface already holds in memory rather than on disk."""
+
+    name: str
+    media_type: str | None
+    data: bytes
+
+
+def _check_size(name: str, size: int) -> int:
+    if size == 0:
+        raise AttachmentError(f"{name}: empty files are not supported")
+    if size > MAX_FILE_SIZE_BYTES:
+        raise AttachmentError(f"{name}: file exceeds the 20 MB limit")
+    return size
+
+
+def _check_kind(name: str, media_type: str | None) -> str:
+    if media_type not in MEDIA_KINDS:
+        raise AttachmentError(f"{name}: unsupported file type ({media_type or 'unknown type'})")
+    return MEDIA_KINDS[media_type]
+
+
+def _check_count(count: int) -> None:
+    if count > MAX_FILES:
+        raise AttachmentError(f"at most {MAX_FILES} files can be sent in one message")
+
+
+def _check_total(sizes: Sequence[int]) -> None:
+    if sum(sizes) > MAX_TOTAL_SIZE_BYTES:
+        raise AttachmentError("attachments exceed the 50 MB total limit")
+
+
 def _size(source: AttachmentSource) -> int:
     try:
         if not source.path.is_file():
@@ -48,11 +81,25 @@ def _size(source: AttachmentSource) -> int:
         size = source.path.stat().st_size
     except OSError as exc:
         raise AttachmentError(f"{source.name}: uploaded file is unavailable") from exc
-    if size == 0:
-        raise AttachmentError(f"{source.name}: empty files are not supported")
-    if size > MAX_FILE_SIZE_BYTES:
-        raise AttachmentError(f"{source.name}: file exceeds the 20 MB limit")
-    return size
+    return _check_size(source.name, size)
+
+
+def load_attachment_bytes(uploads: Sequence[AttachmentBytes]) -> tuple[ContentPart, ...]:
+    """Admit uploads an interface received as bytes, under the same limits.
+
+    Telegram hands over file contents rather than paths. Writing them to disk
+    only to read them back would put a second, quietly different admission
+    policy in the adapter, so both paths meet here instead.
+    """
+
+    _check_count(len(uploads))
+    kinds = [_check_kind(upload.name, upload.media_type) for upload in uploads]
+    sizes = [_check_size(upload.name, len(upload.data)) for upload in uploads]
+    _check_total(sizes)
+    return tuple(
+        ContentPart(kind=kind, data=upload.data, media_type=upload.media_type)
+        for kind, upload in zip(kinds, uploads, strict=True)
+    )
 
 
 def load_attachments(sources: Sequence[AttachmentSource]) -> tuple[ContentPart, ...]:
@@ -62,18 +109,12 @@ def load_attachments(sources: Sequence[AttachmentSource]) -> tuple[ContentPart, 
     the model cannot answer as though it had seen an attachment that was lost.
     """
 
-    if len(sources) > MAX_FILES:
-        raise AttachmentError(f"at most {MAX_FILES} files can be sent in one message")
-
+    _check_count(len(sources))
     sizes: list[int] = []
     for source in sources:
-        if source.media_type not in MEDIA_KINDS:
-            media_type = source.media_type or "unknown type"
-            raise AttachmentError(f"{source.name}: unsupported file type ({media_type})")
+        _check_kind(source.name, source.media_type)
         sizes.append(_size(source))
-
-    if sum(sizes) > MAX_TOTAL_SIZE_BYTES:
-        raise AttachmentError("attachments exceed the 50 MB total limit")
+    _check_total(sizes)
 
     parts = []
     for source in sources:

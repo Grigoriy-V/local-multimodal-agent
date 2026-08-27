@@ -9,7 +9,7 @@ import pytest
 
 from app.context import Context, ContextPolicy, build_prelude, fold_older_messages, transcript
 from app.context.window import DEFAULT_SYSTEM_PROMPT, first_user_turn, system
-from app.memory import MemoryStore
+from app.memory import LOCAL_USER_ID, SqliteStore
 from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall
 
 
@@ -55,8 +55,8 @@ def exchange(count: int) -> list[Message]:
 
 
 @pytest.fixture
-def store() -> MemoryStore:
-    with MemoryStore() as store:
+def store() -> SqliteStore:
+    with SqliteStore() as store:
         yield store
 
 
@@ -149,9 +149,9 @@ def test_a_cut_before_the_first_message_is_clamped_not_taken_from_the_end() -> N
 # --- folding -----------------------------------------------------------------
 
 
-async def test_a_short_thread_is_not_summarized(store: MemoryStore) -> None:
+async def test_a_short_thread_is_not_summarized(store: SqliteStore) -> None:
     backend = EchoBackend()
-    store.append("t1", exchange(3))
+    store.append("t1", exchange(3), LOCAL_USER_ID)
 
     result = await fold_older_messages(backend, store, "t1", ContextPolicy())
 
@@ -161,9 +161,9 @@ async def test_a_short_thread_is_not_summarized(store: MemoryStore) -> None:
 
 
 async def test_a_long_thread_is_folded_and_the_summary_records_its_reach(
-    store: MemoryStore,
+    store: SqliteStore,
 ) -> None:
-    store.append("t1", exchange(12))
+    store.append("t1", exchange(12), LOCAL_USER_ID)
 
     await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy())
 
@@ -172,9 +172,9 @@ async def test_a_long_thread_is_folded_and_the_summary_records_its_reach(
     assert 0 < through < 24
 
 
-async def test_folding_leaves_the_recent_window_verbatim(store: MemoryStore) -> None:
+async def test_folding_leaves_the_recent_window_verbatim(store: SqliteStore) -> None:
     policy = ContextPolicy(keep_recent=8, summarize_after=16)
-    store.append("t1", exchange(12))
+    store.append("t1", exchange(12), LOCAL_USER_ID)
 
     await fold_older_messages(EchoBackend(), store, "t1", policy)
 
@@ -185,10 +185,10 @@ async def test_folding_leaves_the_recent_window_verbatim(store: MemoryStore) -> 
 
 
 async def test_the_summarizer_is_shown_the_older_messages_not_the_recent_ones(
-    store: MemoryStore,
+    store: SqliteStore,
 ) -> None:
     backend = EchoBackend()
-    store.append("t1", exchange(12))
+    store.append("t1", exchange(12), LOCAL_USER_ID)
 
     await fold_older_messages(backend, store, "t1", ContextPolicy())
 
@@ -198,11 +198,11 @@ async def test_the_summarizer_is_shown_the_older_messages_not_the_recent_ones(
     assert "question 11" not in body
 
 
-async def test_folding_twice_carries_the_earlier_summary_forward(store: MemoryStore) -> None:
+async def test_folding_twice_carries_the_earlier_summary_forward(store: SqliteStore) -> None:
     backend = EchoBackend()
-    store.append("t1", exchange(12))
+    store.append("t1", exchange(12), LOCAL_USER_ID)
     await fold_older_messages(backend, store, "t1", ContextPolicy())
-    store.append("t1", exchange(12))
+    store.append("t1", exchange(12), LOCAL_USER_ID)
 
     await fold_older_messages(backend, store, "t1", ContextPolicy())
 
@@ -213,11 +213,11 @@ async def test_folding_twice_carries_the_earlier_summary_forward(store: MemorySt
 # --- folding because the request grew, not because it got long ---------------
 
 
-async def test_a_short_thread_that_filled_the_request_is_folded(store: MemoryStore) -> None:
+async def test_a_short_thread_that_filled_the_request_is_folded(store: SqliteStore) -> None:
     """Eight turns of text and eight turns of images are the same message count."""
 
     policy = ContextPolicy(keep_recent=4, summarize_after=100, max_input_tokens=1000)
-    store.append("t1", exchange(6))
+    store.append("t1", exchange(6), LOCAL_USER_ID)
 
     result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=1200)
 
@@ -225,9 +225,9 @@ async def test_a_short_thread_that_filled_the_request_is_folded(store: MemorySto
     assert store.summary("t1")[1] > 0
 
 
-async def test_a_request_within_the_budget_leaves_the_thread_alone(store: MemoryStore) -> None:
+async def test_a_request_within_the_budget_leaves_the_thread_alone(store: SqliteStore) -> None:
     policy = ContextPolicy(keep_recent=4, summarize_after=100, max_input_tokens=1000)
-    store.append("t1", exchange(6))
+    store.append("t1", exchange(6), LOCAL_USER_ID)
 
     result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=400)
 
@@ -236,7 +236,7 @@ async def test_a_request_within_the_budget_leaves_the_thread_alone(store: Memory
 
 
 async def test_an_oversized_thread_shorter_than_the_window_is_left_alone(
-    store: MemoryStore,
+    store: SqliteStore,
 ) -> None:
     """A request can be over budget with nothing older than the verbatim window.
 
@@ -245,7 +245,7 @@ async def test_an_oversized_thread_shorter_than_the_window_is_left_alone(
     """
 
     policy = ContextPolicy(keep_recent=8, summarize_after=100, max_input_tokens=100)
-    store.append("t1", exchange(1))
+    store.append("t1", exchange(1), LOCAL_USER_ID)
 
     result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=5000)
 
@@ -253,7 +253,7 @@ async def test_an_oversized_thread_shorter_than_the_window_is_left_alone(
     assert store.summary("t1") == (None, 0)
 
 
-async def test_an_oversized_thread_folded_to_nothing_stops_folding(store: MemoryStore) -> None:
+async def test_an_oversized_thread_folded_to_nothing_stops_folding(store: SqliteStore) -> None:
     """Once everything foldable is folded, the next turn must not fold again.
 
     This is what a budget too small for the system prompt alone produces: every
@@ -261,7 +261,7 @@ async def test_an_oversized_thread_folded_to_nothing_stops_folding(store: Memory
     """
 
     policy = ContextPolicy(keep_recent=2, summarize_after=100, max_input_tokens=100)
-    store.append("t1", exchange(4))
+    store.append("t1", exchange(4), LOCAL_USER_ID)
     await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=5000)
     _, through = store.summary("t1")
 
@@ -271,21 +271,21 @@ async def test_an_oversized_thread_folded_to_nothing_stops_folding(store: Memory
     assert store.summary("t1")[1] == through
 
 
-async def test_without_a_known_limit_only_the_message_count_folds(store: MemoryStore) -> None:
+async def test_without_a_known_limit_only_the_message_count_folds(store: SqliteStore) -> None:
     """A model that does not state its context length is not guessed at."""
 
     policy = ContextPolicy(keep_recent=4, summarize_after=100)
-    store.append("t1", exchange(6))
+    store.append("t1", exchange(6), LOCAL_USER_ID)
 
     result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=999_999)
 
     assert result is None
 
 
-async def test_nothing_is_lost_when_a_thread_is_folded(store: MemoryStore) -> None:
+async def test_nothing_is_lost_when_a_thread_is_folded(store: SqliteStore) -> None:
     """The fold moves the window; it never deletes a message."""
 
-    store.append("t1", exchange(12))
+    store.append("t1", exchange(12), LOCAL_USER_ID)
 
     await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy())
 

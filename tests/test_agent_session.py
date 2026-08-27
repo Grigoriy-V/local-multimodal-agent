@@ -14,7 +14,7 @@ import pytest
 
 from app.agent.runtime import Agent
 from app.context import ContextPolicy
-from app.memory import MemoryStore
+from app.memory import LOCAL_USER_ID, SqliteStore
 from app.models import ContentPart, ContextOverflowError, Message
 from tests.fakes import ScriptedBackend, body, calls, prompt_text, says, user
 
@@ -38,7 +38,7 @@ def open_agent(
     backend: ScriptedBackend,
     policy: ContextPolicy | None = None,
 ) -> Agent:
-    return Agent(backend, MemoryStore(database), workspace, policy)
+    return Agent(backend, SqliteStore(database), workspace, policy)
 
 
 # --- conversations survive a restart -----------------------------------------
@@ -162,7 +162,7 @@ async def test_a_fact_is_only_saved_when_the_model_asks_for_it(
 
     await agent.answer("t1", user("My GPU is an RTX 4090."))
 
-    assert agent.store.facts() == []
+    assert agent.store.facts(LOCAL_USER_ID) == []
 
 
 # --- older context folds instead of growing ----------------------------------
@@ -250,7 +250,7 @@ async def test_answer_returns_the_intermediate_steps_and_the_answer(
 
 async def test_the_fill_is_the_size_the_model_reported(database: Path, workspace: Path) -> None:
     backend = ScriptedBackend(says("hello", input_tokens=600), limit=10_000)
-    agent = Agent(backend, MemoryStore(database), workspace, context_fraction=0.5)
+    agent = Agent(backend, SqliteStore(database), workspace, context_fraction=0.5)
 
     await agent.answer("t1", user("hi"))
     fill = await agent.fill()
@@ -263,7 +263,7 @@ async def test_a_model_that_states_no_limit_leaves_the_request_unjudged(
     database: Path, workspace: Path
 ) -> None:
     backend = ScriptedBackend(says("hello", input_tokens=600))
-    agent = Agent(backend, MemoryStore(database), workspace)
+    agent = Agent(backend, SqliteStore(database), workspace)
 
     await agent.answer("t1", user("hi"))
     fill = await agent.fill()
@@ -273,14 +273,14 @@ async def test_a_model_that_states_no_limit_leaves_the_request_unjudged(
 
 
 async def test_there_is_no_fill_before_a_turn(database: Path, workspace: Path) -> None:
-    agent = Agent(ScriptedBackend(), MemoryStore(database), workspace)
+    agent = Agent(ScriptedBackend(), SqliteStore(database), workspace)
 
     assert await agent.fill() is None
 
 
 async def test_the_limit_is_asked_for_once(database: Path, workspace: Path) -> None:
     backend = ScriptedBackend(default=says("ok", input_tokens=10), limit=10_000)
-    agent = Agent(backend, MemoryStore(database), workspace)
+    agent = Agent(backend, SqliteStore(database), workspace)
     asked: list[int] = []
     original = backend.context_limit
 
@@ -304,7 +304,7 @@ async def test_a_request_over_budget_folds_the_conversation(
 
     policy = ContextPolicy(keep_recent=2, summarize_after=100)
     backend = ScriptedBackend(default=says("ok", input_tokens=9_000), limit=10_000)
-    agent = Agent(backend, MemoryStore(database), workspace, policy, context_fraction=0.6)
+    agent = Agent(backend, SqliteStore(database), workspace, policy, context_fraction=0.6)
 
     for turn in range(4):
         await agent.answer("t1", user(f"turn {turn}"))
@@ -314,7 +314,7 @@ async def test_a_request_over_budget_folds_the_conversation(
     assert through > 0
 
 
-def seed_old_turns(store: MemoryStore, thread_id: str = "t1") -> None:
+def seed_old_turns(store: SqliteStore, thread_id: str = "t1") -> None:
     messages = []
     for turn in range(3):
         messages.extend(
@@ -326,13 +326,13 @@ def seed_old_turns(store: MemoryStore, thread_id: str = "t1") -> None:
                 ),
             ]
         )
-    store.append(thread_id, messages)
+    store.append(thread_id, messages, LOCAL_USER_ID)
 
 
 async def test_context_overflow_folds_then_retries_once(
     database: Path, workspace: Path
 ) -> None:
-    store = MemoryStore(database)
+    store = SqliteStore(database)
     seed_old_turns(store)
     backend = ScriptedBackend(
         ContextOverflowError("too large"),
@@ -354,7 +354,7 @@ async def test_context_overflow_folds_then_retries_once(
 async def test_a_second_context_overflow_returns_a_clear_refusal(
     database: Path, workspace: Path
 ) -> None:
-    store = MemoryStore(database)
+    store = SqliteStore(database)
     seed_old_turns(store)
     backend = ScriptedBackend(
         ContextOverflowError("first overflow"),
@@ -376,7 +376,7 @@ async def test_an_input_that_cannot_be_folded_is_refused_without_retrying(
     database: Path, workspace: Path
 ) -> None:
     backend = ScriptedBackend(ContextOverflowError("too large"), limit=100)
-    agent = Agent(backend, MemoryStore(database), workspace, context_fraction=0.6)
+    agent = Agent(backend, SqliteStore(database), workspace, context_fraction=0.6)
 
     produced = await agent.answer("t1", user("one enormous new input"))
 
@@ -391,7 +391,7 @@ async def test_an_input_that_cannot_be_folded_is_refused_without_retrying(
 async def test_overflow_while_summarizing_stops_with_a_refusal(
     database: Path, workspace: Path
 ) -> None:
-    store = MemoryStore(database)
+    store = SqliteStore(database)
     seed_old_turns(store)
     backend = ScriptedBackend(
         ContextOverflowError("original request overflow"),

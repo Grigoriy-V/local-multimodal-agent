@@ -7,7 +7,7 @@ from pathlib import Path
 import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from app.memory import MemoryStore
+from app.memory import ConversationStore
 
 
 async def _discard_checkpoint(path: str | Path, thread_id: str) -> None:
@@ -24,7 +24,7 @@ async def _discard_checkpoint(path: str | Path, thread_id: str) -> None:
 
 
 async def delete_conversation(
-    store: MemoryStore,
+    store: ConversationStore,
     thread_id: str,
     checkpoints: str | Path,
     task_checkpoints: str | Path,

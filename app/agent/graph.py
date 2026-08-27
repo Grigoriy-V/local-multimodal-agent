@@ -20,7 +20,7 @@ from langgraph.types import interrupt
 
 from app.context import Context, ContextPolicy, build_prelude, fold_older_messages
 from app.context.window import DEFAULT_SYSTEM_PROMPT
-from app.memory import MemoryStore
+from app.memory import ConversationStore
 from app.models import (
     Completion,
     ContentPart,
@@ -128,7 +128,8 @@ def latest_text(messages: list[Message]) -> str:
 def build_agent(
     backend: ModelBackend,
     toolbox: Toolbox,
-    store: MemoryStore,
+    store: ConversationStore,
+    user_id: str,
     policy: ContextPolicy | None = None,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     checkpointer: BaseCheckpointSaver | None = None,
@@ -151,7 +152,7 @@ def build_agent(
         summary, through = store.summary(state.thread_id)
         history = store.messages(state.thread_id, after=through - 1)
         query = latest_text(state.messages)
-        facts = store.search(query, limit=policy.retrieved_facts) if query else []
+        facts = store.search(query, user_id, limit=policy.retrieved_facts) if query else []
         return Context(
             prelude=build_prelude(summary, facts, system_prompt),
             history=history,
@@ -217,7 +218,7 @@ def build_agent(
         return {"messages": messages}
 
     async def persist(state: AgentState) -> None:
-        store.append(state.thread_id, state.messages)
+        store.append(state.thread_id, state.messages, user_id)
         await fold_older_messages(
             backend, store, state.thread_id, policy, state.usage.input_tokens
         )

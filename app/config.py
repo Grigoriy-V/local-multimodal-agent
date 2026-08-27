@@ -27,6 +27,37 @@ class ModelSettings(BaseSettings):
     retry_backoff: float = 0.5
 
 
+class TelegramSettings(BaseSettings):
+    """How to reach Telegram, and who is allowed to reach the assistant."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="TELEGRAM_", env_file=".env", extra="ignore"
+    )
+
+    token: str = ""
+    api_base: str = "https://api.telegram.org"
+    # Comma-separated numeric Telegram user ids. Empty means nobody, because the
+    # safe answer has to be the default: an assistant reachable by whoever finds
+    # the bot spends the owner's GPU and reads the owner's memory.
+    allowed_users: str = ""
+    # Admit every Telegram account instead of consulting the list above. Each
+    # account still gets its own conversations, memory and workspace, but they
+    # share one GPU, so this is a deliberate choice and never a default.
+    open_access: bool = False
+    # Long-poll duration asked of Telegram. The HTTP timeout must exceed it.
+    poll_timeout: int = 25
+    timeout: float = 60.0
+
+    @property
+    def allowed(self) -> frozenset[int]:
+        found = set()
+        for part in self.allowed_users.replace(";", ",").split(","):
+            part = part.strip()
+            if part:
+                found.add(int(part))
+        return frozenset(found)
+
+
 class AgentSettings(BaseSettings):
     """Where the agent stores memory, what it may read, and how much it keeps."""
 

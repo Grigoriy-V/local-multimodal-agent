@@ -22,7 +22,7 @@ from pathlib import Path
 from app.agent.runtime import Agent, text_message
 from app.config import ModelSettings
 from app.context import ContextPolicy
-from app.memory import MemoryStore
+from app.memory import SqliteStore
 from app.models.openai_compatible import BackendError, OpenAICompatibleBackend
 
 
@@ -38,7 +38,7 @@ async def open_agent(
 
     agent = Agent(
         backend=OpenAICompatibleBackend(ModelSettings()),
-        store=MemoryStore(room / "memory.sqlite3"),
+        store=SqliteStore(room / "memory.sqlite3"),
         workspace=room / "workspace",
         policy=policy,
         checkpoints=room / "checkpoints.sqlite3",

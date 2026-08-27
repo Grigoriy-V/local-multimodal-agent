@@ -1,12 +1,14 @@
-"""Everything that must outlive the process.
+"""The SQLite implementation of the persistence contract.
 
-One SQLite file holds threads, their messages, a rolling summary per thread, and
-long-term facts. Facts are deliberately not scoped to a thread: the point of a
-long-term fact is that a later conversation finds it.
+One file holds threads, their messages, a rolling summary per thread, and
+long-term facts. Facts are not scoped to a thread — the point of a long-term
+fact is that a later conversation finds it — but they are scoped to a user,
+because the point stops holding across people.
 
-The store is synchronous. A local single-user agent spends its time waiting on
-the model, not on SQLite, and an async wrapper would buy nothing but a
-dependency.
+The store is synchronous. A local agent spends its time waiting on the model,
+not on SQLite, and an async wrapper would buy nothing but a dependency. The
+deployed profile does not share that property and gets its own implementation of
+`ConversationStore` rather than an async disguise over this one.
 """
 
 from __future__ import annotations
@@ -16,16 +18,22 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
 
+from app.memory.base import LOCAL_USER_ID, ConversationStore, Thread
 from app.models import ContentPart, Message, ToolCall
+
+# Bumped whenever the schema changes. `PRAGMA user_version` is SQLite's own
+# integer on the file, so the database states its shape rather than the code
+# guessing it from which columns happen to exist.
+SCHEMA_VERSION = 1
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
     id                 TEXT PRIMARY KEY,
+    user_id            TEXT NOT NULL DEFAULT 'local-user',
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,
     summary            TEXT,
@@ -47,9 +55,13 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS facts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     text       TEXT NOT NULL,
+    user_id    TEXT NOT NULL DEFAULT 'local-user',
     thread_id  TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS threads_by_user ON threads(user_id);
+CREATE INDEX IF NOT EXISTS facts_by_user ON facts(user_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
     USING fts5(text, content='facts', content_rowid='id');
@@ -64,17 +76,6 @@ END;
 """
 
 TOKEN = re.compile(r"\w+", re.UNICODE)
-
-
-@dataclass(frozen=True)
-class Thread:
-    """Enough about a conversation to choose it without opening it."""
-
-    id: str
-    created_at: str
-    updated_at: str
-    messages: int
-    opening: str
 
 
 def _now() -> str:
@@ -150,7 +151,40 @@ def match_query(query: str) -> str:
     return " OR ".join(f'"{token}"' for token in tokens)
 
 
-class MemoryStore:
+def _columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+
+
+def migrate(db: sqlite3.Connection) -> int:
+    """Bring a database up to `SCHEMA_VERSION`, returning the version found.
+
+    Version 0 is either an empty file or a database written before conversations
+    and facts had owners. In the second case every existing row belongs to the
+    person who has been using the local profile all along, so the backfill hands
+    them to `LOCAL_USER_ID` rather than inventing an owner or refusing to open.
+    """
+
+    found = int(db.execute("PRAGMA user_version").fetchone()[0])
+    if found >= SCHEMA_VERSION:
+        return found
+
+    tables = {
+        row["name"]
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    for table in ("threads", "facts"):
+        if table in tables and "user_id" not in _columns(db, table):
+            db.execute(
+                f"ALTER TABLE {table} ADD COLUMN user_id TEXT NOT NULL"
+                f" DEFAULT '{LOCAL_USER_ID}'"
+            )
+    db.executescript(SCHEMA)
+    db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    db.commit()
+    return found
+
+
+class SqliteStore(ConversationStore):
     """The project's SQLite file."""
 
     def __init__(self, path: str | Path = ":memory:") -> None:
@@ -160,37 +194,39 @@ class MemoryStore:
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
-        self._db.executescript(SCHEMA)
-        self._db.commit()
+        migrate(self._db)
 
     # --- threads -------------------------------------------------------------
 
-    def ensure_thread(self, thread_id: str) -> None:
+    def ensure_thread(self, thread_id: str, user_id: str) -> None:
         now = _now()
         self._db.execute(
-            "INSERT INTO threads (id, created_at, updated_at) VALUES (?, ?, ?)"
+            "INSERT INTO threads (id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
             " ON CONFLICT(id) DO NOTHING",
-            (thread_id, now, now),
+            (thread_id, user_id, now, now),
         )
         self._db.commit()
 
-    def threads(self) -> list[Thread]:
-        """Every conversation, most recently touched first.
+    def threads(self, user_id: str) -> list[Thread]:
+        """This user's conversations, most recently touched first.
 
         Carries what a chooser needs — how long it is and how it began — because
         a thread identifier is a session UUID and says nothing to anyone.
         """
 
         rows = self._db.execute(
-            "SELECT t.id, t.created_at, t.updated_at,"
+            "SELECT t.id, t.user_id, t.created_at, t.updated_at,"
             "  (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id) AS messages,"
             "  (SELECT m.content FROM messages m WHERE m.thread_id = t.id AND m.role = 'user'"
             "   ORDER BY m.position LIMIT 1) AS opening"
-            " FROM threads t ORDER BY t.updated_at DESC, t.rowid DESC"
+            " FROM threads t WHERE t.user_id = ?"
+            " ORDER BY t.updated_at DESC, t.rowid DESC",
+            (user_id,),
         ).fetchall()
         return [
             Thread(
                 id=row["id"],
+                user_id=row["user_id"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 messages=row["messages"],
@@ -198,6 +234,12 @@ class MemoryStore:
             )
             for row in rows
         ]
+
+    def thread_owner(self, thread_id: str) -> str | None:
+        row = self._db.execute(
+            "SELECT user_id FROM threads WHERE id = ?", (thread_id,)
+        ).fetchone()
+        return None if row is None else row["user_id"]
 
     def delete_thread(self, thread_id: str) -> bool:
         """Delete one conversation while preserving separately approved facts."""
@@ -208,8 +250,9 @@ class MemoryStore:
             ).fetchone()
             if exists is None:
                 return False
-            # Facts are account-level memory. Removing their deleted-conversation
-            # provenance avoids a dangling reference without forgetting the fact.
+            # Facts are the user's memory, not the conversation's. Removing their
+            # deleted-conversation provenance avoids a dangling reference without
+            # forgetting the fact or changing who it belongs to.
             self._db.execute(
                 "UPDATE facts SET thread_id = NULL WHERE thread_id = ?", (thread_id,)
             )
@@ -219,10 +262,10 @@ class MemoryStore:
 
     # --- messages ------------------------------------------------------------
 
-    def append(self, thread_id: str, messages: Iterable[Message]) -> int:
+    def append(self, thread_id: str, messages: Iterable[Message], user_id: str) -> int:
         """Append messages to a thread and return the new message count."""
 
-        self.ensure_thread(thread_id)
+        self.ensure_thread(thread_id, user_id)
         position = self._db.execute(
             "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM messages WHERE thread_id = ?",
             (thread_id,),
@@ -248,7 +291,9 @@ class MemoryStore:
         self._db.commit()
         return position
 
-    def messages(self, thread_id: str, after: int = -1, limit: int | None = None) -> list[Message]:
+    def messages(
+        self, thread_id: str, after: int = -1, limit: int | None = None
+    ) -> list[Message]:
         """Messages of a thread in order, optionally only those past a position."""
 
         sql = "SELECT * FROM messages WHERE thread_id = ? AND position > ? ORDER BY position"
@@ -277,42 +322,45 @@ class MemoryStore:
         return row["summary"], row["summarized_through"]
 
     def set_summary(self, thread_id: str, text: str, through: int) -> None:
-        self.ensure_thread(thread_id)
-        self._db.execute(
+        cursor = self._db.execute(
             "UPDATE threads SET summary = ?, summarized_through = ?, updated_at = ? WHERE id = ?",
             (text, through, _now(), thread_id),
         )
+        if cursor.rowcount == 0:
+            raise KeyError(f"no such thread: {thread_id!r}")
         self._db.commit()
 
     # --- facts ---------------------------------------------------------------
 
-    def remember(self, text: str, thread_id: str | None = None) -> int:
+    def remember(self, text: str, user_id: str, thread_id: str | None = None) -> int:
         text = text.strip()
         if not text:
             raise ValueError("a fact cannot be empty")
         cursor = self._db.execute(
-            "INSERT INTO facts (text, thread_id, created_at) VALUES (?, ?, ?)",
-            (text, thread_id, _now()),
+            "INSERT INTO facts (text, user_id, thread_id, created_at) VALUES (?, ?, ?, ?)",
+            (text, user_id, thread_id, _now()),
         )
         self._db.commit()
         return int(cursor.lastrowid or 0)
 
-    def search(self, query: str, limit: int = 5) -> list[str]:
-        """Full-text search over facts, best match first."""
+    def search(self, query: str, user_id: str, limit: int = 5) -> list[str]:
+        """Full-text search over this user's facts, best match first."""
 
         match = match_query(query)
         if not match:
             return []
         rows = self._db.execute(
             "SELECT f.text FROM facts_fts JOIN facts f ON f.id = facts_fts.rowid"
-            " WHERE facts_fts MATCH ? ORDER BY bm25(facts_fts) LIMIT ?",
-            (match, limit),
+            " WHERE facts_fts MATCH ? AND f.user_id = ?"
+            " ORDER BY bm25(facts_fts) LIMIT ?",
+            (match, user_id, limit),
         ).fetchall()
         return [row["text"] for row in rows]
 
-    def facts(self, limit: int = 50) -> list[str]:
+    def facts(self, user_id: str, limit: int = 50) -> list[str]:
         rows = self._db.execute(
-            "SELECT text FROM facts ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT text FROM facts WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (user_id, limit),
         ).fetchall()
         return [row["text"] for row in rows]
 
@@ -320,9 +368,3 @@ class MemoryStore:
 
     def close(self) -> None:
         self._db.close()
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *exception: object) -> None:
-        self.close()

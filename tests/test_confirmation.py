@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from app.agent.runtime import Agent
-from app.memory import MemoryStore
+from app.memory import SqliteStore
 from tests.fakes import ScriptedBackend, body, calls, says, user
 
 
@@ -38,7 +38,7 @@ def open_agent(
     database, checkpoints = paths
     return Agent(
         backend,
-        MemoryStore(database),
+        SqliteStore(database),
         workspace,
         checkpoints=checkpoints if checkpointed else None,
     )

@@ -1,8 +1,8 @@
-"""Expose the canonical MemoryStore through Chainlit's native chat history.
+"""Expose the canonical conversation store through Chainlit's native history.
 
 Chainlit needs a data layer to draw its sidebar, but conversation content must
 not acquire a second owner. This adapter therefore derives threads, steps and
-elements from MemoryStore and ignores Chainlit's duplicate step writes.
+elements from the store and ignores Chainlit's duplicate step writes.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import json
 import uuid
-from collections.abc import Sequence
 from typing import Any
 
 from chainlit.data import BaseDataLayer
@@ -26,11 +25,10 @@ from chainlit.types import (
 )
 from chainlit.user import PersistedUser, User
 
-from app.memory import MemoryStore, Thread
-from app.models import ContentPart, Message
 from app.conversations import delete_conversation
+from app.memory import LOCAL_USER_ID, ConversationStore, Thread
+from app.models import ContentPart, Message
 
-LOCAL_USER_ID = "local-user"
 LOCAL_USER_IDENTIFIER = "local"
 LOCAL_USER_CREATED_AT = "2026-01-01T00:00:00+00:00"
 
@@ -101,7 +99,7 @@ class MemoryStoreDataLayer(BaseDataLayer):
 
     def __init__(
         self,
-        store: MemoryStore,
+        store: ConversationStore,
         checkpoints: str = "data/checkpoints.sqlite3",
         task_checkpoints: str = "data/task-checkpoints.sqlite3",
     ) -> None:
@@ -152,7 +150,8 @@ class MemoryStoreDataLayer(BaseDataLayer):
         return None
 
     async def get_thread_author(self, thread_id: str) -> str:
-        return LOCAL_USER_IDENTIFIER if any(t.id == thread_id for t in self.store.threads()) else ""
+        owner = self.store.thread_owner(thread_id)
+        return LOCAL_USER_IDENTIFIER if owner == LOCAL_USER_ID else ""
 
     async def delete_thread(self, thread_id: str) -> None:
         await delete_conversation(
@@ -165,7 +164,7 @@ class MemoryStoreDataLayer(BaseDataLayer):
     async def list_threads(
         self, pagination: Pagination, filters: ThreadFilter
     ) -> PaginatedResponse[ThreadDict]:
-        threads = self.store.threads()
+        threads = self.store.threads(LOCAL_USER_ID)
         if filters.search:
             needle = filters.search.casefold()
             threads = [thread for thread in threads if needle in _thread_name(thread).casefold()]
@@ -187,7 +186,10 @@ class MemoryStoreDataLayer(BaseDataLayer):
         )
 
     async def get_thread(self, thread_id: str) -> ThreadDict | None:
-        thread = next((item for item in self.store.threads() if item.id == thread_id), None)
+        thread = next(
+            (item for item in self.store.threads(LOCAL_USER_ID) if item.id == thread_id),
+            None,
+        )
         return self._thread(thread, include_content=True) if thread else None
 
     async def update_thread(

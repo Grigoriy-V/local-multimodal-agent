@@ -16,14 +16,14 @@ from pathlib import Path
 
 from app.agent.runtime import Agent, text_message
 from app.config import ModelSettings
-from app.memory import MemoryStore
+from app.memory import SqliteStore
 from app.models.openai_compatible import OpenAICompatibleBackend
 
 
 def open_agent(room: Path) -> Agent:
     return Agent(
         backend=OpenAICompatibleBackend(ModelSettings()),
-        store=MemoryStore(room / "memory.sqlite3"),
+        store=SqliteStore(room / "memory.sqlite3"),
         workspace=room / "workspace",
         checkpoints=room / "checkpoints.sqlite3",
     )

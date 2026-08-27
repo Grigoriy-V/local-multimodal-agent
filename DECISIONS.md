@@ -243,3 +243,59 @@ decide what the agent is supposed to infer.
 **Rules out.** A `Conversation` / `Agent` selector, separate user-facing entry
 paths for answers and tasks, and requiring a slash command or tool control to
 obtain autonomous behavior.
+
+## 2026-08-27: The product becomes a deployable personal assistant
+
+**Decision.** The project's scope widens from a single-user local agent to a
+personal assistant that also deploys serverless for a small number of people,
+first over Telegram. It continues in this repository, and the deployment target
+becomes a configuration axis: the local and deployed profiles run the same
+`app/`. The GPU model server remains outside the repository, reached over
+`MODEL_ENDPOINT` only. Direction and its open points are in
+`docs/personal_assistant_direction.md`.
+
+**Why.** Most of `app/` transfers unchanged, and the adapter boundary was built
+for exactly this substitution — proving it by starting a second repository
+would refute the invariant at the moment of its first real test. Keeping the
+local profile preserves a working system to develop against without cloud cost.
+
+**Rules out.** A separate assistant repository, a Modal-specific fork of `app/`,
+provider or platform imports outside their adapter, and treating a capability
+that works in only one profile as finished. It also retires the earlier
+Version 2 direction — a policy-governed tool platform with an MCP surface — as
+the current plan; that material stays in `docs/BACKLOG.md`.
+
+## 2026-08-27: One persistence contract, two implementations
+
+**Decision.** Conversations, summaries and memory move behind one store
+contract. SQLite implements it for the local profile; a networked database
+implements it for the deployed profile, because an idle application must cost
+nothing and SQLite on a network volume is not safe for concurrent writers. One
+shared contract test suite runs against both. Conversations, summaries and
+memory become scoped by user.
+
+**Why.** The engine differs only in full-text search and the connection layer;
+ordinary SQL carries over. Keeping SQLite locally preserves zero-setup runs and
+the offline, temporary-database test rule that a database-server-only design
+would break. Facts are global today by design, which becomes a leak between
+people as soon as a second user exists.
+
+**Rules out.** A concrete store class as a type in application code, SQLite on
+a network volume in the deployed profile, an always-on container kept alive to
+own a database file, a second implementation without shared contract tests, and
+any unscoped fact or thread query once more than one person uses the system.
+
+## 2026-08-27: The HTTP layer waits for a separately hosted caller
+
+**Decision.** `app/api/` stays deferred even though a consumer other than
+Chainlit now exists. Telegram runs in the same process, so the trigger recorded
+in the earlier FastAPI decision is amended: the condition is a UI hosted apart
+from the application, not merely a second consumer.
+
+**Why.** The reason that decision existed was to avoid a layer built for its own
+sake. Two in-process adapters do not create one. What has to be preserved is the
+property that makes the layer cheap later, and that property is a discipline,
+not a module.
+
+**Rules out.** Building an HTTP surface with no separately hosted caller, and
+any code in `app/` that depends on a request, response or session object.

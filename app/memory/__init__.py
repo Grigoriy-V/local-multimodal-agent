@@ -1,3 +1,10 @@
-from app.memory.store import MemoryStore, Thread
+from app.memory.base import LOCAL_USER_ID, ConversationStore, Thread
+from app.memory.store import SCHEMA_VERSION, SqliteStore
 
-__all__ = ["MemoryStore", "Thread"]
+__all__ = [
+    "LOCAL_USER_ID",
+    "SCHEMA_VERSION",
+    "ConversationStore",
+    "SqliteStore",
+    "Thread",
+]

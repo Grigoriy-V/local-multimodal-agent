@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from app.context.window import ContextPolicy, first_user_turn, system, transcript
-from app.memory import MemoryStore
+from app.memory import ConversationStore
 from app.models import ContentPart, Message, ModelBackend
 
 INSTRUCTION = (
@@ -36,7 +36,7 @@ async def summarize(
 
 async def fold_older_messages(
     backend: ModelBackend,
-    store: MemoryStore,
+    store: ConversationStore,
     thread_id: str,
     policy: ContextPolicy,
     used_tokens: int | None = None,

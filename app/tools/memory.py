@@ -7,34 +7,42 @@ listener that harvests statements out of the conversation.
 
 from __future__ import annotations
 
-from app.memory import MemoryStore
+from app.memory import ConversationStore
 from app.tools.base import Tool, ToolError
 
 MAX_FACT_CHARS = 500
 
 
-def _remember(store: MemoryStore, thread_id: str | None, text: str) -> str:
+def _remember(
+    store: ConversationStore, user_id: str, thread_id: str | None, text: str
+) -> str:
     text = text.strip()
     if not text:
         raise ToolError("a fact cannot be empty")
     if len(text) > MAX_FACT_CHARS:
         raise ToolError(f"a fact must be shorter than {MAX_FACT_CHARS} characters")
-    store.remember(text, thread_id=thread_id)
+    store.remember(text, user_id, thread_id=thread_id)
     return f"saved: {text}"
 
 
-def _search(store: MemoryStore, query: str, limit: int) -> str:
-    found = store.search(query, limit=limit)
+def _search(store: ConversationStore, user_id: str, query: str, limit: int) -> str:
+    found = store.search(query, user_id, limit=limit)
     if not found:
         return f"no memory matches {query!r}"
     return "\n".join(f"- {fact}" for fact in found)
 
 
-def memory_tools(store: MemoryStore, thread_id: str | None = None, limit: int = 5) -> list[Tool]:
-    """Build `remember_fact` and `search_memory` over one store.
+def memory_tools(
+    store: ConversationStore,
+    user_id: str,
+    thread_id: str | None = None,
+    limit: int = 5,
+) -> list[Tool]:
+    """Build `remember_fact` and `search_memory` over one store, for one user.
 
     `thread_id` is provenance only. A fact saved in one conversation is
-    searchable from every other one, which is the whole point of saving it.
+    searchable from every other one of that user's conversations, which is the
+    whole point of saving it; `user_id` is where that stops.
     """
 
     return [
@@ -55,7 +63,7 @@ def memory_tools(store: MemoryStore, thread_id: str | None = None, limit: int = 
                 "required": ["text"],
                 "additionalProperties": False,
             },
-            run=lambda text: _remember(store, thread_id, text),
+            run=lambda text: _remember(store, user_id, thread_id, text),
         ),
         Tool(
             name="search_memory",
@@ -68,6 +76,6 @@ def memory_tools(store: MemoryStore, thread_id: str | None = None, limit: int = 
                 "required": ["query"],
                 "additionalProperties": False,
             },
-            run=lambda query: _search(store, query, limit),
+            run=lambda query: _search(store, user_id, query, limit),
         ),
     ]

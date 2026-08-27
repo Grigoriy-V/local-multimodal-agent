@@ -50,7 +50,7 @@ from app.agent.harness import GeneralHarness
 from app.agent.runtime import Agent, create_agent
 from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
 from app.config import AgentSettings
-from app.memory import MemoryStore
+from app.memory import SqliteStore
 from app.models import ContentPart, Message
 from ui.chainlit_history import LOCAL_USER_IDENTIFIER, MemoryStoreDataLayer
 
@@ -70,7 +70,7 @@ async def local_auth(_headers: Any) -> cl.User:
 def history_layer() -> MemoryStoreDataLayer:
     settings = AgentSettings()
     return MemoryStoreDataLayer(
-        MemoryStore(settings.database),
+        SqliteStore(settings.database),
         checkpoints=settings.checkpoints,
         task_checkpoints=settings.task_checkpoints,
     )
