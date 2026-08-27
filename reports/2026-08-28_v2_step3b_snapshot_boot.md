@@ -98,9 +98,20 @@ After the warm measurements the idle window was cut from 600 s to 60 s with
 holding an idle A10 for ten minutes. This is an experiment setting; the next
 deploy restores `SCALEDOWN_WINDOW = 600`.
 
+## Scale to zero, verified
+
+After the idle window elapsed, `modal container list` reported no active
+containers in the environment. The replacement drops its GPU when idle, which is
+the product requirement the whole deployment shape exists to satisfy, and it is
+now confirmed for `assistant-llm-v2` rather than assumed from the baseline.
+
+This also sets up the outstanding measurement: the App is now genuinely cold,
+so the next invocation is a real restored cold start.
+
 ## State
 
-- `assistant-llm-v2`: deployed, snapshot created, idle window temporarily 60 s.
+- `assistant-llm-v2`: deployed, snapshot created, scaled to zero, idle window
+  temporarily 60 s.
 - `assistant-llm`: deployed, zero containers, still serving `MODEL_ENDPOINT`.
   Untouched.
 - `MODEL_ENDPOINT` unchanged. Nothing in `app/` changed.
