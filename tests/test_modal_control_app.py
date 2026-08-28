@@ -58,7 +58,9 @@ def test_webhook_and_worker_are_distinct_modal_functions() -> None:
     }
     assert "telegram_webhook" in functions
     assert "process_telegram_update" in functions
-    assert "process_telegram_update.spawn(update_id)" in source()
+    # The async form, because the blocking one is a synchronous RPC from inside
+    # the event loop the webhook is answering on.
+    assert "await process_telegram_update.spawn.aio(update_id)" in source()
 
 
 def test_database_latency_probe_is_cpu_only_and_does_not_call_the_model() -> None:

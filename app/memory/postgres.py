@@ -33,6 +33,7 @@ from typing import Any
 
 import psycopg
 from psycopg import sql
+from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 
 from app.memory.base import ConversationStore, Thread, TurnContextRecords
@@ -169,6 +170,30 @@ class PostgresStore(ConversationStore):
             connection = self._open()
         return connection
 
+    @staticmethod
+    def _settle(connection: psycopg.Connection) -> None:
+        """Leave the connection outside a transaction.
+
+        Two reasons, one of which cost a live failure. A read opens a
+        transaction like any other statement, so a store that only ever commits
+        after writes leaves the connection `INTRANS` for as long as nobody
+        writes — and the single-round-trip paths below, which turn autocommit on
+        for one statement, are then refused outright: psycopg will not change
+        autocommit inside a transaction. The probe never saw it because it read
+        first on a fresh connection; a real turn calls `threads()` before it
+        reads context, and every message failed.
+
+        The second reason outlives that bug. An idle-in-transaction connection
+        holds a slot and a snapshot on a pooled server, and this assistant is
+        idle by design between messages.
+        """
+
+        if (
+            not connection.closed
+            and connection.info.transaction_status != TransactionStatus.IDLE
+        ):
+            connection.commit()
+
     @contextmanager
     def _cursor(self) -> Iterator[psycopg.Cursor]:
         """A cursor on a live connection, reopening one that went away.
@@ -187,6 +212,9 @@ class PostgresStore(ConversationStore):
             with connection.cursor() as cursor:
                 cursor.execute(f'SET LOCAL search_path TO "{self.schema}"')
                 yield cursor
+            # Writers commit for themselves; this is what ends a read's
+            # transaction, which nothing else would.
+            self._settle(connection)
         except psycopg.OperationalError:
             self._connection = None
             connection.close()
@@ -482,6 +510,9 @@ class PostgresStore(ConversationStore):
             sql.Identifier(self.schema),
         )
         connection = self._live_connection()
+        # Autocommit is what makes this one round trip instead of two, and it
+        # cannot be turned on while a transaction is open.
+        self._settle(connection)
         restore_autocommit = not connection.autocommit
         try:
             if restore_autocommit:

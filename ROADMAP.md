@@ -150,12 +150,28 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      operation stay as instruments, not acceptance. Reasoning and what it rules
      out: `DECISIONS.md`, 2026-08-28.
      `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
-   - Accept the deployed platform adapter. The Telegram secret
-     token and allowed-user list are checked in the application, because
-     platform proxy auth cannot be used for a Telegram webhook. Registering the
-     webhook retires polling rather than joining it: Telegram refuses
-     `getUpdates` while a webhook is set.
-   - File tools over an ephemeral sandbox rather than a local path.
+   - **Deployed adapter accepted; the assistant answers over the webhook.** A
+     real Telegram message went Telegram → webhook → application-checked secret
+     token and allow list → Neon inbox → spawned CPU worker → the same harness →
+     GPU wake → reply, with nothing running on the human's machine. Polling is
+     retired. The first live message exposed a defect the latency probe could
+     not: a read left the PostgreSQL connection in a transaction, so the
+     single-round-trip context query could not switch autocommit and **every**
+     message failed. Fixed, guarded by a fake connection that models transaction
+     status and by the real sequence in the contract suite. Two latency defects
+     fixed with it — a blocking Modal RPC inside the webhook's event loop, and a
+     2 s scaledown that made every message pay a cold start. A warm webhook is
+     now **306 ms against 4.69 s**, 15x. First message about ten seconds, second
+     nearly instant.
+     `reports/2026-08-28_v2_control_plane_live_acceptance.md`.
+   - Chromium in the control image. Browser evidence worked while the agent ran
+     on Windows and found Edge; `debian_slim` has none, so a task whose plan
+     asks for a screenshot now fails validation. `/usr/bin/chromium` is already
+     in the search list: `apt_install`, plus `--no-sandbox` and
+     `--disable-dev-shm-usage` under root.
+   - File tools over an ephemeral sandbox rather than a local path. Until then
+     the workspace dies with the container and files do not survive between
+     messages.
 
 2. **Document ingestion.** PDF, Markdown, text and office documents as a
    first-class capability reusable by chat, retrieval and coding work, with page

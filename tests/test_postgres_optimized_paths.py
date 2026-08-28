@@ -4,7 +4,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+import psycopg
 import pytest
+from psycopg.pq import TransactionStatus
 
 from app.memory.postgres import PostgresStore
 from app.memory.records import dump_content
@@ -24,9 +26,28 @@ class FakeCursor:
     def execute(self, statement: Any, parameters: object = None) -> None:
         rendered = statement.as_string() if hasattr(statement, "as_string") else statement
         self.connection.executions.append((rendered, parameters))
+        # A statement outside autocommit opens a transaction, which is the whole
+        # reason the live failure existed. The fake models it rather than
+        # pretending every connection is always idle.
+        if not self.connection.autocommit:
+            self.connection.status = TransactionStatus.INTRANS
 
     def fetchone(self) -> dict[str, object]:
         return self.connection.row
+
+    def fetchall(self) -> list[dict[str, object]]:
+        # These tests care about what a read does to the connection, not about
+        # what it returns, so a multi-row read is empty rather than invented.
+        return []
+
+
+class FakeInfo:
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+
+    @property
+    def transaction_status(self) -> TransactionStatus:
+        return self.connection.status
 
 
 class FakeConnection:
@@ -35,10 +56,26 @@ class FakeConnection:
     def __init__(self, row: dict[str, object]) -> None:
         self.row = row
         self.closed = False
-        self.autocommit = False
+        self._autocommit = False
+        self.status = TransactionStatus.IDLE
         self.executions: list[tuple[str, object]] = []
         self.commits = 0
         self.pipeline_entries = 0
+        self.info = FakeInfo(self)
+
+    @property
+    def autocommit(self) -> bool:
+        return self._autocommit
+
+    @autocommit.setter
+    def autocommit(self, value: bool) -> None:
+        # psycopg refuses this inside a transaction, and refusing it here is
+        # what makes the offline test able to see the live failure.
+        if self.status != TransactionStatus.IDLE:
+            raise psycopg.ProgrammingError(
+                "can't change 'autocommit' now: connection in transaction status INTRANS"
+            )
+        self._autocommit = value
 
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)
@@ -50,6 +87,7 @@ class FakeConnection:
 
     def commit(self) -> None:
         self.commits += 1
+        self.status = TransactionStatus.IDLE
 
     def close(self) -> None:
         self.closed = True
@@ -138,3 +176,34 @@ def test_append_is_one_execute_with_a_pipelined_commit(
     assert 'INSERT INTO "assistant".threads' in statement
     assert 'INSERT INTO "assistant".messages' in statement
     assert "SET LOCAL" not in statement
+
+
+def test_a_prior_read_does_not_block_the_context_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live failure, reproduced without a database.
+
+    Every deployed message died with `can't change 'autocommit' now`. A turn
+    lists threads before it reads context; that first read left the connection
+    in a transaction, and the single-round-trip context query cannot switch
+    autocommit there. The fake connection refuses the switch exactly as psycopg
+    does, so this test fails without the fix.
+    """
+
+    connection = install_connection(
+        monkeypatch,
+        {
+            "summary": None,
+            "summarized_through": 0,
+            "history": [],
+            "facts": [],
+        },
+    )
+    store = PostgresStore("postgresql://example/db", "assistant")
+    store.threads("user-alice")
+
+    assert connection.status == TransactionStatus.IDLE, "a read must not stay open"
+
+    store.turn_context("t1", "user-alice", "anything", 5)
+
+    assert connection.autocommit is False, "autocommit is restored afterwards"

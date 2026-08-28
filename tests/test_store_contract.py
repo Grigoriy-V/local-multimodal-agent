@@ -155,6 +155,44 @@ def test_deleting_a_conversation_keeps_the_owner_s_facts(
     assert store.search("concise", BOB) == []
 
 
+# --- one store serves a whole turn, in the order a turn actually does it ------
+
+
+def test_reading_first_does_not_break_the_context_read(store: ConversationStore) -> None:
+    """The sequence a real turn performs, which no single-operation test covers.
+
+    A turn lists the user's threads before it assembles context. On PostgreSQL
+    that first read leaves the connection inside a transaction, and the
+    single-round-trip context query — which turns autocommit on for one
+    statement — was then refused outright. Every deployed message failed with
+    `can't change 'autocommit' now`, while the latency probe passed, because the
+    probe read context first on a fresh connection.
+    """
+
+    store.append("t1", [user("hello")], ALICE)
+    store.remember("Alice uses PowerShell", ALICE)
+
+    listed = store.threads(ALICE)
+    context = store.turn_context("t1", ALICE, "PowerShell", 5)
+
+    assert [thread.id for thread in listed] == ["t1"]
+    assert [part.text for message in context.messages for part in message.content] == [
+        "hello"
+    ]
+    assert context.facts == ["Alice uses PowerShell"]
+
+
+def test_a_turn_can_read_then_write_then_read_again(store: ConversationStore) -> None:
+    """Whatever a read leaves behind must not block the write that follows."""
+
+    store.append("t1", [user("first")], ALICE)
+    store.threads(ALICE)
+    store.append("t1", [user("second")], ALICE)
+
+    assert store.message_count("t1") == 2
+    assert store.turn_context("t1", ALICE, "", 5).summarized_through == 0
+
+
 # --- summaries ---------------------------------------------------------------
 
 

@@ -61,7 +61,11 @@ def _settings() -> tuple[object, object]:
     memory=2048,
     min_containers=0,
     max_containers=8,
-    scaledown_window=2,
+    # 15 s, not the platform floor. The arithmetic here is the opposite of the
+    # GPU's: a cold start costs about three seconds of someone's attention,
+    # while holding this container costs $0.00026 for the whole window. The
+    # expensive resource is the person waiting, not the CPU.
+    scaledown_window=15,
     timeout=600,
     include_source=False,
 )
@@ -261,7 +265,11 @@ def measure_database_latency(
 
 async def _spawn(update_id: int) -> None:
     # ``spawn`` returns immediately and the durable inbox owns the retry state.
-    process_telegram_update.spawn(update_id)
+    # The async form matters here rather than being a style preference: the
+    # blocking one is a synchronous RPC to Modal's control plane made from
+    # inside the event loop, and it stalled the webhook that Telegram is
+    # waiting on. Modal's own runtime warned about it in production logs.
+    await process_telegram_update.spawn.aio(update_id)
 
 
 @app.function(
@@ -271,7 +279,10 @@ async def _spawn(update_id: int) -> None:
     memory=512,
     min_containers=0,
     max_containers=20,
-    scaledown_window=2,
+    # Every message paid about three seconds of cold start here, because two
+    # seconds is shorter than any pause between two messages. Fifteen costs
+    # $0.000066 of a quarter-core and removes that from the common case.
+    scaledown_window=15,
     timeout=30,
     include_source=False,
 )
