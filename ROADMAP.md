@@ -4,8 +4,8 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** queue 1, the control plane. No worker start is
-authorized.
+**Current approved step:** none. Queue 1 is next and is not approved. No worker
+start is authorized.
 
 This is the only source for current product direction, state, order and approved
 work. The human approves one step before implementation.
@@ -23,27 +23,20 @@ refused before a model request.
 
 ## Current state
 
-Version 2 is in progress: **Done** below is finished, **Queue** is the remaining
-order. Everything earlier is closed and listed under **Closed stages**.
-
-- The local database is at schema version 1; conversations, memory and files are
-  scoped by user.
+- Local database at schema version 1; conversations, memory and files scoped by
+  user. Deployed database is **Neon**, reached through its pooled endpoint.
 - `assistant-llm-v2` at
   `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run` is the primary
   model deployment, reached with `MODEL_AUTH_STYLE=modal_proxy`. The original
   `assistant-llm` stays deployed as rollback only; retiring it is a destructive
   human gate.
-- The GPU idle window is **12 s**, live on `assistant-llm-v2` through
-  `deploy/modal/autoscale.py` and matching `SCALEDOWN_WINDOW` in `model_app.py`,
-  so the next deploy restores the same number. It costs about $0.0037 of idle
-  A10 per message against $0.0092 at the old 30 s. Modal's 2 s floor was tried
-  and reversed: it was shorter than the pause between two messages, so an
-  ordinary back-and-forth paid a 10.4 s restored wake almost every turn. An
-  interactive approval still pays one, which is the accepted price.
-- One thing is owed to the next `assistant-llm-v2` deploy, and it is not a
-  reason to create one: apply the NCCL loopback rendezvous fix before snapshot
-  creation and verify the logs in that deploy's acceptance; the current warnings
-  are harmless. `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
+- `assistant-control` serves the Telegram webhook and the update worker. Idle
+  windows: 60 s on both CPU functions, 12 s on the GPU. The GPU value is live
+  through `deploy/modal/autoscale.py` and matches `SCALEDOWN_WINDOW`, so a
+  deploy restores it.
+- Owed to the next `assistant-llm-v2` deploy, and not a reason to create one:
+  the NCCL loopback rendezvous fix before snapshot creation.
+  `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
 
 ## Closed stages
 
@@ -64,7 +57,7 @@ while remaining fully usable as a local agent on the human's own machine.
 Direction and rationale: `docs/personal_assistant_direction.md`. Durable
 architectural choices: `DECISIONS.md`. Verified platform facts for the deployed
 profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
-`docs/modal_vllm_cold_start.md`.
+`docs/modal_vllm_cold_start.md` and `docs/control_plane_cold_start_notes.md`.
 
 ### Done
 
@@ -73,274 +66,117 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
   migration. `reports/2026-08-27_v2_step1_store_contract.md`.
 - **Telegram adapter** — derived identity, allow list empty by default,
   transport isolated in `run.py`; conversational and work acceptance both passed
-  live, and voice and media delivery were fixed after them.
-  `reports/2026-08-28_v2_step2_telegram_adapter.md`,
+  live. `reports/2026-08-28_v2_step2_telegram_adapter.md`,
   `reports/2026-08-28_v2_step3b_telegram_live_acceptance.md`,
   `reports/2026-08-28_v2_telegram_voice_and_media_budget.md`.
 - **First model endpoint** — Gemma 4 12B on an A10 through vLLM, 189-201 s from
-  idle. That wake is why the optimized endpoint became its own stage.
-  `reports/2026-08-28_v2_step3a_model_endpoint.md`.
-- **Optimized endpoint** — CPU + GPU snapshots, scale to zero, restored cold
-  start **10.4 s**, text, image and audio all served, unauthorized callers
-  refused at the edge without starting a container.
+  idle. `reports/2026-08-28_v2_step3a_model_endpoint.md`.
+- **Optimized endpoint** — CPU and GPU snapshots, scale to zero, restored cold
+  start 10.4 s, unauthorized callers refused at the edge.
   `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
   `reports/2026-08-28_v2_step3b_edge_auth_refusal.md`,
   `reports/2026-08-28_v2_step3b_snapshot_boot.md`,
   `reports/2026-08-28_v2_step3b_first_boot_failure.md`.
 - **Capability honesty and Telegram shape** — the assistant describes itself
-  from its own wiring, `/can` answers the same without a model call, and the
-  plan and result have a readable form. Offline only; queue 3 is its evidence.
+  from its own wiring, `/can` answers without a model call, `/check` tries each
+  capability where the agent runs, and the plan and result have a readable form.
   `reports/2026-08-28_v2_capability_honesty_and_telegram_shape.md`.
+- **Control plane, accepted live.** A real Telegram message goes webhook →
+  checked secret and allow list → Neon inbox → spawned CPU worker → the same
+  harness → GPU wake → reply, with nothing on the human's machine. Polling
+  retired. `PostgresStore` is the second `ConversationStore` and joins the
+  contract suite only when `AGENT_TEST_DATABASE_URL` is set.
+  `reports/2026-08-28_v2_control_plane_postgres_store.md`,
+  `reports/2026-08-28_v2_control_plane_offline_foundation.md`,
+  `reports/2026-08-28_v2_control_plane_cpu_adapter.md`,
+  `reports/2026-08-28_v2_control_plane_neon_live.md`,
+  `reports/2026-08-28_v2_control_plane_live_acceptance.md`.
+- **Database latency gate withdrawn.** Placement stays unpinned and current
+  delays are accepted; the probe stays an instrument, not acceptance.
+  `DECISIONS.md` 2026-08-28,
+  `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
+- **Cold start reduced.** The agent stack is off the webhook's import path, a
+  memory snapshot was tried and reverted, the worker's cold start is measured,
+  and the webhook now starts the model waking for updates that need one — a cold
+  first message about 9.2 s against 14.4 s, unconfirmed live. Telegram's typing
+  indicator runs for any turn that reaches the model.
+  `reports/2026-08-29_v2_control_plane_cold_start.md`.
 
 ### Queue
 
-1. **Control plane.** The step previously numbered 3c. It deploys new
-   components; it does not redeploy `assistant-llm-v2`.
+1. **Capabilities the assistant actually has.** Acceptance for the whole item:
+   every tool the assistant advertises passes `/check` in the deployed
+   container. Before the two items below, because evidence and measurement taken
+   without these describe a different product.
 
-   - **Written and live-accepted.** `PostgresStore` is the second `ConversationStore`,
-     provider-agnostic: the deployed database is **Neon**, reached through its
-     pooled endpoint because a fleet that scales to zero opens and drops
-     connections in bursts, and everything provider-specific lives in
-     `AGENT_DATABASE_URL`. SQLite stays the local backend. It joins the contract
-     suite only when `AGENT_TEST_DATABASE_URL` is set, so no offline test can
-     reach a real database. Live correctness evidence is recorded below.
-     `reports/2026-08-28_v2_control_plane_postgres_store.md`.
-   - **Offline foundation written, never connected or spawned.** The local and
-     PostgreSQL LangGraph savers now share one lifecycle; webhook validation,
-     persist-before-spawn, a leased update inbox and the worker call boundary
-     are covered offline. The platform module has imported successfully through
-     an unsupported browser GET; the Telegram POST/spawn path remains
-     uninvoked, and the ephemeral sandbox remains open.
-     `reports/2026-08-28_v2_control_plane_offline_foundation.md`.
-   - **CPU platform adapter correctively deployed; POST path remains untested.**
-     `assistant-control` has separate scale-to-zero webhook and update-worker
-     functions plus one explicit migration command. Its locked image excludes
-     local secrets and workspaces. Offline registration and the full regression
-     suite passed. The allow-listed Modal control Secret exists, and the
-     `assistant-control` app deployed successfully in 6.748 s. Opening the web
-     URL caused repeated CPU starts for the browser's `GET /favicon.ico`; every
-     container failed before application code with `ModuleNotFoundError` because
-     the deployment module was absent from the image. The corrected image was
-     deployed in 13.254 s. One queued browser request then imported the module
-     successfully and returned the expected 404 for `GET /favicon.ico`; no
-     Telegram POST has run.
-     `reports/2026-08-28_v2_control_plane_cpu_adapter.md`.
-   - **Neon live correctness acceptance passed; performance remains open.** The
-     pooled endpoint passed the conversation contract and the real
-     inbox/checkpointer smoke. Live evidence exposed and fixed Windows
-     event-loop handling, pooled `search_path` leakage and accidental `.env`
-     loading by the offline suite. Four unused checkpoint tables from the failed
-     first migration were removed after explicit approval; only the active
-     `public` checkpoint tables remain.
-     `reports/2026-08-28_v2_control_plane_neon_live.md`.
-   - **Database latency: gate withdrawn, current delays accepted.** The read
-     path was collapsed from four or five sequential round-trips plus a
-     per-open migration check to a single round-trip, taking the warm maximum
-     from 961.7 ms to 109.4 ms — one round-trip exactly, with four of five
-     samples inside 0.4 ms. That correction is kept. An A/B against a second
-     Neon project then measured both databases from one container, controlling
-     for unpinned placement: **2.1-3.4 ms** co-located, **98.7-196.9 ms** across
-     the Atlantic. The database is placed correctly and the worker is not, so
-     migrating the database to Europe would have turned a passing result into a
-     failing one. Costing both options settled it: the latency wastes about
-     $0.00006 of warm GPU per message, pinning the region would add about
-     $0.00033, and the whole question is worth a dollar a month against roughly
-     $46 of GPU. **The human withdrew the 100 ms / 500 ms limits**, keeps
-     placement unpinned and accepts current delays; the probe and its `compare`
-     operation stay as instruments, not acceptance. Reasoning and what it rules
-     out: `DECISIONS.md`, 2026-08-28.
-     `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
-   - **Deployed adapter accepted; the assistant answers over the webhook.** A
-     real Telegram message went Telegram → webhook → application-checked secret
-     token and allow list → Neon inbox → spawned CPU worker → the same harness →
-     GPU wake → reply, with nothing running on the human's machine. Polling is
-     retired. The first live message exposed a defect the latency probe could
-     not: a read left the PostgreSQL connection in a transaction, so the
-     single-round-trip context query could not switch autocommit and **every**
-     message failed. Fixed, guarded by a fake connection that models transaction
-     status and by the real sequence in the contract suite. Two latency defects
-     fixed with it — a blocking Modal RPC inside the webhook's event loop, and a
-     2 s scaledown that made every message pay a cold start. A warm webhook is
-     now **306 ms against 4.69 s**, 15x. First message about ten seconds, second
-     nearly instant.
-     `reports/2026-08-28_v2_control_plane_live_acceptance.md`.
-   - **CPU cold start: imports won, snapshots lost, ~3.5 s of platform remains.**
-     Measured over nine deployed cold starts of the webhook: **5.36 s** mean
-     before snapshots, **8.56 s** while creating one (six of the nine), **4.06 s**
-     restoring one. Execution over the same window fell from **1.67-3.86 s** to
-     **0.34-0.46 s**, and warm from 271 ms to ~200 ms — that is the import work,
-     and it is kept. The snapshot is not: subtracting execution leaves ~3.5 s of
-     container either way, because a restore skips initialization and this
-     function no longer has any, so the two changes were substitutes and the free
-     one won. Reverted with an AST test against the argument returning.
-     What is left is Modal's scheduling floor for a scale-to-zero container, and
-     no code removes it — only `min_containers`. What earned the execution
-     numbers: the wire format moved to `ui/telegram/wire.py`, which may import
-     only the standard library, and `ui/telegram/__init__.py` no longer imports
-     the adapter eagerly, so nothing on the webhook's path reaches LangGraph or
-     the harness. Two tests hold it — a subprocess with a fresh interpreter, and
-     an AST check on `wire.py`. Splitting the image was considered and dropped:
-     the image-relevant install is ~100 MB of which the Modal client and the
-     database driver are ~65 MB, so a split buys the imports this already bought,
-     not the container. Deployed in 13.504 s with the snapshot removed and the
-     webhook's `scaledown_window` at **60 s** — the only lever left against
-     scheduling is not being cold, and a minute of a quarter-core costs $0.00026,
-     so a hundred wakes a day stays under a dollar a month. The worker stays at
-     15 s.
-   - **Worker cold start measured; it is the largest CPU number in the chain.**
-     From the platform's own startup column, no run needed: **3.23 s** of
-     scheduling (3.05-3.36) plus **1.71 s** of first-execution work — cold
-     execution averages 3.99 s against 2.28 s warm — for **4.93 s** over a warm
-     worker. Scheduling matches the webhook's ~3.5 s, so it is the platform
-     floor again and not this code. The 1.71 s is real initialization, unlike
-     the webhook's, which is the one place a memory snapshot could still pay;
-     capturing it would need the worker's imports at module scope and therefore
-     its own image, and it is worth about 1.2 s. Not taken yet: the window below
-     makes a cold worker rare, and optimizing a rare path is the mistake this
-     already made once. Idle window raised to 60 s to match the webhook, so a
-     conversation stays warm as one thing — about $3 a month at a hundred wakes
-     a day. `docs/control_plane_cold_start_notes.md`.
-   - Priced, not chosen: `min_containers=1` removes a cold start outright —
-     about $5.7-11.4 a month on the webhook depending on its size, about $45 on
-     the worker, which is GPU money for CPU. Decide only against measured
-     first-message latency after the wider windows.
-   - **Approved, written and deployed** (25.429 s), unmeasured. The webhook
-     starts the model
-     waking instead of leaving it until the worker gets there. Against the
-     measured chain that takes a cold first message from about 14.4 s to about
-     9.2 s: the worker reaches the model at 8.94 s and the model is ready at
-     9.20 s, so its whole 4.93 s cold start disappears into the wake, with 0.26 s
-     of slack. `ModelBackend.warm` sends the cheapest request and abandons the
-     response, because a scale-to-zero container starts on a request arriving,
-     not on its answer being read; it never raises, and a failed wake is a
-     slower turn rather than a lost message. `wire.py` owns
-     `MODEL_FREE_COMMANDS`, so `/help` and `/check` spend nothing, and the list
-     is the exceptions rather than the rule — a new command wakes by default,
-     which is the cheap direction to be wrong in. Called only after the secret
-     and allow-list checks, so a stranger cannot spend GPU, and before the
-     durable write, because that write is time the wake could already be using.
-   - Chromium in the control image. Browser evidence worked while the agent ran
-     on Windows and found Edge; `debian_slim` has none, so a task whose plan
-     asks for a screenshot now fails validation. `/usr/bin/chromium` is already
-     in the search list: `apt_install`, plus `--no-sandbox` and
-     `--disable-dev-shm-usage` under root.
-   - File tools over an ephemeral sandbox rather than a local path. Until then
-     the workspace dies with the container and files do not survive between
-     messages.
+   - **Chromium in the control image.** `/check` reports `FAIL browser.inspect`
+     in the container today.
+   - **File tools over an ephemeral sandbox.** The workspace dies with the
+     container, so files do not survive between two messages.
+   - **Document ingestion.** PDF, Markdown, text and office documents, with page
+     and section boundaries preserved. Attachments accept images and audio only.
+   - **Web: search, render, scrape — three tools, not one.** Search through
+     Firecrawl comes first. Rendering a page is ours and runs in the tool
+     sandbox. Scrape is laid in as a tool and is not a default.
+     `reports/2026-08-29_v2_web_capability_options.md`.
 
-2. **Document ingestion.** PDF, Markdown, text and office documents as a
-   first-class capability reusable by chat, retrieval and coding work, with page
-   and section boundaries preserved. Attachments today accept images and audio
-   only. It comes before the two items below on purpose: evidence collected
-   without it would be evidence for a product nobody has, and a measurement
-   taken before it would be invalidated by the input sizes it introduces.
+2. **Live product evidence.** Nothing above has been seen by a user: that the
+   assistant answers a capability question correctly, that `/can` agrees, and
+   that the plan and result read well in a real chat. Alongside it, evidence
+   that the harness is agentic rather than demo-shaped — multi-step work that
+   survives a restart, asks when it should, and claims no result it did not
+   verify. Needs one warm window.
 
-3. **Live product evidence.** Nothing from the daily-use work above has been
-   seen by a user: that the assistant now answers a capability question
-   correctly, that `/can` agrees with it, and that the shaped plan and result
-   read well in a real chat. Alongside it, evidence that the harness is
-   genuinely agentic rather than demo-shaped: multi-step work that survives a
-   restart, asks when it should, and claims no result it did not verify. Needs
-   one warm window. Telegram voice recognition quality belongs here too and is
-   separate work — the audio decodes, so it is a mis-hearing; isolating codec
-   from bitrate and language needs one clean comparison of the same sentence as
-   Opus and WAV.
+   - The agentness evidence is a scenario suite. It asserts on what the harness
+     emits and never on the model's wording; it uses our criteria, not the
+     plan's; and it runs as one warm window on request, because every run wakes
+     a GPU.
+   - Telegram voice recognition quality: the audio decodes, so it is a
+     mis-hearing. One clean comparison of the same sentence as Opus and WAV.
+   - Streaming the answer, through Telegram's message drafts
+     (`sendMessageDraft`, Bot API 10.0). The display is the cheap half; the
+     source is not, because `ModelBackend.stream` drops `tool_calls` and
+     `usage`. Worth more after the single-call change below.
 
-   **Streaming the answer.** Telegram's own indicator now runs for any turn that
-   reaches the model, which covers the cold case where there are no tokens to
-   show at all. Real streaming is the next step and it is genuinely available:
-   `sendMessageDraft` (Bot API 10.0, 2026-05-08) streams a partial message with
-   the client's own typing animation, `sendRichMessageDraft` (2026-06-11) does
-   it for formatted text, and `can_stop` / `keep_on_stop` (2026-08-24) put a
-   stop control in the user's hands. That removes the reason this was previously
-   dismissed: an `editMessageText` loop is capped near one edit a second per
-   chat, which at 15-17 tok/s is two or three redraws on a short answer.
+3. **Measurement, metrics, economics, optimization, in that order.** Today's
+   15-17 tok/s conflates network, prefill and decode; there is no prefill
+   measurement on the A10, and prefix caching has never been read out of a
+   startup log.
 
-   The cost is not the display, it is the source. `ModelBackend.stream` exists
-   and nothing calls it, because it yields `AsyncIterator[str]` and so drops
-   `tool_calls` and `usage`, which the graph needs to choose its next node.
-   Streaming therefore means a variant that yields text while accumulating a
-   full `Completion` — tool-call fragments reassembled from deltas, usage asked
-   for with `stream_options` — and then carrying chunks through `call_model`,
-   through `Agent.steps` (which yields whole messages today), to the adapter.
-   Four contracts, and worth doing for long answers and the work path rather
-   than for short chat replies.
-
-   It does not shorten time to first token on its own: the router's model call
-   still runs first and shows nothing, so the single-call change is worth more
-   here and comes before it.
-
-   `/check` already answers the technical half of this without a model: it tries
-   each capability where the agent actually runs. What it cannot judge is
-   behaviour, so the agentness evidence is a scenario suite, and three
-   constraints on it are worth fixing now rather than after it is built. It
-   asserts on what the harness emits — the route taken, an approval interrupt
-   arriving before any write, a criterion passing against real evidence, an
-   artifact with a parsed property — and never on the model's wording, because
-   assertions on generated text flake and then get switched off. Our criteria,
-   not the plan's, or the agent grades its own homework. And it runs as one
-   warm window for the whole suite, on request: every run wakes a GPU, so it
-   cannot live in continuous integration under this project's worker gate.
-
-4. **Measurement, metrics, economics, optimization, in that order.** Last,
-   because a measurement is only worth taking once the capabilities that
-   determine what a turn costs are in place. Nothing here is tuning by feel:
-   today's 15-17 tok/s is `completion_tokens / wall time` over 48-token answers
-   from a Windows client, so it conflates network, prefill and decode; there is
-   no prefill measurement on the A10, and whether prefix caching is on has never
-   been read out of a startup log.
-
-   - Measure first: one long-output run separating prefill from decode, and the
-     same for input size, so later changes have a baseline to beat.
+   - **Application telemetry first.** The worker emits nothing, so a turn's
+     shape is invisible and what exists is Modal's dashboard, which the local
+     profile does not have. One record per turn written to the shared store,
+     with the boundaries `docs/control_plane_cold_start_notes.md` names, plus
+     token counts and success. Timings and counts only — no message text, no
+     attachments, nothing about a person beyond the owner id.
+   - One long-output run separating prefill from decode, and the same for input
+     size, as a baseline to beat.
    - **GPU active seconds per successful user turn** is the primary metric, not
-     total spend. "Successful" needs a definition a failed or abandoned turn
-     cannot quietly satisfy.
-   - Real economics on top of it: cost per turn and per user, counting the
-     harness's two model calls per message honestly. Modal bills by App in
-     hourly buckets, so per-turn cost is derived from container lifetime and
-     must be labelled as derived.
-   - Adaptive scaledown instead of one fixed number. Warm-snapshot wake is about
-     8 s and Modal's floor is 2 s: when a person is slow, hold nothing; when
-     messages come in a run, raise the window to 15-30 s. `autoscale.py` changes
-     this over the network without a deploy, which is what makes it feasible —
-     but a deploy resets it to `SCALEDOWN_WINDOW` in `model_app.py`.
-   - Only then optimization: prefix caching confirmed rather than assumed,
-     speculative decoding, and the router call that costs a second full-context
-     request on every message.
+     total spend. "Successful" needs a definition a failed turn cannot satisfy.
+   - Cost per turn and per user, counting the harness's two model calls
+     honestly. Modal bills by App in hourly buckets, so per-turn cost is derived
+     and must be labelled as derived.
+   - Adaptive scaledown instead of one fixed number, over the network through
+     `autoscale.py`.
+   - Then optimization: prefix caching confirmed rather than assumed,
+     speculative decoding, and the single-call change that removes the router's
+     second full-context request per message.
 
-5. **Technical debt: one conversation is not serialized.** Found live, when a
-   screenshot and a question sent seconds apart were answered by two containers
-   at once and the reply to the second arrived first. The inbox leases an
-   `update_id` and nothing else, so two updates from one chat run in parallel
-   against one thread. Three layers, worth keeping apart because only the first
-   is forced:
+4. **Technical debt: one conversation is not serialized.** Found live — a
+   screenshot and a question sent seconds apart ran in two containers and were
+   answered out of order. The inbox leases an `update_id` and nothing else.
 
    - **Mutual exclusion.** Two turns must not run on one thread. Today each
-     loads context without the other's message, both append, both may fold, and
-     both write the same LangGraph checkpoint. `current_thread` is a
-     check-then-act, so two workers meeting a user who has no thread yet create
-     two and split the conversation permanently.
-   - **Order.** The reply arriving first was not jitter: a photo turn downloads
-     a file and prefills an image, so it loses to a text question every time.
-     Ordering follows from mutual exclusion only if the owner drains its
-     conversation by ascending `update_id`.
-   - **Coalescing.** A screenshot then a question is one intent in two
-     messages. Perfect ordering still answers a bare photo and then the
-     question, which is correct and not what was asked. A short window that
-     merges updates from one chat into a single turn is the behaviour wanted,
-     and it is the reason to build the two above as an owner that drains rather
-     than a lock.
+     loads context without the other's message, both append, and both write the
+     same checkpoint. `current_thread` is a check-then-act, so two workers
+     meeting a user with no thread create two.
+   - **Order.** The owner drains its conversation by ascending `update_id`.
+   - **Coalescing.** A screenshot then a question is one intent in two messages.
 
-   Modal can do the first natively — a parametrized class gives each parameter
-   set its own container pool, so a chat could pin to a container. Rejected as
-   the primary mechanism: ordering within a conversation is a product property,
-   and one that holds only on Modal would make the local profile a different
-   product. The lease belongs in the database both profiles share. Doing it
-   needs a migration on a populated database, which is a human gate.
-
-   Stopgap available without a migration: `max_containers=1` on the worker
-   serializes everything, at the price of one person's long task blocking
-   everyone.
+   The lease belongs in the database both profiles share, so the behaviour does
+   not depend on the platform. That needs a migration on a populated database,
+   which is a human gate. Stopgap without a migration: `max_containers=1` on the
+   worker.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the
@@ -359,10 +195,15 @@ tool platform with an MCP surface — is superseded; its detail is in
 `docs/BACKLOG.md`. Changing scope requires an edit here, and a `DECISIONS.md`
 entry when the change is architecturally durable.
 
-## Maintenance
+## How this file is kept
 
-Keep this file short. Closed work moves to **Done** as one paragraph and its
-evidence links; step-by-step history, metrics and commands belong in `reports/`,
-durable rationale in `DECISIONS.md`. **Queue** is an order, not a list: work
-that turns out to be unfinished comes back as its own queue item rather than
-staying as a caveat inside a closed one, and nothing is numbered twice.
+- **Only approved work.** A conclusion the human has not approved in words is a
+  draft and belongs in `reports/`, not here. See `AGENTS.md`, Records.
+- **State and order, not reasoning.** No options, comparisons, prices or
+  research. Those go to `reports/`; durable architecture goes to `DECISIONS.md`.
+- **One entry per item, a few lines, plus links.** Evidence lives in the report
+  it links to and is not summarized twice.
+- **Done is a list of outcomes**, not a history of how they were reached.
+- **Queue is an order, not a list.** Unfinished work returns as its own queue
+  item instead of staying as a caveat inside a closed one.
+- **Short beats complete.** If this file needs a table of contents, cut it.

@@ -143,6 +143,18 @@ never overrides the roadmap. `docs/BACKLOG.md` is the source of truth for
 detailed deferred and possible later direction; it is not a contract, current
 plan or authorization.
 
+**A decision you reached is a draft until the human approves it in words.** This
+covers anything architectural, and anything that materially changes later
+development or what the project costs. Writing it into `ROADMAP.md`,
+`DECISIONS.md` or a report does not make it true, and neither does the human
+reading it without objecting; only an explicit yes does.
+
+An unapproved conclusion belongs in `reports/`, where options and reasoning
+live, and is written as an option. `ROADMAP.md` and `DECISIONS.md` carry only
+what was approved, because the next session reads them as settled and will build
+on them without re-examining them. Recording your own reasoning there is how a
+proposal silently becomes a rule nobody chose.
+
 Use `tools/work_log.py` rather than hand-editing JSONL journals. Set `--agent`
 to the application actually running.
 
