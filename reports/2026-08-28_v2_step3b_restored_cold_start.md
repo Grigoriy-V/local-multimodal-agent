@@ -132,3 +132,90 @@ its still-pending Modal task, and the retry loop then submitted another one.
 `wake()` now waits on one request for the full measurement budget and treats any
 transport failure as terminal. Offline tests assert both the single request and
 the no-retry failure path.
+
+## Strict multimodal run after the duplicate-task fix
+
+A separately authorized invocation used the unchanged audio-capable deployment
+and the fixed single-request client:
+
+```text
+uv run python scripts/measure_endpoint_wake.py \
+  --url https://grigoriy-v--assistant-llm-v2-server-serve.modal.run \
+  --auth headers
+```
+
+The client completed with exit code 0 and retained all semantic assertions:
+
+| Check | Result |
+|---|---|
+| Request to serving | **446.5 s**, HTTP 200 |
+| Text | **1.64 s**, 15.2 tok/s; returned red, blue and yellow |
+| Image | **2.75 s**; identified a red circle |
+| Audio | **5.03 s**; transcribed the travel-series sentence |
+| Scale to zero | confirmed; container list was empty on the second read-only check |
+
+This is not the expected second restored-cold-start result. The Modal dashboard
+marked the first container **Failed**. The single client request remained
+pending, and Modal continued it on another container; this is platform retry,
+not the duplicate client-request bug that was fixed earlier. The later container
+again logged `Creating GPU memory snapshot for Function` and vLLM executed its
+full startup, including weight loading and Torch/Dynamo compilation. The
+apparent pause after `Dynamo bytecode transform time: 6.26 s` was not a deadlock:
+at 01:13:54 the next log recorded that the compiled graph had been cached, and
+the request later served successfully. The 446.5 s client time therefore
+includes a failed first container, platform retry/wait and the successful full
+snapshot-build path.
+
+The NCCL TCPStore `Broken pipe` heartbeat warning also repeated around snapshot
+handling and until shutdown. It did not break the three requests served by the
+successful container, but it is now a reproducible runtime warning rather than
+a one-off observation. The retained CLI logs do not expose a definitive fatal
+traceback for the first container, so the warning is correlated with the failure
+but is not yet proven to be its cause.
+
+The deployment remains at `scaledown_window=30`. One read-only container-list
+check 35 seconds after the client exited still showed the container; a second
+check roughly 30 seconds later returned `[]`. This confirms eventual
+scale-to-zero, not an exact 30-second observed shutdown latency.
+
+**Decision:** do not pay for another nominally identical wake. First determine
+from current Modal documentation, the dashboard status and retained logs why
+the first container failed, why the unchanged deployment is producing multiple
+GPU snapshot builds and how snapshot variants are selected. Any next invocation
+must test one explicit hypothesis.
+
+## Final 60-second restored-wake control
+
+The human authorized one final control with a strict 60-second client ceiling.
+The measurement utility gained a `--wake-timeout` argument so this limit is
+explicit and testable rather than a shell-process timeout. The command was:
+
+```text
+uv run python scripts/measure_endpoint_wake.py \
+  --url https://grigoriy-v--assistant-llm-v2-server-serve.modal.run \
+  --auth headers \
+  --wake-timeout 60 \
+  --skip-modalities
+```
+
+The conditional cancellation path was not needed:
+
+- the single `/v1/models` request returned HTTP 200 in **10.4 s**;
+- Modal logged `resume: healthy after 0.0s`;
+- the route log measured 8.64 s with 15 ms execution;
+- there was no new `Creating GPU memory snapshot` event for this invocation;
+- the required text check returned the three primary colours in **1.47 s** at
+  17.0 tok/s;
+- the script exited 0;
+- a read-only container check after 35 seconds returned `[]`.
+
+This proves that the audio-capable snapshot created by the preceding expensive
+run is reusable. It does not explain why the preceding invocation first failed
+one container and rebuilt a snapshot, but another identical paid wake is no
+longer justified merely to establish whether restore can work.
+
+The NCCL TCPStore `Broken pipe` warnings are independently reproducible: they
+began around restore and repeated every second through the successful request
+and idle period. They did not affect correctness or the 10.4-second wake, but
+they materially pollute the logs. Their cause and suppression are the next
+read-only investigation; no worker should be started solely for that diagnosis.

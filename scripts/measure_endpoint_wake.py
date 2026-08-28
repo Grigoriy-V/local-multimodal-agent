@@ -12,6 +12,7 @@ because every extra cold start is a paid GPU boot.
 
     python scripts/measure_endpoint_wake.py --url https://...modal.run --auth headers
     python scripts/measure_endpoint_wake.py --url https://...modal.run --auth bearer
+    python scripts/measure_endpoint_wake.py --url https://...modal.run --wake-timeout 60
 
 `--auth bearer` sends the proxy token joined by a period as an ordinary bearer
 token. That is the property `reports/2026-08-28_v2_step3a_model_endpoint.md`
@@ -94,7 +95,12 @@ def request(
         return 0, str(error).encode()
 
 
-def wake(url: str, headers: dict[str, str]) -> tuple[float, list[str]]:
+def wake(
+    url: str,
+    headers: dict[str, str],
+    *,
+    timeout: float = WAKE_BUDGET,
+) -> tuple[float, list[str]]:
     """Wait on one request until the endpoint serves.
 
     A timed-out HTTP client does not prove that Modal cancelled the queued task.
@@ -107,7 +113,7 @@ def wake(url: str, headers: dict[str, str]) -> tuple[float, list[str]]:
     status, body = request(
         f"{url}/v1/models",
         headers,
-        timeout=WAKE_BUDGET,
+        timeout=timeout,
     )
     elapsed = time.monotonic() - started
     note = f"{elapsed:6.1f}s  {status}"
@@ -189,14 +195,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True, help="endpoint root, without /v1")
     parser.add_argument("--auth", choices=("headers", "bearer"), default="headers")
+    parser.add_argument(
+        "--wake-timeout",
+        type=float,
+        default=WAKE_BUDGET,
+        help="seconds to wait on the single wake request (default: 600)",
+    )
     parser.add_argument("--skip-modalities", action="store_true")
     arguments = parser.parse_args()
+    if arguments.wake_timeout <= 0:
+        parser.error("--wake-timeout must be greater than zero")
 
     url = arguments.url.rstrip("/").removesuffix("/v1")
     headers = auth_headers(read_token(), arguments.auth)
 
     print(f"waking {url} with {arguments.auth} auth")
-    elapsed, _ = wake(url, headers)
+    elapsed, _ = wake(url, headers, timeout=arguments.wake_timeout)
     print(f"\nREQUEST TO SERVING: {elapsed:.1f}s\n")
 
     try:

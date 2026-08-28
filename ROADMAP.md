@@ -4,7 +4,8 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none — redeploy complete; no worker start authorized
+**Current approved step:** none — the 60-second restored-wake control passed;
+no worker start is authorized
 
 This is the only source for current product direction, development state,
 order and approved work. The human approves one step before implementation.
@@ -68,7 +69,14 @@ reconsidered; this roadmap wins any conflict.
   `vllm[audio]` dependency; its first invocation rebuilt the invalidated
   snapshot and served text, image and audio over HTTP 200, but the local command
   wrapper lost the final strict semantic result. A separate restored wake is
-  still required. Evidence: `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
+  still required. A subsequent strict run passed text, image and audio, but
+  the first container was marked failed and Modal then built another GPU
+  snapshot instead of restoring one; request-to-serving was **446.5 s**, so it
+  is correctness evidence rather than restored-cold-start evidence. A final
+  human-approved control with a 60-second ceiling then reused that snapshot
+  successfully: **10.4 s request-to-serving**, `resume: healthy after 0.0s`, no
+  new snapshot build, and scale-to-zero confirmed. Evidence:
+  `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
   building on `reports/2026-08-28_v2_step3b_snapshot_boot.md` and
   `reports/2026-08-28_v2_step3b_first_boot_failure.md`. The baseline
   `assistant-llm` still serves `MODEL_ENDPOINT`. Step 3c is not authorized.
@@ -176,10 +184,16 @@ Ordered plan:
          a 22.06 GiB card. An explicit `--gpu-memory-utilization=0.83` is the
          untested fix. Modal restarted the failed container, so a failed boot
          costs more than one boot; stop the App rather than letting it retry.
-         Evidence: `reports/2026-08-28_v2_step3b_first_boot_failure.md`. Then
-         create and verify CPU+GPU snapshots and measure at least two restored
-         cold starts, because Modal may create several snapshots for one GPU
-         type;
+         Evidence: `reports/2026-08-28_v2_step3b_first_boot_failure.md`. CPU+GPU
+         snapshot creation now succeeds and one genuine restore measured 25.0
+         s. Two later invocations after the audio image change each rebuilt a
+         GPU snapshot rather than reusing the preceding one. During the latest
+         strict run the first container was marked failed; Modal continued the
+         pending server task on another container, which built a snapshot and
+         passed text, image and audio after 446.5 s to serving. A final
+         60-second control then restored the resulting snapshot in 10.4 s with
+         no new snapshot creation. Snapshot reuse is therefore working, though
+         the preceding failed-container path remains unexplained;
       6. record request-to-ready, restore-to-health, TTFT, warm answer latency,
          tokens/s, VRAM and cost. Verify text first, then image and audio; extend
          warmup only if the multimodal first request shows extra work;
@@ -234,12 +248,11 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Authorize an independent restored-wake measurement against the newly built
-   audio-capable snapshot. The measurement client now submits one long-lived
-   wake request instead of creating another pending Modal task after every
-   60-second client timeout. Retain its exit code and text, image and audio
-   results before this counts as acceptance-grade evidence for step 3b's
-   cold-start claim.
+1. Diagnose the NCCL TCPStore `Broken pipe` heartbeat warnings from current
+   Modal/vLLM/PyTorch documentation and the retained logs. They begin around GPU
+   snapshot restore and repeat every second until shutdown, including on the
+   successful 10.4-second restore. Do not start another worker merely to
+   reproduce them; a future paid invocation remains a separate human gate.
 2. Accept step 2 against the accepted endpoint: one conversational turn and one
    work request through Telegram. The baseline endpoint can prove integration,
    but the optimized replacement should become the normal product endpoint.
