@@ -6,6 +6,12 @@ copying the file wholesale — which would put the test database URL, local path
 and anything else that ever lands there into a platform secret. Naming the keys
 makes that impossible by accident and reviewable on sight.
 
+The direction matters as much as the filter: the values are ours and live in a
+file we keep, and the platform is given a copy. Typing them into a provider's
+dashboard would make that provider the place the truth lives, and this project
+treats a deployment target as a configuration axis — Modal runs inference today
+and something else may run it tomorrow.
+
 Values are never printed, never written into a shell string and never recorded.
 The command is built as an argument list, so nothing passes through a shell, and
 the only output is key names.
@@ -25,7 +31,14 @@ SECRET_NAME = "assistant-control"
 # Windows path means nothing in a Linux container, and `AGENT_TEST_DATABASE_URL`
 # is excluded because a deployment must never be able to reach the database the
 # test suite creates and drops schemas in.
-ALLOWED = (
+#
+# A pair means the value is read from the first name and published under the
+# second. That exists for one specific problem: a value the container must have
+# and the local profile must not. `WEB_RENDERER_URL` is exactly that — it is
+# what decides where a page is opened, so a copy sitting in `.env` under its own
+# name would silently send every local `view_web_page` to the deployed renderer,
+# starting a container to do what the browser on this machine does for free.
+ALLOWED: tuple[str | tuple[str, str], ...] = (
     "TELEGRAM_TOKEN",
     "TELEGRAM_WEBHOOK_SECRET",
     "TELEGRAM_ALLOWED_USERS",
@@ -37,7 +50,19 @@ ALLOWED = (
     "MODEL_NAME",
     "MODEL_API_KEY",
     "MODEL_AUTH_STYLE",
+    # The web capability. The search key and the renderer's proxy token are
+    # credentials; the identity is a courtesy to sites that ask for one.
+    "WEB_FIRECRAWL_API_KEY",
+    "WEB_RENDERER_KEY",
+    "WEB_FALLBACK_USER_AGENT",
+    ("DEPLOY_WEB_RENDERER_URL", "WEB_RENDERER_URL"),
 )
+
+
+def named(entry: str | tuple[str, str]) -> tuple[str, str]:
+    """(name in our file, name in the deployed environment)."""
+
+    return (entry, entry) if isinstance(entry, str) else entry
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -51,6 +76,23 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
+def plan(values: dict[str, str]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Split the allow list into what will be published and what is absent.
+
+    Separate from `main` so the decision about what leaves this machine can be
+    tested without running anything.
+    """
+
+    pairs = [named(entry) for entry in ALLOWED]
+    present = [(source, target) for source, target in pairs if values.get(source)]
+    missing = [(source, target) for source, target in pairs if not values.get(source)]
+    return present, missing
+
+
+def describe(source: str, target: str) -> str:
+    return source if source == target else f"{source} -> {target}"
+
+
 def main() -> int:
     source = Path(".env")
     if not source.is_file():
@@ -58,19 +100,22 @@ def main() -> int:
         return 1
 
     values = read_env(source)
-    present = [key for key in ALLOWED if values.get(key)]
-    missing = [key for key in ALLOWED if not values.get(key)]
+    present, missing = plan(values)
 
     print(f"publishing {len(present)} keys to the {SECRET_NAME} secret:")
-    for key in present:
-        print(f"  + {key}")
-    for key in missing:
-        print(f"  - {key} (absent from .env, not published)")
+    for names in present:
+        print(f"  + {describe(*names)}")
+    for names in missing:
+        print(f"  - {describe(*names)} (absent from .env, not published)")
 
     if not present:
         print("nothing to publish")
         return 1
 
+    # `--force` replaces the secret rather than adding to it, which is correct
+    # only because this list is the whole intended contents: a key that stops
+    # being published stops existing, instead of lingering in the platform after
+    # it was removed here.
     command = [
         sys.executable,
         "-m",
@@ -78,7 +123,7 @@ def main() -> int:
         "secret",
         "create",
         SECRET_NAME,
-        *(f"{key}={values[key]}" for key in present),
+        *(f"{target}={values[source]}" for source, target in present),
         "--force",
     ]
     return subprocess.run(command, check=False).returncode

@@ -437,3 +437,28 @@ away from the control plane and the person's persistent files.
 search results, enabling arbitrary external URLs in the credential-bearing
 update worker, mounting the person's workspace into the renderer, and building
 a general-purpose sandbox before another capability requires one.
+
+## 2026-08-29: Configuration values are ours; a platform is given a copy
+
+**Decision.** Every credential and runtime value the deployed profile needs
+lives in configuration the project keeps, and reaches a platform through
+`tools/sync_control_secret.py`, which publishes an allow-listed set from the
+owner's own `.env`. A provider's dashboard is never the place a value is
+authored or the place it is looked up from.
+
+A value the container must have and the local profile must not is published
+under a different name than it is read under — the renderer address is
+`DEPLOY_WEB_RENDERER_URL` locally and `WEB_RENDERER_URL` in the deployment.
+
+**Why.** Modal is where inference runs today, not what this product is built
+on; moving to a hosted API or another platform must be a configuration change.
+Values typed into a dashboard exist only inside that provider, cannot be
+reviewed, and would have to be re-entered by hand somewhere else on the day the
+platform changes. The allow list is also the review surface: it names what
+leaves the machine, so copying a file wholesale cannot happen by accident.
+
+**Rules out.** Authoring secrets in a provider console, `Secret.from_dotenv`
+over the local `.env` as a whole (it would push the local profile's own
+workspace and database settings into the container), publishing image-owned
+facts such as `AGENT_WORKSPACE` or `WEB_LOCAL_BROWSER`, and letting a
+deployment-only value configure the local profile by sharing its name.

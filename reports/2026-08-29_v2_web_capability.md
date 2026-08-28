@@ -187,9 +187,14 @@ measurement.
   reachable from it remain open questions from the options report.
 - The deployed assistant right now fetches pages, has no search tool, and fails
   `view_web_page` by design: the three `WEB_` values are not in the
-  `assistant-control` secret. Adding them is the owner's action — a partial
-  `modal secret create --force` would replace the whole secret, dropping the bot
-  token, the model key and the database URL.
+  `assistant-control` secret yet. They travel there through
+  `tools/sync_control_secret.py`, which publishes an allow-listed set from the
+  owner's own `.env` — the keys stay ours and the platform is given a copy,
+  because a deployment target is a configuration axis and this one is only where
+  inference runs today. The renderer's address is read from
+  `DEPLOY_WEB_RENDERER_URL` and published as `WEB_RENDERER_URL`, so the value
+  the container needs does not also repoint the local profile at a remote
+  browser.
 - No live Telegram turn has used any of this, so the agent's *choice* of tool —
   search versus fetch versus view — is untested against a real model.
 
