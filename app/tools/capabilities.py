@@ -10,16 +10,19 @@ from app.tools.base import Tool, Toolbox
 from app.tools.browser import browser_tools
 from app.tools.documents import document_tools
 from app.tools.filesystem import filesystem_tools
+from app.tools.presentation import presentation_tools
 
 FILESYSTEM_READ = "filesystem.read"
 FILESYSTEM_WRITE = "filesystem.write"
 BROWSER_INSPECT = "browser.inspect"
 DOCUMENTS_READ = "documents.read"
+PRESENT_FILES = "presentation.files"
 DEFAULT_CAPABILITIES = (
     FILESYSTEM_READ,
     FILESYSTEM_WRITE,
     BROWSER_INSPECT,
     DOCUMENTS_READ,
+    PRESENT_FILES,
 )
 
 
@@ -69,6 +72,7 @@ class CapabilityRegistry:
                 Capability(FILESYSTEM_WRITE, _filesystem_write),
                 Capability(BROWSER_INSPECT, browser_tools),
                 Capability(DOCUMENTS_READ, document_tools),
+                Capability(PRESENT_FILES, presentation_tools),
             )
         )
         self._capabilities = {capability.name: capability for capability in configured}

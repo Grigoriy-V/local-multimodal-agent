@@ -32,6 +32,34 @@ present, explicitly sending that choice and explaining what it sees. Earlier
 statements in this report that tool-media auto-delivery was approved are
 superseded by this correction; the chronological failure evidence is retained.
 
+### Replacement implemented offline
+
+The corrected contract is now in the working tree:
+
+- `ContentPart.outbound` records an explicit application action and survives
+  both SQL store implementations through the existing JSON content field, so no
+  database migration is required;
+- `send_file` is a general, non-destructive presentation tool rooted in the
+  person's workspace. It selects one image, audio item or ordinary file and
+  marks only that item outbound;
+- `view_pages` remains visual evidence for the model and saves each rendered
+  page under `.agent/documents/`, returning the exact path the agent may later
+  choose for `send_file`;
+- Telegram and Chainlit ignore ordinary tool media. They transport only an
+  explicitly outbound tool part; Chainlit history also hides observation media
+  and preserves explicitly sent media;
+- outbound bytes are not replayed into the next model request as new evidence;
+- `/check` gains `presentation.file`, which exercises the same rooted tool and
+  verifies that one selected file becomes exactly one outbound item without
+  contacting an interface.
+
+Offline evidence: targeted capability, document, adapter, persistence and wire
+tests passed **204/204** before the final integration additions; the complete
+suite then passed **548**, with **1 skipped**. Ruff passed on every changed file
+with the file's pre-existing Chainlit import-order exception ignored. `git diff
+--check` passed. Nothing was deployed and no worker or model endpoint was
+started, so this is implementation evidence rather than product acceptance.
+
 ## Two decisions the human approved, 2026-08-29
 
 **A volume, not a sandbox, for persistence.** The sub-item read "file tools over

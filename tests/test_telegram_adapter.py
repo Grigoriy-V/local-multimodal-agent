@@ -831,15 +831,10 @@ async def test_the_indicator_stops_when_the_turn_fails(
     assert any("failed" in message for message in telegram.sent)
 
 
-async def test_a_page_a_tool_rendered_reaches_the_person(
+async def test_a_page_a_tool_rendered_stays_internal(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    """Asked to show the PDF, the assistant said it had no way to display it.
-
-    It had one. The image was in the tool result, went to the model and stopped
-    at the adapter. A tool's text is working material and still stays out of the
-    chat; what it drew does not.
-    """
+    """Observation is evidence for the agent, not an adapter send decision."""
 
     adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
     produced = Message(
@@ -853,5 +848,30 @@ async def test_a_page_a_tool_rendered_reaches_the_person(
 
     await adapter._deliver(CHAT, produced)
 
-    assert telegram.photos == ["image-2.png"]
+    assert telegram.photos == []
     assert not any("page 1 of 3" in sent for sent in telegram.sent)
+
+
+async def test_a_file_the_agent_explicitly_selected_reaches_the_person(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    produced = Message(
+        role="tool",
+        content=[
+            ContentPart(kind="text", text="Selected page.png for delivery."),
+            ContentPart(
+                kind="image",
+                data=b"rendered-page",
+                media_type="image/png",
+                name="page.png",
+                outbound=True,
+            ),
+        ],
+        tool_call_id="send-1",
+    )
+
+    await adapter._deliver(CHAT, produced)
+
+    assert telegram.photos == ["page.png"]
+    assert not any("Selected page.png" in sent for sent in telegram.sent)

@@ -31,6 +31,8 @@ def dump_content(parts: Sequence[ContentPart]) -> str:
             "text": part.text,
             "data": base64.b64encode(part.data).decode("ascii") if part.data else None,
             "media_type": part.media_type,
+            "name": part.name,
+            "outbound": part.outbound,
         }
         for part in parts
     ]
@@ -44,6 +46,8 @@ def load_content(raw: str) -> list[ContentPart]:
             text=item["text"],
             data=base64.b64decode(item["data"]) if item["data"] else None,
             media_type=item["media_type"],
+            name=item.get("name"),
+            outbound=bool(item.get("outbound", False)),
         )
         for item in json.loads(raw)
     ]

@@ -55,7 +55,7 @@ def _element(
         "threadId": thread_id,
         "forId": step_id,
         "type": part.kind,
-        "name": f"{part.kind}-{part_index}",
+        "name": part.name or f"{part.kind}-{part_index}",
         "display": "inline",
         "size": "medium" if part.kind == "image" else None,
         "mime": part.media_type,
@@ -75,6 +75,8 @@ def _step(thread_id: str, position: int, message: Message, created_at: str) -> S
         step_type = "tool"
         name = "Tool"
     output = _text(message)
+    if message.role == "tool" and not output.startswith("error:"):
+        output = "Completed."
     if message.tool_calls and not output:
         output = "\n".join(
             f"{call.name}({json.dumps(call.arguments, ensure_ascii=False)})"
@@ -224,7 +226,9 @@ class MemoryStoreDataLayer(BaseDataLayer):
                 step = _step(thread.id, position, message, thread.created_at)
                 steps.append(step)
                 for part_index, part in enumerate(message.content):
-                    if part.kind != "text":
+                    if part.kind != "text" and (
+                        message.role != "tool" or part.outbound
+                    ):
                         elements.append(_element(thread.id, step["id"], position, part_index, part))
         return {
             "id": thread.id,

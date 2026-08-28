@@ -33,12 +33,13 @@ class Delivery:
     """
 
     media: tuple[str, ...] = ("image", "audio")
+    files: bool = True
 
 
 # Both interfaces that exist show pictures and play sound, so this is the honest
 # default rather than a cautious one. An interface that cannot must say so.
 CHAT_DELIVERY = Delivery()
-TEXT_ONLY = Delivery(media=())
+TEXT_ONLY = Delivery(media=(), files=False)
 
 
 def accepted(kind: str) -> tuple[str, ...]:
@@ -74,19 +75,18 @@ def tool_inventory(tools: Toolbox) -> str:
     )
 
 
-def _delivery_sentence(delivery: Delivery) -> str:
-    if not delivery.media:
+def _delivery_sentence(tools: Toolbox, delivery: Delivery) -> str:
+    if "send_file" not in tools.names or not (delivery.media or delivery.files):
         return (
-            "Only the text of your answer reaches the person. Media you produce is "
-            "not delivered here, so describe it instead of presenting it."
+            "Only the text of your answer reaches the person. You have no explicit "
+            "file-delivery action here, so do not claim that you sent one."
         )
-    kinds = " or ".join(delivery.media)
+    kinds = ", ".join((*delivery.media, *(("files",) if delivery.files else ())))
     return (
-        f"Your answer reaches the person as chat messages: the text is shown, and any "
-        f"{kinds} a tool returns to you is sent to them as well, automatically. You do "
-        "not attach it and there is no separate step: calling the tool is what sends it. "
-        "So never say you cannot make, take or send a picture — call the tool that "
-        "produces one and it arrives."
+        f"This interface can deliver {kinds}. Observation tools keep their evidence "
+        "between you and the tool. When you decide the person should receive one "
+        "workspace item, explicitly call send_file with that path; nothing else is sent "
+        "automatically."
     )
 
 
@@ -104,7 +104,7 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
         f"- {tool_inventory(tools)}",
         f"- The person can send you text and these media types: {inputs}. Anything "
         "else is refused before you see it.",
-        f"- {_delivery_sentence(delivery)}",
+        f"- {_delivery_sentence(tools, delivery)}",
     ]
     if "read_document" in tools.names:
         # Said separately from the media list because it arrives differently: a
@@ -113,9 +113,8 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
         # earlier version did, and the assistant duly told a person it was a text
         # model that could not look at the PDF it had just read.
         looking = (
-            " view_pages turns a PDF page into an image: you see it, and the person is "
-            "sent the same picture. That is how you show someone a page or a scan, and "
-            "it is also how you read one that has no text layer."
+            " view_pages turns PDF pages into images for you to inspect and returns "
+            "their saved workspace paths; it sends nothing by itself."
             if "view_pages" in tools.names
             else ""
         )
@@ -147,7 +146,10 @@ def capability_report(
 
     images = ", ".join(accepted("image")) or "nothing"
     audio = ", ".join(accepted("audio")) or "nothing"
-    sends = ", ".join(("text",) + delivery.media)
+    outgoing = list(delivery.media)
+    if delivery.files and "send_file" in tools.names:
+        outgoing.append("files")
+    sends = ", ".join(("text", *outgoing))
     asking = ", ".join(needs_approval(tools)) or "nothing"
     megabytes = MAX_FILE_SIZE_BYTES // (1024 * 1024)
     lines = [

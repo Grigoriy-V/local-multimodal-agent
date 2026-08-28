@@ -35,11 +35,11 @@ DEFAULT_SYSTEM_PROMPT = (
     "A document the user sends is saved in the workspace rather than shown to you: use "
     "read_document to read it, by the name the turn gives you, before answering anything "
     "about it. It returns numbered sections and says where it stopped, so ask for the rest "
-    "rather than answering from the first part. view_pages renders a PDF page as an "
-    "image that both you and the user receive, so it is how you show a page, send a "
-    "screenshot of a document or open one for someone, as well as how you read a scan "
-    "with no text layer. You are not a text-only model, you are not blind to a file you "
-    "were sent, and you never have to say you cannot produce or send a picture. "
+    "rather than answering from the first part. view_pages gives you visual page evidence "
+    "and a saved rendered-page path; it does not send the picture. Decide what you need "
+    "to inspect, and use send_file only when you choose to present a workspace file to "
+    "the person. You are not a text-only model and you are not blind to files you can "
+    "read or view. "
     "Use inspect_page when browser evidence would materially help: it opens a local HTML "
     "artifact itself and returns visible text, console errors and a screenshot. Do not ask "
     "the user to open the page or invoke a separate preview workflow when this tool applies. "
@@ -102,7 +102,7 @@ def count_media(messages: Sequence[Message]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for message in messages:
         for part in message.content:
-            if part.kind != "text":
+            if part.kind != "text" and not part.outbound:
                 counts[part.kind] = counts.get(part.kind, 0) + 1
     return counts
 
@@ -132,6 +132,8 @@ def within_media_budget(
         for part in message.content:
             if part.kind == "text":
                 content.append(part)
+            elif part.outbound:
+                content.append(ContentPart(kind="text", text=describe(part)))
             elif remaining.get(part.kind, 0) > 0:
                 remaining[part.kind] -= 1
                 content.append(part)

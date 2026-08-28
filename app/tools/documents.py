@@ -13,6 +13,7 @@ fragment it thinks is the whole thing.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from app.documents import (
@@ -104,7 +105,19 @@ def view_pages(root: Path, path: str, page: int = 1, pages: int = 1) -> list[Con
 
     numbers = ", ".join(str(number) for number, _ in rendered)
     last = rendered[-1][0]
-    note = f"{target.name}: page(s) {numbers} of {total}, rendered as images."
+    preview_root = root / ".agent" / "documents"
+    preview_root.mkdir(parents=True, exist_ok=True)
+    identity = hashlib.sha256(data).hexdigest()[:12]
+    saved = []
+    for number, image in rendered:
+        preview = preview_root / f"{identity}-page-{number}.png"
+        preview.write_bytes(image)
+        saved.append(preview.relative_to(root).as_posix())
+    note = (
+        f"{target.name}: page(s) {numbers} of {total}, rendered as images for your "
+        f"inspection. Saved rendered page path(s): {', '.join(saved)}. Nothing was sent "
+        "to the person; use send_file only if you decide to present one."
+    )
     if last < total:
         note += f" Call view_pages again with page={last + 1} for what follows."
     parts: list[ContentPart] = [ContentPart(kind="text", text=note)]
@@ -154,13 +167,11 @@ def document_tools(root: Path) -> list[Tool]:
         Tool(
             name="view_pages",
             description=(
-                "Render pages of a PDF as images. You see the page, and the person is "
-                "sent the same picture — this is how you show someone a page, take a "
-                "screenshot of a document, or open one for them. Use it for a scan or "
-                "anything with no text layer, when the layout itself is the question — a "
-                "table, a diagram, a form — and whenever you are asked to show, open or "
-                f"look at the document. At most {MAX_PAGES_PER_VIEW} page(s) per call; "
-                "ask again for the ones that follow."
+                "Render PDF pages as images for your own visual inspection and return "
+                "workspace paths for the rendered pages. This never sends anything to "
+                "the person. Use it when visual evidence matters, including scans, layout, "
+                f"tables, diagrams and forms. At most {MAX_PAGES_PER_VIEW} page(s) per "
+                "call; ask again for the ones that follow."
             ),
             parameters={
                 "type": "object",

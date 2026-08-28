@@ -100,7 +100,12 @@ def build_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
 
     payload: list[dict[str, Any]] = []
     for message in messages:
-        parts = [_content_part(part) for part in message.content]
+        # An outbound part is a transport action the agent already chose, not
+        # fresh evidence for another model request. The accompanying tool text
+        # is the receipt the model sees.
+        parts = [_content_part(part) for part in message.content if not part.outbound]
+        if message.role == "tool" and not parts:
+            parts = [{"type": "text", "text": "The selected item was prepared for delivery."}]
         # An assistant turn that only calls tools has no content, and the wire
         # format spells that null rather than as an empty list.
         item: dict[str, Any] = {"role": message.role, "content": parts or None}

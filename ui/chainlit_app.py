@@ -109,10 +109,14 @@ def spoken(message: Message) -> str:
     return " ".join(part.text or "" for part in message.content).strip()
 
 
-def media_parts(message: Message) -> list[ContentPart]:
+def media_parts(message: Message, *, outbound_only: bool = False) -> list[ContentPart]:
     """The parts that have to be shown rather than said, in the order they came."""
 
-    return [part for part in message.content if part.kind != "text"]
+    return [
+        part
+        for part in message.content
+        if part.kind != "text" and (part.outbound or not outbound_only)
+    ]
 
 
 def canonical_thread_id(session: Any) -> str:
@@ -121,7 +125,7 @@ def canonical_thread_id(session: Any) -> str:
     return str(session.thread_id)
 
 
-def attachments(message: Message) -> list[Any]:
+def attachments(message: Message, *, outbound_only: bool = False) -> list[Any]:
     """Show the pictures and the sound, not just the words about them.
 
     Without this a reopened conversation is a transcript with holes in it: the
@@ -129,11 +133,11 @@ def attachments(message: Message) -> list[Any]:
     """
 
     shown = []
-    for index, part in enumerate(media_parts(message)):
-        element = cl.Image if part.kind == IMAGE else cl.Audio
+    for index, part in enumerate(media_parts(message, outbound_only=outbound_only)):
+        element = {IMAGE: cl.Image, AUDIO: cl.Audio}.get(part.kind, cl.File)
         shown.append(
             element(
-                name=f"{part.kind}-{index}",
+                name=part.name or f"{part.kind}-{index}",
                 content=part.data,
                 mime=part.media_type,
                 display="inline",
@@ -154,11 +158,12 @@ async def render(produced: AsyncIterator[Message]) -> None:
                 # step to fill in; show the result on its own instead of losing it.
                 step = cl.Step(name="tool result", type="tool")
                 await step.send()
-            step.output = spoken(message)
+            result = spoken(message)
+            step.output = result if result.startswith("error:") else "Completed."
             await step.update()
-            shown = attachments(message)
+            shown = attachments(message, outbound_only=True)
             if shown:
-                await cl.Message(content="Browser evidence", elements=shown).send()
+                await cl.Message(content="", elements=shown).send()
             continue
 
         body = spoken(message)

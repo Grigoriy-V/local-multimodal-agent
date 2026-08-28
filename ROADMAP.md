@@ -9,8 +9,8 @@ each deploy, sandbox or container run is asked for separately.
 
 **Corrected 2026-08-29 after a live test.** `assistant-control` v14 is deployed,
 but its automatic delivery of media returned by any tool is rejected product
-behaviour. A later prompt workaround remains only in the working tree and must
-not be deployed. Read
+behaviour. The replacement is implemented and tested offline in the working
+tree, but is not deployed or accepted live. Read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
 "Correction after the last live test", before changing anything.
 
@@ -122,15 +122,17 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      a directory on a Modal volume; a document is saved there and read with
      `read_document`, or looked at with `view_pages`.
      `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`.
-   - **Agent-controlled presentation is approved and not implemented.** Reading,
+   - **Agent-controlled presentation is implemented offline, not deployed.** Reading,
      viewing and inspecting are observation tools: their results go to the agent
      and never reach the person automatically. The agent decides which tools to
      use and whether, what and when to present. Sending a chosen workspace file
-     or media item is a separate general capability; the interface only carries
-     that explicit outbound action. The v14 auto-forward and the later prompt
-     workaround are both rejected. Acceptance needs a clean real chat in which
-     the agent inspects the document, explicitly sends what it chose and explains
-     what it sees; unrelated tool media must remain internal.
+     or media item is the separate `send_file` capability; the interface only
+     carries that explicit outbound action. `view_pages` saves rendered pages so
+     the agent can inspect them and later select one. The v14 auto-forward and
+     the later prompt workaround are both replaced. Offline: 548 passed, 1
+     skipped. Acceptance still needs a clean real chat in which the agent
+     inspects the document, explicitly sends what it chose and explains what it
+     sees; unrelated tool media must remain internal.
    - **Browser image layering is deployed but its cache benefit is unconfirmed.**
      Chromium is installed below the copied source. v14 paid the slow build once;
      the next deploy is the first measurement of whether that layer is reused.

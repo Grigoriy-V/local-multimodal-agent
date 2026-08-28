@@ -108,6 +108,20 @@ def test_media_bytes_survive_a_round_trip(store: SqliteStore) -> None:
     assert message.content[1].media_type == "image/png"
 
 
+def test_explicit_outbound_metadata_survives_a_round_trip(store: SqliteStore) -> None:
+    part = ContentPart(
+        kind="file",
+        data=b"report",
+        media_type="application/pdf",
+        name="report.pdf",
+        outbound=True,
+    )
+    store.append("t1", [Message(role="tool", content=[part], tool_call_id="send")], LOCAL_USER_ID)
+
+    [message] = store.messages("t1")
+    assert message.content[0] == part
+
+
 def test_messages_can_be_read_from_a_position(store: SqliteStore) -> None:
     store.append("t1", [user("one"), user("two"), user("three")], LOCAL_USER_ID)
 

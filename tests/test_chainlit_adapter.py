@@ -110,6 +110,20 @@ def test_a_text_only_message_has_nothing_to_show() -> None:
     assert media_parts(message) == []
 
 
+def test_only_explicit_tool_media_is_selected_for_outbound_delivery() -> None:
+    observed = ContentPart(kind="image", data=b"seen", media_type="image/png")
+    selected = ContentPart(
+        kind="image",
+        data=b"sent",
+        media_type="image/png",
+        name="chosen.png",
+        outbound=True,
+    )
+    message = Message(role="tool", content=[observed, selected], tool_call_id="call")
+
+    assert media_parts(message, outbound_only=True) == [selected]
+
+
 def test_spoken_joins_only_the_text_parts() -> None:
     message = Message(
         role="assistant",

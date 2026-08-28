@@ -6,6 +6,7 @@ from app.tools.capabilities import (
     DOCUMENTS_READ,
     FILESYSTEM_READ,
     FILESYSTEM_WRITE,
+    PRESENT_FILES,
     Capability,
     CapabilityGrant,
     CapabilityRegistry,
@@ -13,6 +14,7 @@ from app.tools.capabilities import (
 from app.tools.documents import document_tools
 from app.tools.filesystem import filesystem_tools
 from app.tools.memory import memory_tools
+from app.tools.presentation import presentation_tools, send_file
 
 __all__ = [
     "BROWSER_INSPECT",
@@ -20,6 +22,7 @@ __all__ = [
     "DOCUMENTS_READ",
     "FILESYSTEM_READ",
     "FILESYSTEM_WRITE",
+    "PRESENT_FILES",
     "Capability",
     "CapabilityGrant",
     "CapabilityRegistry",
@@ -32,4 +35,6 @@ __all__ = [
     "find_chromium_browser",
     "inspect_local_page",
     "memory_tools",
+    "presentation_tools",
+    "send_file",
 ]

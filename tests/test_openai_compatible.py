@@ -152,6 +152,29 @@ def test_mixed_message_keeps_part_order() -> None:
     ]
 
 
+def test_an_explicit_outbound_is_not_replayed_as_fresh_model_evidence() -> None:
+    message = Message(
+        role="tool",
+        content=[
+            text_part("Selected shot.png for delivery."),
+            ContentPart(
+                kind="image",
+                data=b"png",
+                media_type="image/png",
+                name="shot.png",
+                outbound=True,
+            ),
+        ],
+        tool_call_id="send-1",
+    )
+
+    [built] = build_messages([message])
+
+    assert built["content"] == [
+        {"type": "text", "text": "Selected shot.png for delivery."}
+    ]
+
+
 def test_an_assistant_turn_sends_its_tool_calls_and_null_content() -> None:
     call = ToolCall(id="call_1", name="read_file", arguments={"path": "README.md"})
 

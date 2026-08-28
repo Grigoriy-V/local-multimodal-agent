@@ -133,7 +133,8 @@ def test_an_interface_that_shows_media_says_media_arrives(
     brief = capability_brief(everything(registry), CHAT_DELIVERY)
 
     assert "image" in brief
-    assert "never say you cannot make, take or send a picture" in brief
+    assert "explicitly call send_file" in brief
+    assert "nothing else is sent automatically" in brief
 
 
 def test_an_interface_that_cannot_show_media_says_that_instead(
@@ -143,16 +144,31 @@ def test_an_interface_that_cannot_show_media_says_that_instead(
 
     brief = capability_brief(everything(registry), TEXT_ONLY)
 
-    assert "not delivered here" in brief
-    assert "never say you cannot make, take or send a picture" not in brief
+    assert "no explicit file-delivery action" in brief
+    assert "explicitly call send_file" not in brief
+
+
+def test_a_text_only_agent_does_not_receive_a_send_tool(
+    tmp_path: Path, workspace: Path
+) -> None:
+    agent = Agent(
+        ScriptedBackend(),
+        SqliteStore(tmp_path / "text-only.sqlite3"),
+        workspace,
+        delivery=TEXT_ONLY,
+    )
+    try:
+        assert "send_file" not in agent.toolbox("thread").names
+    finally:
+        agent.store.close()
 
 
 def test_a_declared_kind_reaches_the_model(registry: CapabilityRegistry) -> None:
     brief = capability_brief(everything(registry), Delivery(media=("image",)))
 
-    assert "any image a tool returns to you is sent" in brief
+    assert "can deliver image" in brief
     assert "audio" in brief  # still accepted as input
-    assert "image or audio part" not in brief
+    assert "nothing else is sent automatically" in brief
 
 
 # --- the hand-written prompt cannot outlive its tools -------------------------
@@ -278,21 +294,15 @@ def test_the_brief_never_says_a_document_cannot_be_seen(
     assert "view_pages" in brief
 
 
-def test_the_brief_says_that_calling_a_tool_is_what_sends_the_picture(
+def test_the_brief_separates_observation_from_explicit_presentation(
     registry: CapabilityRegistry,
 ) -> None:
-    """The second denial, after the first was fixed: "I cannot take screenshots".
-
-    Told it could see a document, the assistant still refused to show one — and
-    it was right that it cannot attach a file, because it emits text. What it was
-    never told is that the picture a tool returns is delivered for it, so calling
-    the tool *is* sending. Delivery happens in the adapter and is invisible from
-    inside the model unless the brief says so.
-    """
+    """Looking at a page is not a hidden request for the adapter to send it."""
 
     from app.capabilities import capability_brief
 
     brief = capability_brief(registry.toolbox(registry.grant()))
 
-    assert "calling the tool is what sends it" in brief
-    assert "the person is sent the same picture" in brief
+    assert "view_pages" in brief
+    assert "sends nothing by itself" in brief
+    assert "explicitly call send_file" in brief

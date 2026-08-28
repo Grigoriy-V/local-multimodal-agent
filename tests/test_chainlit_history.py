@@ -95,6 +95,45 @@ async def test_native_history_resumes_text_and_media(layer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_native_history_hides_observation_media_and_keeps_explicit_outbound(layer) -> None:
+    layer.store.append(
+        "chat",
+        [
+            Message(
+                role="tool",
+                content=[
+                    ContentPart("text", text="private evidence"),
+                    ContentPart("image", data=b"seen", media_type="image/png"),
+                ],
+                tool_call_id="look",
+            ),
+            Message(
+                role="tool",
+                content=[
+                    ContentPart("text", text="selected"),
+                    ContentPart(
+                        "image",
+                        data=b"sent",
+                        media_type="image/png",
+                        name="chosen.png",
+                        outbound=True,
+                    ),
+                ],
+                tool_call_id="send",
+            ),
+        ],
+        LOCAL_USER_ID,
+    )
+
+    thread = await layer.get_thread("chat")
+
+    assert thread is not None
+    assert [step["output"] for step in thread["steps"]] == ["Completed.", "Completed."]
+    assert len(thread["elements"]) == 1
+    assert thread["elements"][0]["name"] == "chosen.png"
+
+
+@pytest.mark.asyncio
 async def test_native_history_paginates_and_searches(layer) -> None:
     for thread_id, opening in (("one", "alpha"), ("two", "beta"), ("three", "gamma")):
         layer.store.append(

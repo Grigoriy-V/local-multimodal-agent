@@ -236,6 +236,8 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
         writer.write(buffer)
         name = f"preflight-{uuid.uuid4().hex[:8]}.pdf"
         (root / name).write_bytes(buffer.getvalue())
+        previews = root / ".agent" / "documents"
+        before = set(previews.glob("*.png")) if previews.is_dir() else set()
         try:
             result = await tools.run_async(
                 ToolCall("preflight-pages", "view_pages", {"path": name})
@@ -249,7 +251,25 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
             render_pages(buffer.getvalue(), 1, 1)
         finally:
             (root / name).unlink(missing_ok=True)
+            after = set(previews.glob("*.png")) if previews.is_dir() else set()
+            for preview in after - before:
+                preview.unlink(missing_ok=True)
         return "a PDF page was rendered to an image the model can look at"
+
+    async def presentation() -> str:
+        """Select a real workspace file without involving an interface."""
+
+        name = f"preflight-{uuid.uuid4().hex[:8]}.txt"
+        marker = uuid.uuid4().hex.encode("ascii")
+        (root / name).write_bytes(marker)
+        try:
+            result = tools.run(ToolCall("preflight-presentation", "send_file", {"path": name}))
+            outgoing = [part for part in result.content if part.outbound]
+            if len(outgoing) != 1 or outgoing[0].data != marker:
+                raise RuntimeError("the selected file did not become one outbound item")
+        finally:
+            (root / name).unlink(missing_ok=True)
+        return "a workspace file became one explicit outbound item"
 
     available = set(tools.names)
     probes: list[Probe] = []
@@ -261,6 +281,8 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
         probes.append(Probe("documents.read", "free", documents))
     if "view_pages" in available:
         probes.append(Probe("documents.view", "free", pages))
+    if "send_file" in available:
+        probes.append(Probe("presentation.file", "free", presentation))
     return probes
 
 

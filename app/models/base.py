@@ -23,12 +23,19 @@ class ContextOverflowError(BackendError):
 
 @dataclass(frozen=True)
 class ContentPart:
-    """One piece of a message. Parts keep the order the user supplied."""
+    """One piece of a message. Parts keep the order the user supplied.
 
-    kind: Literal["text", "image", "audio"]
+    `outbound` is an explicit application action, not a property inferred by an
+    interface. Observation tools return ordinary media for the model to inspect;
+    a presentation tool marks only the item the agent chose to send.
+    """
+
+    kind: Literal["text", "image", "audio", "file"]
     text: str | None = None
     data: bytes | None = None
     media_type: str | None = None
+    name: str | None = None
+    outbound: bool = False
 
     def __post_init__(self) -> None:
         if self.kind == "text":
@@ -36,6 +43,8 @@ class ContentPart:
                 raise ValueError("a text part requires text")
         elif not self.data or not self.media_type:
             raise ValueError(f"a {self.kind} part requires data and media_type")
+        if self.kind == "file" and not self.name:
+            raise ValueError("a file part requires a name")
 
 
 @dataclass(frozen=True)

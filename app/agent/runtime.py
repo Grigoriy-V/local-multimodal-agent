@@ -32,7 +32,14 @@ from app.memory import LOCAL_USER_ID, ConversationStore, Thread, open_store
 from app.models import ContentPart, Message, ModelBackend, Usage
 from app.preflight import Probe, backend_probe, report, run, store_probes, tool_probes
 from app.models.openai_compatible import OpenAICompatibleBackend
-from app.tools import CapabilityGrant, CapabilityRegistry, Toolbox, memory_tools
+from app.tools import (
+    DEFAULT_CAPABILITIES,
+    PRESENT_FILES,
+    CapabilityGrant,
+    CapabilityRegistry,
+    Toolbox,
+    memory_tools,
+)
 
 # The checkpoint holds this project's own dataclasses, so LangGraph is told
 # which types it is allowed to reconstruct. Nothing else may come back out.
@@ -108,7 +115,18 @@ class Agent:
         self.checkpoints = checkpoints
         self.context_fraction = context_fraction
         self.capability_registry = capability_registry or CapabilityRegistry(self.workspace)
-        self.capability_grant = capability_grant or self.capability_registry.grant()
+        if capability_grant is None:
+            capabilities = DEFAULT_CAPABILITIES
+            if not (delivery.media or delivery.files):
+                capabilities = tuple(
+                    name for name in capabilities if name != PRESENT_FILES
+                )
+            capability_grant = self.capability_registry.grant(capabilities=capabilities)
+        elif capability_grant.allows(PRESENT_FILES) and not (
+            delivery.media or delivery.files
+        ):
+            raise ValueError("a text-only interface cannot grant file presentation")
+        self.capability_grant = capability_grant
         self._graphs: dict[str, CompiledStateGraph] = {}
         self._checkpoint_handle = (
             CheckpointHandle(
@@ -346,8 +364,8 @@ def create_agent(
     """Build the default agent from configuration.
 
     `delivery` is the caller's statement of what its interface can put in front
-    of a person; it is what stops the model from denying that it can send a
-    picture, so an interface that renders less has to say so here.
+    of a person. It controls whether the explicit presentation capability is
+    wired at all; observation tools never infer delivery from their own output.
     """
 
     agent_settings = agent_settings or AgentSettings()

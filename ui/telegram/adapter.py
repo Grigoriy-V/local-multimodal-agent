@@ -385,11 +385,10 @@ class TelegramAdapter:
     async def _deliver(self, chat_id: int, produced: Message) -> None:
         body = spoken(produced)
         if produced.role == "tool":
-            # A tool's text is working material and stays out of the chat. Its
-            # media does not: a rendered page or a screenshot is the thing the
-            # person asked to see, and it existed here while the assistant was
-            # telling them it had no way to show anything.
-            await self._send_media(chat_id, produced)
+            # Tool results are working material. Only a presentation tool can
+            # mark a concrete item outbound; observing a page or screenshot is
+            # never interpreted as a send decision by this adapter.
+            await self._send_media(chat_id, produced, outbound_only=True)
             return
         if body:
             await self.client.send_message(chat_id, body)
@@ -401,19 +400,19 @@ class TelegramAdapter:
                 chat_id, "\n".join(f"· {call.name}" for call in produced.tool_calls)
             )
 
-    async def _send_media(self, chat_id: int, produced: Message) -> None:
-        """Put the message's own media in the chat.
-
-        `spoken` renders text only, and the artifact loop sends files the task
-        wrote to disk. A browser screenshot is neither: it lives in the message
-        the agent produced. Without this it reached the store and Chainlit but
-        never the person who asked.
-        """
+    async def _send_media(
+        self, chat_id: int, produced: Message, *, outbound_only: bool = False
+    ) -> None:
+        """Translate media the application explicitly selected to Telegram."""
 
         for index, part in enumerate(produced.content, start=1):
             if part.kind == "text" or not part.data:
                 continue
-            name = f"{part.kind}-{index}{MEDIA_SUFFIXES.get(part.media_type or '', '.bin')}"
+            if outbound_only and not part.outbound:
+                continue
+            name = part.name or (
+                f"{part.kind}-{index}{MEDIA_SUFFIXES.get(part.media_type or '', '.bin')}"
+            )
             if part.kind == "image":
                 await self.client.send_photo(chat_id, name, part.data)
             else:

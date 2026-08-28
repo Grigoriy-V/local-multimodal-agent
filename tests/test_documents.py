@@ -285,8 +285,13 @@ async def test_a_scan_is_read_by_looking_at_it(tmp_path: Path) -> None:
     image = result.content[1]
     assert image.media_type in MEDIA_KINDS
     assert image.data is not None and image.data.startswith(b"\x89PNG")
-    assert "of 2" in (result.content[0].text or "")
-    assert "page=2" in (result.content[0].text or "")
+    note = result.content[0].text or ""
+    assert "of 2" in note
+    assert "page=2" in note
+    assert "Nothing was sent" in note
+    previews = list((tmp_path / ".agent" / "documents").glob("*-page-1.png"))
+    assert len(previews) == 1
+    assert previews[0].read_bytes() == image.data
 
 
 async def test_the_last_page_does_not_invite_a_next_one(tmp_path: Path) -> None:
