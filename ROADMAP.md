@@ -90,21 +90,22 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
 1. **Control plane.** The step previously numbered 3c. It deploys new
    components; it does not redeploy `assistant-llm-v2`.
 
-   - **Written, never run.** `PostgresStore` is the second `ConversationStore`,
+   - **Written and live-accepted.** `PostgresStore` is the second `ConversationStore`,
      provider-agnostic: the deployed database is **Neon**, reached through its
      pooled endpoint because a fleet that scales to zero opens and drops
      connections in bursts, and everything provider-specific lives in
      `AGENT_DATABASE_URL`. SQLite stays the local backend. It joins the contract
      suite only when `AGENT_TEST_DATABASE_URL` is set, so no offline test can
-     reach a real database. Nothing has executed a statement yet.
+     reach a real database. Live correctness evidence is recorded below.
      `reports/2026-08-28_v2_control_plane_postgres_store.md`.
    - **Offline foundation written, never connected or spawned.** The local and
      PostgreSQL LangGraph savers now share one lifecycle; webhook validation,
      persist-before-spawn, a leased update inbox and the worker call boundary
-     are covered offline. The platform HTTP/spawn adapter is deployed but has
-     not been invoked; the ephemeral sandbox remains open.
+     are covered offline. The platform module has imported successfully through
+     an unsupported browser GET; the Telegram POST/spawn path remains
+     uninvoked, and the ephemeral sandbox remains open.
      `reports/2026-08-28_v2_control_plane_offline_foundation.md`.
-   - **CPU platform adapter deployed but its first start failed.**
+   - **CPU platform adapter correctively deployed; POST path remains untested.**
      `assistant-control` has separate scale-to-zero webhook and update-worker
      functions plus one explicit migration command. Its locked image excludes
      local secrets and workspaces. Offline registration and the full regression
@@ -112,8 +113,10 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      `assistant-control` app deployed successfully in 6.748 s. Opening the web
      URL caused repeated CPU starts for the browser's `GET /favicon.ico`; every
      container failed before application code with `ModuleNotFoundError` because
-     the deployment module was absent from the image. The packaging correction
-     is written and offline-only until a separately approved redeploy.
+     the deployment module was absent from the image. The corrected image was
+     deployed in 13.254 s. One queued browser request then imported the module
+     successfully and returned the expected 404 for `GET /favicon.ico`; no
+     Telegram POST has run.
      `reports/2026-08-28_v2_control_plane_cpu_adapter.md`.
    - **Neon live correctness acceptance passed; performance remains open.** The
      pooled endpoint passed the conversation contract and the real
@@ -131,9 +134,16 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      either limit keeps the control-plane stage open. Acceptance must run from
      the deployed CPU path, not from the developer machine, and records the
      physical container region. The production-shared CPU probe is written,
-     offline-verified and present in the broken `assistant-control` deployment;
-     it uses Modal's default unpinned placement to avoid a region price
-     multiplier. It has not reached application code.
+     offline-verified and present in the corrected `assistant-control`
+     deployment; it uses Modal's default unpinned placement to avoid a region
+     price multiplier. Its CPU-only `prepare` invocation created the isolated
+     representative Neon fixture successfully. The first warm read from
+     `eu-south-2` failed at 640.399-961.732 ms (warm max 961.732 ms). Neon
+     reported only 0.1-6.7 ms of database execution, exposing sequential network
+     round-trips and runtime migration checks as the cause. A one-round-trip
+     read, one-round-trip append and migration-free runtime open are written and
+     offline-verified but not deployed; cold read and write measurements remain
+     open.
      `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
    - Accept the deployed platform adapter. The Telegram secret
      token and allowed-user list are checked in the application, because

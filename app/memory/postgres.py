@@ -32,9 +32,10 @@ from contextlib import contextmanager
 from typing import Any
 
 import psycopg
+from psycopg import sql
 from psycopg.rows import dict_row
 
-from app.memory.base import ConversationStore, Thread
+from app.memory.base import ConversationStore, Thread, TurnContextRecords
 from app.memory.records import (
     dump_content,
     dump_tool_calls,
@@ -118,6 +119,7 @@ def migrate(connection: psycopg.Connection, schema: str) -> int:
     """
 
     with connection.cursor() as cursor:
+        cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
         # Transaction-local state cannot leak through a transaction pooler to
         # the next client that receives this server connection.
         cursor.execute(f'SET LOCAL search_path TO "{schema}"')
@@ -143,22 +145,28 @@ class PostgresStore(ConversationStore):
     hold other things, and gives a test its own namespace to create and drop.
     """
 
-    def __init__(self, dsn: str, schema: str = "public") -> None:
+    def __init__(
+        self, dsn: str, schema: str = "public", *, migrate_schema: bool = False
+    ) -> None:
         if not TOKEN.fullmatch(schema):
             raise ValueError(f"not a usable schema name: {schema!r}")
         self.dsn = dsn
         self.schema = schema
-        self._connection: psycopg.Connection | None = None
-        migrate(self._open(), self.schema)
+        self._connection: psycopg.Connection | None = self._open()
+        if migrate_schema:
+            migrate(self._connection, self.schema)
 
     # --- connection ----------------------------------------------------------
 
     def _open(self) -> psycopg.Connection:
         connection = psycopg.connect(self.dsn, row_factory=dict_row)
-        with connection.cursor() as cursor:
-            cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
-        connection.commit()
         self._connection = connection
+        return connection
+
+    def _live_connection(self) -> psycopg.Connection:
+        connection = self._connection
+        if connection is None or connection.closed or connection.broken:
+            connection = self._open()
         return connection
 
     @contextmanager
@@ -174,9 +182,7 @@ class PostgresStore(ConversationStore):
         is safe. It is dropped instead, so the next call opens a new one.
         """
 
-        connection = self._connection
-        if connection is None or connection.closed or connection.broken:
-            connection = self._open()
+        connection = self._live_connection()
         try:
             with connection.cursor() as cursor:
                 cursor.execute(f'SET LOCAL search_path TO "{self.schema}"')
@@ -247,37 +253,81 @@ class PostgresStore(ConversationStore):
     # --- messages ------------------------------------------------------------
 
     def append(self, thread_id: str, messages: Iterable[Message], user_id: str) -> int:
-        self.ensure_thread(thread_id, user_id)
+        pending = list(messages)
         stamp = now()
-        with self._cursor() as cursor:
-            cursor.execute(
-                "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM messages"
-                " WHERE thread_id = %s",
-                (thread_id,),
+        statement = sql.SQL(
+            """
+            WITH input AS (
+                SELECT ordinality - 1 AS offset,
+                       role, content, tool_calls, tool_call_id
+                FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[])
+                     WITH ORDINALITY
+                     AS item(role, content, tool_calls, tool_call_id, ordinality)
+            ),
+            owned_thread AS (
+                INSERT INTO {}.threads
+                    (id, user_id, created_at, updated_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE
+                    SET updated_at = EXCLUDED.updated_at
+                RETURNING id
+            ),
+            base AS (
+                SELECT COALESCE(MAX(position), -1) + 1 AS next
+                FROM {}.messages
+                WHERE thread_id = %s
+            ),
+            inserted AS (
+                INSERT INTO {}.messages
+                    (thread_id, position, role, content, tool_calls,
+                     tool_call_id, created_at)
+                SELECT %s, (base.next + input.offset)::integer, input.role,
+                       input.content, input.tool_calls, input.tool_call_id, %s
+                FROM input
+                CROSS JOIN base
+                CROSS JOIN owned_thread
+                RETURNING position
             )
-            position = int(cursor.fetchone()["next"])  # type: ignore[index]
-            for message in messages:
-                cursor.execute(
-                    "INSERT INTO messages"
-                    " (thread_id, position, role, content, tool_calls, tool_call_id,"
-                    "  created_at)"
-                    " VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                    (
-                        thread_id,
-                        position,
-                        message.role,
-                        dump_content(message.content),
-                        dump_tool_calls(message.tool_calls),
-                        message.tool_call_id,
-                        stamp,
-                    ),
-                )
-                position += 1
-            cursor.execute(
-                "UPDATE threads SET updated_at = %s WHERE id = %s", (stamp, thread_id)
-            )
-            cursor.connection.commit()
-        return position
+            SELECT COALESCE(
+                MAX(position) + 1,
+                (SELECT next FROM base)
+            ) AS count
+            FROM inserted
+            """
+        ).format(
+            sql.Identifier(self.schema),
+            sql.Identifier(self.schema),
+            sql.Identifier(self.schema),
+        )
+        connection = self._live_connection()
+        try:
+            with connection.cursor() as cursor:
+                with connection.pipeline():
+                    cursor.execute(
+                        statement,
+                        (
+                            [message.role for message in pending],
+                            [dump_content(message.content) for message in pending],
+                            [dump_tool_calls(message.tool_calls) for message in pending],
+                            [message.tool_call_id for message in pending],
+                            thread_id,
+                            user_id,
+                            stamp,
+                            stamp,
+                            thread_id,
+                            thread_id,
+                            stamp,
+                        ),
+                    )
+                    connection.commit()
+                row = cursor.fetchone()
+        except psycopg.OperationalError:
+            self._connection = None
+            connection.close()
+            raise
+        if row is None:
+            raise RuntimeError("append query returned no row")
+        return int(row["count"])
 
     def messages(
         self, thread_id: str, after: int = -1, limit: int | None = None
@@ -366,6 +416,104 @@ class PostgresStore(ConversationStore):
             )
             rows = cursor.fetchall()
         return [row["text"] for row in rows]
+
+    def turn_context(
+        self,
+        thread_id: str,
+        user_id: str,
+        query: str,
+        retrieved_facts: int,
+    ) -> TurnContextRecords:
+        """Fetch summary, unsummarized history and facts in one round-trip."""
+
+        match = match_query(query) if query else ""
+        statement = sql.SQL(
+            """
+            WITH thread AS (
+                SELECT summary, summarized_through
+                FROM {}.threads
+                WHERE id = %s
+            ),
+            history AS (
+                SELECT position, role, content, tool_calls, tool_call_id
+                FROM {}.messages
+                WHERE thread_id = %s
+                  AND position > COALESCE(
+                      (SELECT summarized_through FROM thread), 0
+                  ) - 1
+                ORDER BY position
+            ),
+            fact_query AS (
+                SELECT CASE
+                    WHEN %s = '' THEN NULL
+                    ELSE to_tsquery('simple', %s)
+                END AS value
+            ),
+            matched_facts AS (
+                SELECT fact.text, fact.id,
+                       ts_rank(fact.search, fact_query.value) AS rank
+                FROM {}.facts AS fact
+                CROSS JOIN fact_query
+                WHERE fact.user_id = %s
+                  AND fact_query.value IS NOT NULL
+                  AND fact.search @@ fact_query.value
+                ORDER BY rank DESC, fact.id DESC
+                LIMIT %s
+            )
+            SELECT
+                (SELECT summary FROM thread) AS summary,
+                COALESCE(
+                    (SELECT summarized_through FROM thread), 0
+                ) AS summarized_through,
+                COALESCE(
+                    (SELECT jsonb_agg(to_jsonb(history) ORDER BY position)
+                     FROM history),
+                    '[]'::jsonb
+                ) AS history,
+                COALESCE(
+                    (SELECT jsonb_agg(text ORDER BY rank DESC, id DESC)
+                     FROM matched_facts),
+                    '[]'::jsonb
+                ) AS facts
+            """
+        ).format(
+            sql.Identifier(self.schema),
+            sql.Identifier(self.schema),
+            sql.Identifier(self.schema),
+        )
+        connection = self._live_connection()
+        restore_autocommit = not connection.autocommit
+        try:
+            if restore_autocommit:
+                connection.autocommit = True
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    statement,
+                    (
+                        thread_id,
+                        thread_id,
+                        match,
+                        match,
+                        user_id,
+                        retrieved_facts,
+                    ),
+                )
+                row = cursor.fetchone()
+        except psycopg.OperationalError:
+            self._connection = None
+            connection.close()
+            raise
+        finally:
+            if restore_autocommit and not connection.closed:
+                connection.autocommit = False
+        if row is None:
+            raise RuntimeError("context query returned no row")
+        return TurnContextRecords(
+            summary=row["summary"],
+            summarized_through=int(row["summarized_through"]),
+            messages=[row_to_message(item) for item in row["history"]],
+            facts=list(row["facts"]),
+        )
 
     # --- lifecycle -----------------------------------------------------------
 

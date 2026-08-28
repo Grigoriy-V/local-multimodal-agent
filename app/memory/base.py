@@ -43,6 +43,16 @@ class Thread:
     opening: str
 
 
+@dataclass(frozen=True)
+class TurnContextRecords:
+    """Durable records needed to construct one model turn."""
+
+    summary: str | None
+    summarized_through: int
+    messages: list[Message]
+    facts: list[str]
+
+
 class ConversationStore(ABC):
     """Durable conversations, summaries and facts for one deployment."""
 
@@ -114,6 +124,25 @@ class ConversationStore(ABC):
     @abstractmethod
     def facts(self, user_id: str, limit: int = 50) -> list[str]:
         """This user's most recently saved facts."""
+
+    def turn_context(
+        self,
+        thread_id: str,
+        user_id: str,
+        query: str,
+        retrieved_facts: int,
+    ) -> TurnContextRecords:
+        """Read every durable record needed for one turn.
+
+        Local stores can answer this through their ordinary operations. A
+        networked store overrides the boundary so one logical read need not
+        become several network round-trips.
+        """
+
+        summary, through = self.summary(thread_id)
+        messages = self.messages(thread_id, after=through - 1)
+        facts = self.search(query, user_id, limit=retrieved_facts) if query else []
+        return TurnContextRecords(summary, through, messages, facts)
 
     # --- lifecycle -----------------------------------------------------------
 

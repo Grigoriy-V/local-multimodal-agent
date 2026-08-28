@@ -40,7 +40,11 @@ def postgres_store(_tmp_path: Path) -> ConversationStore:
 
     from app.memory.postgres import PostgresStore
 
-    return PostgresStore(POSTGRES_DSN, schema=f"contract_{uuid.uuid4().hex[:12]}")
+    return PostgresStore(
+        POSTGRES_DSN,
+        schema=f"contract_{uuid.uuid4().hex[:12]}",
+        migrate_schema=True,
+    )
 
 
 STORE_FACTORIES: dict[str, Callable[[Path], ConversationStore]] = {

@@ -29,7 +29,9 @@ async def test_setup_runs_every_migration_and_closes_the_store(monkeypatch: Any)
 
     monkeypatch.setattr(
         "tools.setup_control_plane.open_store",
-        lambda _settings: (events.append("store.setup") or FakeStore(events)),
+        lambda _settings, *, migrate_schema: (
+            events.append("store.setup") or FakeStore(events)
+        ),
     )
 
     async def checkpoints(url: str, *, allowed_types: object) -> None:
@@ -67,7 +69,7 @@ async def test_setup_closes_the_store_when_a_later_migration_fails(monkeypatch: 
     events: list[str] = []
     monkeypatch.setattr(
         "tools.setup_control_plane.open_store",
-        lambda _settings: FakeStore(events),
+        lambda _settings, *, migrate_schema: FakeStore(events),
     )
 
     async def fail(_url: str, *, allowed_types: object) -> None:

@@ -32,12 +32,19 @@ def test_a_database_url_opens_postgres_instead(monkeypatch: pytest.MonkeyPatch) 
     machine that runs the local profile.
     """
 
-    opened: dict[str, str] = {}
+    opened: dict[str, str | bool] = {}
 
     class FakePostgresStore:
-        def __init__(self, dsn: str, schema: str = "public") -> None:
+        def __init__(
+            self,
+            dsn: str,
+            schema: str = "public",
+            *,
+            migrate_schema: bool = False,
+        ) -> None:
             opened["dsn"] = dsn
             opened["schema"] = schema
+            opened["migrate_schema"] = migrate_schema
 
     stand_in = ModuleType("app.memory.postgres")
     stand_in.PostgresStore = FakePostgresStore  # type: ignore[attr-defined]
@@ -51,7 +58,14 @@ def test_a_database_url_opens_postgres_instead(monkeypatch: pytest.MonkeyPatch) 
     store = open_store(settings)
 
     assert isinstance(store, FakePostgresStore)
-    assert opened == {"dsn": "postgresql://example/db", "schema": "assistant"}
+    assert opened == {
+        "dsn": "postgresql://example/db",
+        "schema": "assistant",
+        "migrate_schema": False,
+    }
+
+    open_store(settings, migrate_schema=True)
+    assert opened["migrate_schema"] is True
 
 
 def test_the_deployed_url_is_never_a_default() -> None:

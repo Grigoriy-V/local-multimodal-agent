@@ -18,7 +18,7 @@ async def setup_control_plane(settings: AgentSettings | None = None) -> None:
     if not settings.database_url:
         raise ValueError("AGENT_DATABASE_URL is required for control-plane setup")
 
-    store: ConversationStore = open_store(settings)
+    store: ConversationStore = open_store(settings, migrate_schema=True)
     try:
         await setup_postgres_checkpoints(
             settings.database_url,

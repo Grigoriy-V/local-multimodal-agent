@@ -21,10 +21,8 @@ def load_turn_context(
     their combined cost remains the cost of this one logical read.
     """
 
-    summary, through = store.summary(thread_id)
-    history = store.messages(thread_id, after=through - 1)
-    facts = store.search(query, user_id, limit=retrieved_facts) if query else []
+    records = store.turn_context(thread_id, user_id, query, retrieved_facts)
     return Context(
-        prelude=build_prelude(summary, facts, system_prompt),
-        history=history,
+        prelude=build_prelude(records.summary, records.facts, system_prompt),
+        history=records.messages,
     )

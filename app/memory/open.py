@@ -16,10 +16,16 @@ from app.memory.base import ConversationStore
 from app.memory.store import SqliteStore
 
 
-def open_store(settings: AgentSettings | None = None) -> ConversationStore:
+def open_store(
+    settings: AgentSettings | None = None, *, migrate_schema: bool = False
+) -> ConversationStore:
     settings = settings or AgentSettings()
     if settings.database_url:
         from app.memory.postgres import PostgresStore
 
-        return PostgresStore(settings.database_url, settings.database_schema)
+        return PostgresStore(
+            settings.database_url,
+            settings.database_schema,
+            migrate_schema=migrate_schema,
+        )
     return SqliteStore(settings.database)

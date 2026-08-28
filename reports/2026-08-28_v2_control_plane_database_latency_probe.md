@@ -1,7 +1,7 @@
 # Control-plane database latency probe
 
 **Date:** 2026-08-28  
-**Scope:** offline implementation, Modal Secret creation and failed CPU control-plane runtime start
+**Scope:** offline implementation, corrected CPU control-plane deployment and packaging runtime evidence; no database probe
 
 ## Result
 
@@ -58,12 +58,24 @@ failed before application code with `ModuleNotFoundError: No module named
 'control_app'`: `include_source=False` was correct for excluding unrelated
 repository content, but the allow-listed image inputs omitted the deployment
 module itself. The corrected image now copies exactly that file to
-`/root/project/control_app.py`. It has not been redeployed.
+`/root/project/control_app.py` and was deployed in **13.254 s**.
+
+The old queued favicon call survived the redeploy and started one corrected CPU
+container. It returned the expected 404 instead of crashing: the first request
+had 9.83 s total duration and 29.8 ms execution, and a second request on the
+same container had 66.0 ms total duration and 19.5 ms execution. This confirms
+module packaging only; it is not database latency evidence.
 
 No Telegram update, database operation, model request or GPU worker reached
 application code. VRAM use was **0**. Deployment and failed CPU-start cost was
 not measured. No latency result exists, so the database performance gate
 remains open.
+
+The separately authorized CPU-only `prepare` invocation subsequently returned
+`{"operation": "prepare", "fixture": "ready"}`. The representative Neon
+fixture is ready and the Modal app returned to zero active tasks. This write is
+setup evidence only: it is not a latency sample and it made Neon warm, so the
+first read must wait for confirmed database scale-to-zero.
 
 The first authorized deploy attempt built two small intermediate image layers
 and then stopped before publication: `uv_sync` had incorrectly been given a
@@ -91,12 +103,47 @@ gate.
 Each item starts a distinct CPU worker and therefore needs fresh explicit
 permission immediately before it runs:
 
-1. redeploy the corrected `assistant-control` image without invoking a function;
-2. invoke `prepare` once;
-3. after Neon has scaled to zero, invoke `read` once;
+1. deploy the optimized control image without invoking a function;
+2. invoke one warm `read` to validate the SQL and warm budget;
+3. after Neon has scaled to zero, invoke `read` once for cold acceptance;
 4. after Neon has scaled to zero again, invoke `write` once.
 
 The first sample may be called database-cold only when Neon, not merely the
 Modal Function, was idle. If either operation misses either limit, the control
 plane stays open and the measured call sequence must be optimized before a
 retry.
+
+## First warm result and correction
+
+The first deployed read ran in Modal region `eu-south-2` and returned the
+expected shape (eight history messages and three prelude entries), but failed
+the performance gate:
+
+- first sample: **2421.686 ms**; not accepted as a database-cold result because
+  Neon had just been prepared;
+- warm samples: **749.049, 640.399, 648.692, 641.838, 961.732 ms**;
+- warm maximum: **961.732 ms**, versus the **100 ms** limit.
+
+Neon's query-performance view showed individual server execution at only
+**0.1-6.7 ms**, while also showing repeated `CREATE SCHEMA`, `CREATE TABLE`,
+`CREATE INDEX` and schema-version queries. The miss is therefore dominated by
+application-generated network round-trips, not database execution.
+
+The correction is written and offline-verified but not deployed:
+
+- ordinary `PostgresStore` opening no longer runs migrations; only the explicit
+  control-plane setup path requests them;
+- `turn_context` is a production persistence boundary. SQLite retains the
+  simple composed implementation, while PostgreSQL returns summary,
+  unsummarized messages and matching facts in one schema-qualified SQL execute
+  without a separate `SET LOCAL`;
+- PostgreSQL append materializes the complete turn into one schema-qualified
+  SQL execute and pipelines its commit instead of serializing thread creation,
+  position lookup, message inserts and the thread update across the network.
+
+Offline verification after the correction: targeted persistence/control tests
+**30 passed in 0.92 s**; final full regression **465 passed, 1 skipped in
+12.92 s**; scoped Ruff and `git diff --check` passed (apart from Git's CRLF
+conversion notice). A broader Ruff invocation also inspected unrelated files
+and found a pre-existing unused `field` import in `app/agent/task_graph.py`; it
+was not changed as part of this database correction.
