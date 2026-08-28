@@ -116,10 +116,9 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
 
 ### Queue
 
-1. **Capabilities the assistant actually has.** Acceptance for the whole item:
-   every tool the assistant advertises passes `/check` in the deployed
-   container. Before the two items below, because evidence and measurement taken
-   without these describe a different product.
+1. **Capabilities the assistant actually has. Met 2026-08-29:** every tool the
+   assistant advertises passes `/check` in the deployed container, 10/10 with
+   the credit-costing search probe included.
 
    - **Done: a browser, a workspace that survives, and documents.** Deployed
      2026-08-29, `/check` 6/6 in the container, and a real PDF read correctly in
@@ -150,12 +149,10 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      is not implemented. `reports/2026-08-29_v2_web_capability.md`,
      `reports/2026-08-29_v2_web_capability_options.md`.
 
-     **Outstanding, and the item's remaining acceptance:** nothing is deployed.
-     The renderer has never run, the deployed `/check` cannot include
-     `web.view` until `WEB_RENDERER_URL` and `WEB_RENDERER_KEY` are in the
-     `assistant-control` secret, and no live turn has made the agent choose
-     among the three. Each of those steps starts a worker and is asked for
-     separately.
+     Deployed and accepted: the deployed self-test passes **10/10**, including
+     all three web tools, with `view_web_page` served by the isolated renderer.
+     No live turn has yet made the agent choose among the three; that evidence
+     belongs to queue 2, which is where the interface is judged.
 
 2. **Baseline chat product and live evidence.** Confirm in the real interface
    that the assistant answers a capability question correctly, `/can` agrees,

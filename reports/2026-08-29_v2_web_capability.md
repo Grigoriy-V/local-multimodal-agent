@@ -192,11 +192,34 @@ Configuration reached the deployment through `tools/sync_control_secret.py`:
 `WEB_FALLBACK_USER_AGENT` is not set, so the deployed assistant will be refused
 by sites that ask a client to identify itself.
 
+## Accepted in the deployed container
+
+`self_test` was invoked on the deployed function itself — `Function.from_name`,
+not `modal run`, which would have built an ephemeral copy and measured that
+instead — with the credit probe included:
+
+**all 10 passed**, including `web.fetch`, `web.view` (18,265-byte PNG) and
+`web.search`. 16.1 s of wall clock covering the worker's cold start and the
+renderer's. This was `render_web_page`'s first execution.
+
+Two things came free with it. `web.view` could only pass by reaching the
+renderer with proxy authentication, so the secret published minutes earlier did
+arrive in the container — a redeploy after `sync_control_secret.py` is enough.
+And the worker never opened the page itself: it carries `WEB_LOCAL_BROWSER=0`,
+so a renderer that was unreachable would have failed rather than fallen back.
+
 ## Not verified
 
-- **`render_web_page` has never run.** Its cold latency, whether Chromium keeps
-  its own sandbox under a non-root user there, and whether cloud metadata is
-  reachable from it remain open questions from the options report.
+- **Cloud metadata reachability from the renderer container is untested**, and
+  our own policy is what stops a request rather than the network: both the
+  caller and the renderer refuse the address before connecting. Measuring the
+  network itself needs a probe that deliberately bypasses the policy, which is
+  a container start and a separate decision.
+- Chromium still runs as root with `--no-sandbox` there — `container_flags()`
+  decides that by looking at the machine, and the machine is a root container.
+  The renderer's isolation is the container's emptiness, not the browser's.
+- The renderer's own cold start is not separated from the worker's; 16.1 s is
+  the pair.
 - The deployed assistant right now fetches pages, has no search tool, and fails
   `view_web_page` by design: the three `WEB_` values are not in the
   `assistant-control` secret yet. They travel there through
