@@ -84,7 +84,11 @@ reconsidered; this roadmap wins any conflict.
   model's reply; one restored container served the harness's two completion
   calls in 17.8 s and 1.66 s, then scaled to zero. Step 2's conversational
   acceptance is therefore closed; its work-request acceptance remains.
+  The public endpoint URL is not a secret: unauthenticated and invalid-credential
+  requests are refused with 401 at the edge in under 1.2 s without starting a
+  container, verified on v2 itself.
   Evidence:
+  `reports/2026-08-28_v2_step3b_edge_auth_refusal.md`,
   `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
   `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`,
   building on `reports/2026-08-28_v2_step3b_snapshot_boot.md` and
