@@ -409,3 +409,31 @@ result it actually chose, independently of Telegram or another interface.
 send decisions inside an adapter, prompt rules that hard-code a tool sequence
 for a product request, and describing a capable workspace agent as unable to
 look at or present files it can actually handle.
+
+## 2026-08-29: Web search, fetch and visual rendering are separate capabilities
+
+**Decision.** Firecrawl is used for search only on the normal path.
+`fetch_page` is the application's own bounded direct HTTP tool and does not
+spend provider credit. `view_web_page` is the application's own Chromium
+renderer, executed in a dedicated secretless CPU function with neither control
+credentials nor a workspace volume. It returns evidence to the agent; showing
+its screenshot remains a separate `send_file` decision. Firecrawl scrape is an
+explicit fallback for pages the direct fetch or datacenter browser cannot read.
+
+A general-purpose Modal Sandbox is not part of this capability. Fetching bytes
+does not execute page JavaScript and stays in the existing worker behind public
+destination, redirect, time, type and size bounds. Arbitrary page rendering is
+isolated because the existing deployed browser runs as root with
+`--no-sandbox` in the same container as application secrets.
+
+**Why.** Search, fetching readable content and looking at a rendered page have
+different costs and failure modes. One provider API for all three would spend
+credits and disclose every fetched URL unnecessarily. A universal execution
+sandbox would add a mechanism larger than the product need. A small secretless
+renderer preserves full visual capability while keeping untrusted page code
+away from the control plane and the person's persistent files.
+
+**Rules out.** Firecrawl as the default fetch path, automatically scraping all
+search results, enabling arbitrary external URLs in the credential-bearing
+update worker, mounting the person's workspace into the renderer, and building
+a general-purpose sandbox before another capability requires one.

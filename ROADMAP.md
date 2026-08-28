@@ -129,19 +129,19 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      with `view_pages`, explicitly sent both selected page images with
      `send_file`, and then explained what it saw. The observation images did not
      appear before the explicit sends. Personal document content is not recorded.
-     The deployment's exact build identity and the expanded `/check` 7/7 result
-     were not captured; those remain evidence gaps for the whole queue item.
+     The expanded deployed `/check` then passed 7/7, including
+     `presentation.file`. The deployment's exact build identity was not captured.
    - **Browser image layering is deployed but its cache benefit is unconfirmed.**
      Chromium is installed below the copied source. v14 paid the slow build once;
      the next deploy is the first measurement of whether that layer is reused.
-   - **Web: search, render, scrape — three tools, not one.** Not started. Search
-     through Firecrawl first; the key is `WEB_FIRECRAWL_API_KEY`, decided
-     2026-08-29, and the human has it. Rendering is ours and runs where
-     untrusted content may run, which is the sandbox below. Scrape is laid in as
-     a tool and is not a default.
+   - **Web: search, fetch and visual view — three tools, not one.** Not started.
+     Search uses Firecrawl and `WEB_FIRECRAWL_API_KEY`. `fetch_page` is our own
+     bounded direct HTTP tool and spends no provider credit. `view_web_page`
+     uses our Chromium in a separate secretless CPU renderer with no workspace
+     mount. Firecrawl scrape is an explicit fallback for pages our datacenter
+     browser cannot read, never the default fetch path. A general-purpose
+     sandbox is not part of this capability.
      `reports/2026-08-29_v2_web_capability_options.md`.
-   - **The sandbox, for untrusted content only.** Not started. It is what
-     rendering an arbitrary URL waits on.
 
 2. **Baseline chat product and live evidence.** Confirm in the real interface
    that the assistant answers a capability question correctly, `/can` agrees,

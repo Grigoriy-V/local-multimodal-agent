@@ -78,13 +78,14 @@ the assistant could continue reasoning from the visual evidence. The trace did
 not include a `read_document` call, so its explanation was grounded in the page
 images available in conversation history rather than extracted document text.
 
-Two narrower evidence gaps remain. The agent's reply to the explicit provenance
-question was not supplied, so truthful self-reporting of that provenance is not
-accepted by this test. The deployment success metadata and the expanded deployed
-`/check` result (**7/7**, including `presentation.file`) were also not captured;
-live behaviour proves the new code was running, but not its exact build identity
-or the complete preflight suite. No private filename or document content is
-recorded here.
+The expanded deployed `/check` subsequently passed **7/7**, including
+`presentation.file`, as reported by the human. One narrower evidence gap remains:
+the exact deployment build identity was not captured. The later provenance reply
+was recovered from the conversation store; it referred to visual inspection but
+also ambiguously claimed text-reading tooling even though the stored trace had no
+`read_document` call. That is an agent self-reporting defect for the harness phase,
+not a failure of visual evidence or explicit delivery. No private filename or
+document content is recorded here.
 
 ## Two decisions the human approved, 2026-08-29
 
