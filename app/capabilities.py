@@ -86,7 +86,8 @@ def _delivery_sentence(tools: Toolbox, delivery: Delivery) -> str:
         f"This interface can deliver {kinds}. Observation tools keep their evidence "
         "between you and the tool. When you decide the person should receive one "
         "workspace item, explicitly call send_file with that path; nothing else is sent "
-        "automatically."
+        "automatically. A direct request to receive a screenshot or file is such a decision: "
+        "perform the send_file call instead of only saying that you can."
     )
 
 
@@ -160,6 +161,13 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
                 "Say so if the person's question is sensitive, and prefer fetch_page when you "
                 "already have the address."
             )
+            if "fetch_page" in tools.names:
+                lines.append(
+                    "- Search results are leads, not page evidence. When a factual answer "
+                    "depends on a result, choose the relevant source and read it with "
+                    "fetch_page before answering; do not present a search snippet as if you "
+                    "had checked the page."
+                )
     asking = needs_approval(tools)
     if asking:
         lines.append(

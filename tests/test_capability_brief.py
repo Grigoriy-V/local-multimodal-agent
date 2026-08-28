@@ -134,6 +134,7 @@ def test_an_interface_that_shows_media_says_media_arrives(
 
     assert "image" in brief
     assert "explicitly call send_file" in brief
+    assert "perform the send_file call instead of only saying that you can" in brief
     assert "nothing else is sent automatically" in brief
 
 

@@ -269,3 +269,32 @@ fixed prompt without lying to an agent that does not have it.
 3. Run the deployed self-test once with `include_credit=True` — this starts a
    worker and a renderer container.
 4. One live Telegram turn that needs the web, to see the agent choose.
+
+## Correction after the deployed live turn
+
+The earlier 10/10 was real but not stable. A later free `/check` passed 8/9:
+`browser.inspect` failed while removing Chromium's temporary profile with
+`Directory not empty`. The latest Telegram thread in Neon showed the same error
+from `view_web_page` on Habr, so this was a shared browser lifecycle race rather
+than one bad probe. The agent recovered usefully with `fetch_page`.
+
+The local correction is deliberately small for the current personal scale:
+temporary-profile cleanup is best effort and can no longer invalidate evidence
+the browser already produced. No process supervisor or persistent cleanup
+service was added.
+
+The same live thread exposed product behaviour, not just plumbing. The agent
+answered current weather from search snippets without reading a source, then
+described its screenshot tools instead of acting on a direct request. General
+prompt guidance now says to pursue the requested outcome, recover reasonably
+from safe observation failures, call `send_file` when delivery is requested,
+and treat search results as leads that must be read before a factual answer.
+These are agent decisions, not a fixed website or screenshot workflow.
+
+Focused offline checks pass. This correction is not accepted live until the
+changed control app is deployed, `/check` passes, and one ordinary Telegram
+request makes the model inspect and send a web screenshot itself.
+
+The corrected control app was deployed in 21.1 s. Deployment built only the
+changed source layers and started no function. No acceptance call was made;
+the next evidence is the owner's ordinary Telegram request.

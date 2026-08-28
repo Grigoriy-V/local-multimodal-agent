@@ -264,7 +264,16 @@ async def open_page(
         raise RuntimeError("no installed Chrome/Edge browser was found")
 
     port = _free_port()
-    with tempfile.TemporaryDirectory(prefix="local-agent-browser-") as profile:
+    # Chromium's parent can exit a fraction before one of its helpers stops
+    # touching the profile. On Linux that race used to make rmtree raise
+    # ``Directory not empty`` and discard an otherwise successful screenshot.
+    # A temporary browser profile is cleanup, not the product result, so a
+    # best-effort removal must never turn evidence already collected into a
+    # failed tool call. The container is ephemeral, and on a personal machine
+    # the next normal temp cleanup can collect anything a late helper retained.
+    with tempfile.TemporaryDirectory(
+        prefix="local-agent-browser-", ignore_cleanup_errors=True
+    ) as profile:
         process = subprocess.Popen(
             [
                 str(executable),

@@ -42,10 +42,9 @@ refused before a model request.
   through `deploy/modal/autoscale.py` and matches `SCALEDOWN_WINDOW`, so a
   deploy restores it. A third function, `render_web_page`, is deployed at
   `https://grigoriy-v--assistant-control-render-web-page.modal.run` behind proxy
-  auth, and has never been run. The web keys are in the `assistant-control`
-  secret, published from the owner's own `.env` by
-  `tools/sync_control_secret.py`; nothing about the deployed web capability has
-  been exercised yet, because doing so starts a worker.
+  auth. It has run both in the deployed self-test and in a real Telegram turn.
+  The web keys are in the `assistant-control` secret, published from the owner's
+  own `.env` by `tools/sync_control_secret.py`.
 - Owed to the next `assistant-llm-v2` deploy, and not a reason to create one:
   the NCCL loopback rendezvous fix before snapshot creation.
   `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
@@ -116,9 +115,10 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
 
 ### Queue
 
-1. **Capabilities the assistant actually has. Met 2026-08-29:** every tool the
-   assistant advertises passes `/check` in the deployed container, 10/10 with
-   the credit-costing search probe included.
+1. **Capabilities the assistant actually has. Reopened 2026-08-29:** an earlier
+   deployed run passed 10/10, but a later free `/check` passed 8/9 and a real
+   Telegram turn reproduced the same Chromium profile-cleanup race. The small
+   fix is deployed; acceptance is pending a real check.
 
    - **Done: a browser, a workspace that survives, and documents.** Deployed
      2026-08-29, `/check` 6/6 in the container, and a real PDF read correctly in
@@ -149,10 +149,16 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      is not implemented. `reports/2026-08-29_v2_web_capability.md`,
      `reports/2026-08-29_v2_web_capability_options.md`.
 
-     Deployed and accepted: the deployed self-test passes **10/10**, including
-     all three web tools, with `view_web_page` served by the isolated renderer.
-     No live turn has yet made the agent choose among the three; that evidence
-     belongs to queue 2, which is where the interface is judged.
+     A deployed self-test historically passed **10/10**, including all three web
+     tools. A later `browser.inspect` check failed 8/9, and Neon showed the same
+     `Directory not empty` cleanup failure from `view_web_page` on Habr. The
+     shared Chromium cleanup no longer lets removal of a temporary profile
+     discard otherwise successful evidence. The change is deployed but has not
+     run there yet. The same real turn also showed the model repairing browser failure
+     with `fetch_page`, then later describing screenshot tools instead of using
+     them; general outcome/recovery guidance now tells it to act and finish the
+     requested delivery. One deployed `/check` and one live screenshot request
+     remain the acceptance evidence.
 
 2. **Baseline chat product and live evidence.** Confirm in the real interface
    that the assistant answers a capability question correctly, `/can` agrees,
