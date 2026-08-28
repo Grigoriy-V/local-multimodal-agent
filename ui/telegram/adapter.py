@@ -54,6 +54,19 @@ HELP = (
 PHOTO_MEDIA_TYPE = "image/jpeg"
 VOICE_MEDIA_TYPE = "audio/ogg"
 
+# Telegram names an upload by its filename, so an outgoing part needs a
+# plausible extension. Only the types the assistant can produce are listed.
+MEDIA_SUFFIXES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/flac": ".flac",
+    "audio/ogg": ".ogg",
+}
+
 
 def canonical_user_id(telegram_user_id: int) -> str:
     """The application's own identifier for a Telegram account."""
@@ -328,8 +341,27 @@ class TelegramAdapter:
             return
         if body:
             await self.client.send_message(chat_id, body)
+        await self._send_media(chat_id, produced)
         for call in produced.tool_calls:
             await self.client.send_message(chat_id, f"· {call.name}")
+
+    async def _send_media(self, chat_id: int, produced: Message) -> None:
+        """Put the message's own media in the chat.
+
+        `spoken` renders text only, and the artifact loop sends files the task
+        wrote to disk. A browser screenshot is neither: it lives in the message
+        the agent produced. Without this it reached the store and Chainlit but
+        never the person who asked.
+        """
+
+        for index, part in enumerate(produced.content, start=1):
+            if part.kind == "text" or not part.data:
+                continue
+            name = f"{part.kind}-{index}{MEDIA_SUFFIXES.get(part.media_type or '', '.bin')}"
+            if part.kind == "image":
+                await self.client.send_photo(chat_id, name, part.data)
+            else:
+                await self.client.send_document(chat_id, name, part.data)
 
     async def _ask_pending_calls(
         self, harness: GeneralHarness, chat_id: int, thread_id: str
@@ -389,6 +421,7 @@ class TelegramAdapter:
     ) -> None:
         result = harness.finish_task(thread_id, view)
         await self.client.send_message(chat_id, spoken(result) or "The task produced no result.")
+        await self._send_media(chat_id, result)
         for artifact in (view.outcome.artifacts if view.outcome else ()):
             try:
                 path = harness.tasks.artifact_path(view, artifact)

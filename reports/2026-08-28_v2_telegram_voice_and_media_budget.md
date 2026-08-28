@@ -113,9 +113,17 @@ in Telegram. The code agrees — the adapter has no path for an image part.
 documents, and `_deliver` sends text and tool-call names. Neither sends media
 from a message's own content.
 
-So the browser screenshot exists in the store and would render in Chainlit, but
-a Telegram user never sees it. That is a real gap in the adapter rather than in
-the harness, and it is not fixed here.
+So the browser screenshot existed in the store and would render in Chainlit, but
+a Telegram user never saw it. That was a gap in the adapter, not in the harness.
+
+**Fixed.** `_send_media` now sends a message's own media parts: images through
+`sendPhoto` so they appear in the chat, everything else as a document. It runs
+on both the conversational and the task paths. `send_photo` falls back to
+`send_document` above Telegram's 10 MB photo cap, because a screenshot that is
+merely large is still worth seeing. Verified offline only — the model cannot be
+scripted to emit an image, so the delivery step is driven directly in
+`test_media_the_agent_produced_reaches_the_chat`. A live check needs one more
+GPU wake and has not been run.
 
 ## Checks
 

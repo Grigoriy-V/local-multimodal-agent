@@ -297,10 +297,12 @@ this roadmap when a concrete assistant use case needs them.
    deferred as separate work, not a blocker. A third, pre-existing defect was
    fixed alongside: importing `chainlit` loaded the developer's `.env` into the
    environment, so thirteen offline tests failed according to local
-   configuration. One gap stays open and is not a step-2 blocker: the Telegram
-   adapter delivers text, tool-call names and on-disk artifacts, but never the
-   media parts of a message, so a browser screenshot the task produced reaches
-   the store and Chainlit but not the Telegram user. Evidence:
+   configuration. A fourth was found by the human reading the delivered chat
+   against the store: the adapter sent text, tool-call names and on-disk
+   artifacts but never a message's own media, so the task's browser screenshot
+   reached the store and Chainlit and not the Telegram user. Images now go
+   through `sendPhoto`; this is verified offline and still wants one live
+   confirmation. Evidence:
    `reports/2026-08-28_v2_telegram_voice_and_media_budget.md`.
 3. Start step 3c control-plane work.
 4. Continue to step 4 document ingestion; it remains planned and has not been

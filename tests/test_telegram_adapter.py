@@ -19,7 +19,7 @@ from app.agent.runtime import Agent
 from app.agent.task_runtime import TaskRuntime
 from app.config import AgentSettings, TelegramSettings
 from app.memory import SqliteStore
-from app.models import Completion
+from app.models import Completion, ContentPart, Message
 from tests.fakes import ScriptedBackend, says
 from ui.telegram.adapter import (
     REFUSAL,
@@ -51,6 +51,7 @@ class FakeTelegram:
         self.sent: list[str] = []
         self.keyboards: list[dict[str, Any]] = []
         self.documents: list[str] = []
+        self.photos: list[str] = []
         self.files: dict[str, bytes] = {}
         self._next_message_id = 100
 
@@ -64,8 +65,12 @@ class FakeTelegram:
             return httpx.Response(200, content=self.files.get(name, b""))
 
         method = path.rsplit("/", 1)[-1]
-        if method == "sendDocument":
-            self.documents.append(request.url.path)
+        if method in {"sendDocument", "sendPhoto"}:
+            # Uploads are multipart, so the filename is read off the body rather
+            # than from JSON like every other call.
+            body = request.content.decode("latin-1")
+            name = body.partition('filename="')[2].partition('"')[0]
+            (self.photos if method == "sendPhoto" else self.documents).append(name)
             self.calls.append((method, {}))
             return httpx.Response(200, json={"ok": True, "result": {}})
 
@@ -326,6 +331,46 @@ async def test_an_ordinary_message_is_answered_into_the_chat(
     await adapter.handle_update(text_update("hello"))
 
     assert "Hello back." in telegram.sent
+
+
+async def test_media_the_agent_produced_reaches_the_chat(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """A browser screenshot lives in the message, not in an on-disk artifact.
+
+    The model cannot be scripted to emit one, so the delivery step is driven
+    directly; before this existed the picture stopped at the store.
+    """
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    produced = Message(
+        role="assistant",
+        content=[
+            ContentPart(kind="text", text="Here is the page."),
+            ContentPart(kind="image", data=b"\x89PNG", media_type="image/png"),
+        ],
+    )
+
+    await adapter._deliver(CHAT, produced)
+
+    assert "Here is the page." in telegram.sent
+    assert telegram.photos == ["image-2.png"]
+    assert telegram.documents == []
+
+
+async def test_non_image_media_is_sent_as_a_document(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    produced = Message(
+        role="assistant",
+        content=[ContentPart(kind="audio", data=b"RIFF", media_type="audio/wav")],
+    )
+
+    await adapter._deliver(CHAT, produced)
+
+    assert telegram.documents == ["audio-1.wav"]
+    assert telegram.photos == []
 
 
 async def test_the_conversation_is_stored_under_the_mapped_user(

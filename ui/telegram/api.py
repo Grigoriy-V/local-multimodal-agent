@@ -24,6 +24,8 @@ from app.config import TelegramSettings
 MAX_MESSAGE_CHARS = 4096
 # Documents Telegram will accept from a bot.
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+# Telegram's own cap for `sendPhoto`, which is much smaller than a document's.
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
 
 
 class TelegramError(RuntimeError):
@@ -160,23 +162,43 @@ class TelegramClient:
             "answerCallbackQuery", {"callback_query_id": callback_id, "text": text}
         )
 
-    async def send_document(self, chat_id: int, name: str, data: bytes) -> None:
-        if len(data) > MAX_DOCUMENT_BYTES:
+    async def _upload(
+        self, method: str, field: str, chat_id: int, name: str, data: bytes, limit: int
+    ) -> None:
+        if len(data) > limit:
             await self.send_message(
                 chat_id, f"{name} is too large to send ({len(data)} bytes)."
             )
             return
         try:
             response = await self._client.post(
-                "/sendDocument",
+                f"/{method}",
                 data={"chat_id": str(chat_id)},
-                files={"document": (name, data)},
+                files={field: (name, data)},
             )
         except httpx.HTTPError as error:
             raise TelegramError(f"telegram could not be reached ({error})") from error
         body = response.json()
         if not body.get("ok"):
-            raise TelegramError(f"telegram refused sendDocument: {body.get('description')}")
+            raise TelegramError(f"telegram refused {method}: {body.get('description')}")
+
+    async def send_document(self, chat_id: int, name: str, data: bytes) -> None:
+        await self._upload(
+            "sendDocument", "document", chat_id, name, data, MAX_DOCUMENT_BYTES
+        )
+
+    async def send_photo(self, chat_id: int, name: str, data: bytes) -> None:
+        """Send an image so it appears in the chat rather than as a file.
+
+        Telegram's photo limit is far lower than its document limit, and a
+        screenshot that is merely large is still worth seeing, so anything over
+        it falls back to the document path instead of being dropped.
+        """
+
+        if len(data) > MAX_PHOTO_BYTES:
+            await self.send_document(chat_id, name, data)
+            return
+        await self._upload("sendPhoto", "photo", chat_id, name, data, MAX_PHOTO_BYTES)
 
     async def download(self, file_id: str) -> bytes:
         """Fetch an uploaded file's bytes through the two-step file API."""
