@@ -70,6 +70,20 @@ class AgentSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENT_", env_file=".env", extra="ignore")
 
     database: str = "data/memory.sqlite3"
+    # Where the deployed profile keeps conversations instead. Empty means the
+    # SQLite file above, which is what the local profile uses and will keep
+    # using: a personal machine has one process and a disk under it.
+    #
+    # `PostgresStore` is provider-agnostic; everything a provider needs lives in
+    # this one string. For Neon that means the **pooled** endpoint — a fleet
+    # that scales to zero opens and drops connections in bursts, and a direct
+    # endpoint runs out of them long before the database runs out of capacity —
+    # together with `sslmode=require`. It is a credential and belongs in the
+    # environment or a platform secret, never in the repository.
+    database_url: str = ""
+    # Keeps this application's tables together in a database that may hold
+    # other things, and gives a test a namespace of its own.
+    database_schema: str = "public"
     # In-flight turns only, in LangGraph's own schema. Kept apart from the
     # database so that discarding it costs no conversation.
     checkpoints: str = "data/checkpoints.sqlite3"

@@ -87,15 +87,25 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
 
 ### Queue
 
-1. **Control plane.** The step previously numbered 3c. A second store
-   implementation on external Postgres and a matching LangGraph checkpointer; a
-   webhook that only validates, persists and spawns, with the agent loop in a
-   separate worker; and file tools reimplemented over an ephemeral sandbox
-   rather than a local path. The Telegram secret token and an allowed-user list
-   are checked in the application, because platform proxy auth cannot be used
-   for a Telegram webhook. Registering the webhook retires the polling transport
-   rather than joining it: Telegram refuses `getUpdates` while a webhook is set.
-   It deploys new components; it does not redeploy `assistant-llm-v2`.
+1. **Control plane.** The step previously numbered 3c. It deploys new
+   components; it does not redeploy `assistant-llm-v2`.
+
+   - **Written, never run.** `PostgresStore` is the second `ConversationStore`,
+     provider-agnostic: the deployed database is **Neon**, reached through its
+     pooled endpoint because a fleet that scales to zero opens and drops
+     connections in bursts, and everything provider-specific lives in
+     `AGENT_DATABASE_URL`. SQLite stays the local backend. It joins the contract
+     suite only when `AGENT_TEST_DATABASE_URL` is set, so no offline test can
+     reach a real database. Nothing has executed a statement yet.
+     `reports/2026-08-28_v2_control_plane_postgres_store.md`.
+   - The LangGraph checkpointer on the same database.
+   - A webhook that only validates, persists and spawns, with the agent loop in
+     a separate worker. The Telegram secret token and an allowed-user list are
+     checked in the application, because platform proxy auth cannot be used for
+     a Telegram webhook. Registering the webhook retires the polling transport
+     rather than joining it: Telegram refuses `getUpdates` while a webhook is
+     set.
+   - File tools over an ephemeral sandbox rather than a local path.
 
 2. **Document ingestion.** PDF, Markdown, text and office documents as a
    first-class capability reusable by chat, retrieval and coding work, with page

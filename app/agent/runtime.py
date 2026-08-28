@@ -30,8 +30,7 @@ from app.capabilities import (
 from app.config import AgentSettings, ModelSettings
 from app.context import Context, ContextPolicy, build_prelude
 from app.context.window import DEFAULT_SYSTEM_PROMPT
-from app.memory import LOCAL_USER_ID, ConversationStore, Thread
-from app.memory.store import SqliteStore
+from app.memory import LOCAL_USER_ID, ConversationStore, Thread, open_store
 from app.models import ContentPart, Message, ModelBackend, Usage
 from app.models.openai_compatible import OpenAICompatibleBackend
 from app.tools import CapabilityGrant, CapabilityRegistry, Toolbox, memory_tools
@@ -344,7 +343,7 @@ def create_agent(
     workspace.mkdir(parents=True, exist_ok=True)
     return Agent(
         backend=OpenAICompatibleBackend(model_settings or ModelSettings()),
-        store=SqliteStore(agent_settings.database),
+        store=open_store(agent_settings),
         workspace=workspace,
         policy=policy,
         checkpoints=agent_settings.checkpoints,

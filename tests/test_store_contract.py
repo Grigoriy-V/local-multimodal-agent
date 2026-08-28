@@ -13,6 +13,8 @@ stops.
 
 from __future__ import annotations
 
+import os
+import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -24,15 +26,40 @@ from app.models import ContentPart, Message
 ALICE = "user-alice"
 BOB = "user-bob"
 
+# The PostgreSQL implementation answers the same questions over a real database
+# or not at all. There is no fake: a store that passes against a stand-in has
+# demonstrated nothing about the thing it will actually run on. So the entry
+# below appears only when a DSN is configured, and the offline suite stays
+# offline — `AGENT_TEST_DATABASE_URL` is deliberately its own variable, so
+# running the tests can never reach the deployed database by accident.
+POSTGRES_DSN = os.environ.get("AGENT_TEST_DATABASE_URL", "")
+
+
+def postgres_store(_tmp_path: Path) -> ConversationStore:
+    """A store in a schema of its own, so tests cannot see each other's rows."""
+
+    from app.memory.postgres import PostgresStore
+
+    return PostgresStore(POSTGRES_DSN, schema=f"contract_{uuid.uuid4().hex[:12]}")
+
+
 STORE_FACTORIES: dict[str, Callable[[Path], ConversationStore]] = {
     "sqlite": lambda tmp_path: SqliteStore(tmp_path / "contract.sqlite3"),
 }
+if POSTGRES_DSN:
+    STORE_FACTORIES["postgres"] = postgres_store
 
 
 @pytest.fixture(params=sorted(STORE_FACTORIES))
 def store(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[ConversationStore]:
-    with STORE_FACTORIES[request.param](tmp_path) as opened:
+    opened = STORE_FACTORIES[request.param](tmp_path)
+    try:
         yield opened
+    finally:
+        drop = getattr(opened, "drop_schema", None)
+        if drop is not None:
+            drop()
+        opened.close()
 
 
 def user(value: str) -> Message:

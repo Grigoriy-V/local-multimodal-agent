@@ -30,6 +30,12 @@ ui = [
 deploy = [
     "modal>=1.0",
 ]
+# The deployed profile's conversation store. Not installed locally by default:
+# the local profile keeps using SQLite, and `app/memory/open.py` imports this
+# driver only when a database URL is configured.
+postgres = [
+    "psycopg[binary]>=3.2",
+]
 
 [build-system]
 requires = ["hatchling"]

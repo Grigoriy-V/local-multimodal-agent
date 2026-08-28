@@ -1,0 +1,85 @@
+"""How a stored message is encoded, shared by every SQL implementation.
+
+A message is the same message whichever database holds it: the same JSON
+content, the same base64 media, the same tool calls. The encoding lives here so
+a second implementation cannot quietly invent a second format — the contract
+suite checks behaviour, and behaviour would not notice.
+
+Media is stored rather than dropped, so a reloaded conversation is the same
+conversation.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
+
+from app.models import ContentPart, Message, ToolCall
+
+
+def now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def dump_content(parts: Sequence[ContentPart]) -> str:
+    payload = [
+        {
+            "kind": part.kind,
+            "text": part.text,
+            "data": base64.b64encode(part.data).decode("ascii") if part.data else None,
+            "media_type": part.media_type,
+        }
+        for part in parts
+    ]
+    return json.dumps(payload)
+
+
+def load_content(raw: str) -> list[ContentPart]:
+    return [
+        ContentPart(
+            kind=item["kind"],
+            text=item["text"],
+            data=base64.b64decode(item["data"]) if item["data"] else None,
+            media_type=item["media_type"],
+        )
+        for item in json.loads(raw)
+    ]
+
+
+def dump_tool_calls(calls: Sequence[ToolCall]) -> str | None:
+    if not calls:
+        return None
+    return json.dumps(
+        [{"id": c.id, "name": c.name, "arguments": c.arguments} for c in calls]
+    )
+
+
+def load_tool_calls(raw: str | None) -> tuple[ToolCall, ...]:
+    if not raw:
+        return ()
+    return tuple(
+        ToolCall(id=c["id"], name=c["name"], arguments=c["arguments"])
+        for c in json.loads(raw)
+    )
+
+
+def row_to_message(row: Mapping[str, Any]) -> Message:
+    return Message(
+        role=row["role"],
+        content=load_content(row["content"]),
+        tool_calls=load_tool_calls(row["tool_calls"]),
+        tool_call_id=row["tool_call_id"],
+    )
+
+
+def opening_text(raw: str | None) -> str:
+    """The words a thread began with. A picture on its own leaves none."""
+
+    if not raw:
+        return ""
+    return " ".join(
+        part.text or "" for part in load_content(raw) if part.kind == "text"
+    ).strip()

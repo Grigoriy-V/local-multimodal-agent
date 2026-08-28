@@ -13,17 +13,21 @@ deployed profile does not share that property and gets its own implementation of
 
 from __future__ import annotations
 
-import base64
-import json
 import re
 import sqlite3
-from collections.abc import Iterable, Sequence
-from datetime import UTC, datetime
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from app.memory.base import LOCAL_USER_ID, ConversationStore, Thread
-from app.models import ContentPart, Message, ToolCall
+from app.memory.records import (
+    dump_content,
+    dump_tool_calls,
+    now,
+    opening_text,
+    row_to_message,
+)
+from app.models import Message
 
 # Bumped whenever the schema changes. `PRAGMA user_version` is SQLite's own
 # integer on the file, so the database states its shape rather than the code
@@ -76,67 +80,6 @@ END;
 """
 
 TOKEN = re.compile(r"\w+", re.UNICODE)
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def dump_content(parts: Sequence[ContentPart]) -> str:
-    """Serialize content parts. Media is stored, not dropped, so a reloaded
-    conversation is the same conversation."""
-
-    payload = [
-        {
-            "kind": part.kind,
-            "text": part.text,
-            "data": base64.b64encode(part.data).decode("ascii") if part.data else None,
-            "media_type": part.media_type,
-        }
-        for part in parts
-    ]
-    return json.dumps(payload)
-
-
-def load_content(raw: str) -> list[ContentPart]:
-    return [
-        ContentPart(
-            kind=item["kind"],
-            text=item["text"],
-            data=base64.b64decode(item["data"]) if item["data"] else None,
-            media_type=item["media_type"],
-        )
-        for item in json.loads(raw)
-    ]
-
-
-def _dump_tool_calls(calls: Sequence[ToolCall]) -> str | None:
-    if not calls:
-        return None
-    return json.dumps([{"id": c.id, "name": c.name, "arguments": c.arguments} for c in calls])
-
-
-def _load_tool_calls(raw: str | None) -> tuple[ToolCall, ...]:
-    if not raw:
-        return ()
-    return tuple(ToolCall(id=c["id"], name=c["name"], arguments=c["arguments"]) for c in json.loads(raw))
-
-
-def _row_to_message(row: sqlite3.Row) -> Message:
-    return Message(
-        role=row["role"],
-        content=load_content(row["content"]),
-        tool_calls=_load_tool_calls(row["tool_calls"]),
-        tool_call_id=row["tool_call_id"],
-    )
-
-
-def _opening_text(raw: str | None) -> str:
-    """The words a thread began with. A picture on its own leaves none."""
-
-    if not raw:
-        return ""
-    return " ".join(part.text or "" for part in load_content(raw) if part.kind == "text").strip()
 
 
 def match_query(query: str) -> str:
@@ -199,11 +142,11 @@ class SqliteStore(ConversationStore):
     # --- threads -------------------------------------------------------------
 
     def ensure_thread(self, thread_id: str, user_id: str) -> None:
-        now = _now()
+        stamp = now()
         self._db.execute(
             "INSERT INTO threads (id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
             " ON CONFLICT(id) DO NOTHING",
-            (thread_id, user_id, now, now),
+            (thread_id, user_id, stamp, stamp),
         )
         self._db.commit()
 
@@ -230,7 +173,7 @@ class SqliteStore(ConversationStore):
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 messages=row["messages"],
-                opening=_opening_text(row["opening"]),
+                opening=opening_text(row["opening"]),
             )
             for row in rows
         ]
@@ -270,7 +213,7 @@ class SqliteStore(ConversationStore):
             "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM messages WHERE thread_id = ?",
             (thread_id,),
         ).fetchone()["next"]
-        now = _now()
+        stamp = now()
         for message in messages:
             self._db.execute(
                 "INSERT INTO messages"
@@ -281,13 +224,13 @@ class SqliteStore(ConversationStore):
                     position,
                     message.role,
                     dump_content(message.content),
-                    _dump_tool_calls(message.tool_calls),
+                    dump_tool_calls(message.tool_calls),
                     message.tool_call_id,
-                    now,
+                    stamp,
                 ),
             )
             position += 1
-        self._db.execute("UPDATE threads SET updated_at = ? WHERE id = ?", (now, thread_id))
+        self._db.execute("UPDATE threads SET updated_at = ? WHERE id = ?", (stamp, thread_id))
         self._db.commit()
         return position
 
@@ -301,7 +244,7 @@ class SqliteStore(ConversationStore):
         if limit is not None:
             sql += " LIMIT ?"
             parameters.append(limit)
-        return [_row_to_message(row) for row in self._db.execute(sql, parameters)]
+        return [row_to_message(row) for row in self._db.execute(sql, parameters)]
 
     def message_count(self, thread_id: str) -> int:
         row = self._db.execute(
@@ -324,7 +267,7 @@ class SqliteStore(ConversationStore):
     def set_summary(self, thread_id: str, text: str, through: int) -> None:
         cursor = self._db.execute(
             "UPDATE threads SET summary = ?, summarized_through = ?, updated_at = ? WHERE id = ?",
-            (text, through, _now(), thread_id),
+            (text, through, now(), thread_id),
         )
         if cursor.rowcount == 0:
             raise KeyError(f"no such thread: {thread_id!r}")
@@ -338,7 +281,7 @@ class SqliteStore(ConversationStore):
             raise ValueError("a fact cannot be empty")
         cursor = self._db.execute(
             "INSERT INTO facts (text, user_id, thread_id, created_at) VALUES (?, ?, ?, ?)",
-            (text, user_id, thread_id, _now()),
+            (text, user_id, thread_id, now()),
         )
         self._db.commit()
         return int(cursor.lastrowid or 0)
