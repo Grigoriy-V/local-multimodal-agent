@@ -137,7 +137,14 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    rather than joining it: Telegram refuses `getUpdates` while a webhook is set.
    It deploys new components; it does not redeploy `assistant-llm-v2`.
 
-2. **Live product evidence.** Nothing from the daily-use work above has been
+2. **Document ingestion.** PDF, Markdown, text and office documents as a
+   first-class capability reusable by chat, retrieval and coding work, with page
+   and section boundaries preserved. Attachments today accept images and audio
+   only. It comes before the two items below on purpose: evidence collected
+   without it would be evidence for a product nobody has, and a measurement
+   taken before it would be invalidated by the input sizes it introduces.
+
+3. **Live product evidence.** Nothing from the daily-use work above has been
    seen by a user: that the assistant now answers a capability question
    correctly, that `/can` agrees with it, and that the shaped plan and result
    read well in a real chat. Alongside it, evidence that the harness is
@@ -148,11 +155,13 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    from bitrate and language needs one clean comparison of the same sentence as
    Opus and WAV.
 
-3. **Measurement, metrics, economics, optimization, in that order.** Nothing
-   here is tuning by feel. Today's 15-17 tok/s is `completion_tokens / wall
-   time` over 48-token answers from a Windows client, so it conflates network,
-   prefill and decode; there is no prefill measurement on the A10, and whether
-   prefix caching is on has never been read out of a startup log.
+4. **Measurement, metrics, economics, optimization, in that order.** Last,
+   because a measurement is only worth taking once the capabilities that
+   determine what a turn costs are in place. Nothing here is tuning by feel:
+   today's 15-17 tok/s is `completion_tokens / wall time` over 48-token answers
+   from a Windows client, so it conflates network, prefill and decode; there is
+   no prefill measurement on the A10, and whether prefix caching is on has never
+   been read out of a startup log.
 
    - Measure first: one long-output run separating prefill from decode, and the
      same for input size, so later changes have a baseline to beat.
@@ -171,11 +180,6 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    - Only then optimization: prefix caching confirmed rather than assumed,
      speculative decoding, and the router call that costs a second full-context
      request on every message.
-
-4. **Document ingestion.** PDF, Markdown, text and office documents as a
-   first-class capability reusable by chat, retrieval and coding work, with page
-   and section boundaries preserved. Attachments today accept images and audio
-   only.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the
