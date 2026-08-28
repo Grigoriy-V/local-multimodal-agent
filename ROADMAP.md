@@ -325,6 +325,32 @@ this roadmap when a concrete assistant use case needs them.
    - Evidence that it is genuinely agentic rather than demo-shaped: multi-step
      work that survives a restart, asks when it should and does not claim a
      result it did not verify.
+5. Measurement, metrics, economics and optimization, in that order. Nothing here
+   is tuning by feel: today's throughput numbers (15-17 tok/s) are
+   `completion_tokens / wall time` over 48-token answers measured from a Windows
+   client, so they conflate network, prefill and decode and are not a generation
+   rate. There is no prefill measurement on the A10 at all, and whether prefix
+   caching is on has never been read out of a startup log.
+   - Measure first: one long-output run that separates prefill from decode, and
+     the same for input size, so later changes have a baseline to beat.
+   - **GPU active seconds per successful user turn** is the primary metric, not
+     total GPU spend. Spend says what was consumed; this says what a turn costs
+     and whether a change helped. "Successful" needs a definition that a failed
+     or abandoned turn cannot quietly satisfy.
+   - Real economics on top of it: cost per turn and per user, with the harness's
+     two model calls per message counted honestly. Modal Billing reports by App
+     in hourly buckets, so per-turn cost is derived from container lifetime and
+     must be labelled as derived.
+   - Adaptive scaledown instead of one fixed number. Measured wake from a warm
+     snapshot is about 8 s on the route log; Modal's floor is 2 s. When a person
+     is slow — longer than roughly 30 s between messages — hold nothing and drop
+     to the minimum. When messages come in a run, raise the window to 15-30 s so
+     nobody waits on a cold start. `deploy/modal/autoscale.py` already changes
+     this over the network without a deploy, which is what makes it feasible;
+     note that a deploy resets it to `SCALEDOWN_WINDOW` in `model_app.py`.
+   - Only then optimization: prefix caching confirmed rather than assumed,
+     speculative decoding, and the router call that costs a second full-context
+     request on every message.
 
 ## Out of scope
 
