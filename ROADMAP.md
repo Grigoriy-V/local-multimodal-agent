@@ -60,15 +60,16 @@ reconsidered; this roadmap wins any conflict.
 - The Version 2 direction is agreed and recorded below. Step 1 is closed and
   step 2 is implemented; the local database is at schema version 1 and both
   conversations and files are scoped by user. Step 3a is closed. Step 3b is
-  implemented and working, but not yet measured where it matters. Sleep mode,
-  snapshot creation and snapshot restore all succeed for Gemma 4 12B on an A10
-  after an explicit `--gpu-memory-utilization 0.80`; the engine wakes in 1.0 s
-  and answers warm in 1.3 s. Evidence:
-  `reports/2026-08-28_v2_step3b_snapshot_boot.md`, with the OOM that preceded it
-  in `reports/2026-08-28_v2_step3b_first_boot_failure.md`. **No restored
-  cold-start number exists yet**, which is the number the whole step is for. The
-  baseline `assistant-llm` still serves `MODEL_ENDPOINT`. Step 3c is not
-  authorized.
+  implemented and its first restored cold start measured at **25.0 s**, roughly
+  an 8x reduction against the baseline's 189-201 s, with a bearer-token proxy
+  credential confirmed working on the `.modal.run` endpoint. One restored wake
+  is not acceptance-grade evidence by itself — Modal may build several
+  worker-type-specific snapshots — and the same run found audio broken
+  (`vllm[audio]` was missing from the image; fixed, not yet redeployed or
+  reverified). Evidence: `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
+  building on `reports/2026-08-28_v2_step3b_snapshot_boot.md` and
+  `reports/2026-08-28_v2_step3b_first_boot_failure.md`. The baseline
+  `assistant-llm` still serves `MODEL_ENDPOINT`. Step 3c is not authorized.
 
 ## Closed stages
 
@@ -231,15 +232,11 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Authorize the restored cold-start measurement: let `assistant-llm-v2` scale
-   to zero, then invoke it at least twice, taking the timing from the container
-   log rather than from the client — a plain request is answered `303` while the
-   container is still coming up, so it cannot time readiness. Two wakes because
-   Modal may build several worker-type-specific snapshots.
-2. Then verify image and audio against the restored endpoint, and test whether a
-   joined proxy token works as a bearer token on `.modal.run`. That last one
-   decides whether `OpenAICompatibleBackend` needs the change step 3a concluded
-   it did not.
+1. Redeploy `assistant-llm-v2` with the `vllm[audio]` fix. Free; starts no
+   container.
+2. Authorize the second restored-wake measurement, with `--auth headers` this
+   time. Text, image and audio must all pass before this counts as
+   acceptance-grade evidence for step 3b's cold-start claim.
 3. Accept step 2 against the accepted endpoint: one conversational turn and one
    work request through Telegram. The baseline endpoint can prove integration,
    but the optimized replacement should become the normal product endpoint.

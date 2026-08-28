@@ -192,7 +192,15 @@ image = (
     modal.Image.from_registry("nvidia/cuda:12.9.0-devel-ubuntu22.04", add_python="3.12")
     .entrypoint([])
     .uv_pip_install(
-        f"vllm=={VLLM_VERSION}",
+        # Plain `vllm` binds a placeholder audio module at import time; nothing
+        # short of the `[audio]` extra replaces it, and restarting after
+        # installing its dependencies separately does not help either. Recorded
+        # the hard way locally in `reports/2026-08-01_gemma4_endpoint_smoke.md`
+        # and rediscovered here when `assistant-llm-v2` answered audio with
+        # `Please install vllm[audio] for audio support` — the baseline was
+        # never actually tested against an audio request, so this image
+        # inherited the omission rather than a working configuration.
+        f"vllm[audio]=={VLLM_VERSION}",
         f"transformers=={TRANSFORMERS_VERSION}",
         "huggingface_hub[hf_transfer]",
     )
