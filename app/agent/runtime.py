@@ -14,13 +14,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-import aiosqlite
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from app.agent.graph import build_agent, latest_text
+from app.checkpoints import CheckpointHandle
 from app.capabilities import (
     CHAT_DELIVERY,
     Delivery,
@@ -92,6 +90,7 @@ class Agent:
         policy: ContextPolicy | None = None,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         checkpoints: str | Path | None = None,
+        checkpoint_database_url: str = "",
         context_fraction: float = 0.6,
         capability_registry: CapabilityRegistry | None = None,
         capability_grant: CapabilityGrant | None = None,
@@ -110,8 +109,15 @@ class Agent:
         self.capability_registry = capability_registry or CapabilityRegistry(self.workspace)
         self.capability_grant = capability_grant or self.capability_registry.grant()
         self._graphs: dict[str, CompiledStateGraph] = {}
-        self._connection: aiosqlite.Connection | None = None
-        self._saver: AsyncSqliteSaver | None = None
+        self._checkpoint_handle = (
+            CheckpointHandle(
+                checkpoints,
+                database_url=checkpoint_database_url,
+                allowed_types=CHECKPOINT_TYPES,
+            )
+            if checkpoints is not None
+            else None
+        )
         self._limit: int | None = None
         self._asked_the_limit = False
         self._usage = Usage()
@@ -135,23 +141,16 @@ class Agent:
         used = self._usage.input_tokens
         return None if used is None else Fill(used=used, budget=await self.budget())
 
-    async def _checkpointer(self) -> AsyncSqliteSaver | None:
+    async def _checkpointer(self) -> object | None:
         """Open the checkpoint file on first use.
 
         Lazily, because building an agent is synchronous and opening the file is
         not; and because an agent that never runs a turn should not create one.
         """
 
-        if self.checkpoints is None:
+        if self._checkpoint_handle is None:
             return None
-        if self._saver is None:
-            path = Path(self.checkpoints)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            self._connection = await aiosqlite.connect(str(path))
-            serde = JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
-            self._saver = AsyncSqliteSaver(self._connection, serde=serde)
-            await self._saver.setup()
-        return self._saver
+        return await self._checkpoint_handle.open()
 
     def toolbox(self, thread_id: str) -> Toolbox:
         """The tools this thread's graph is compiled with.
@@ -285,8 +284,8 @@ class Agent:
         close = getattr(self.backend, "aclose", None)
         if close is not None:
             await close()
-        if self._connection is not None:
-            await self._connection.close()
+        if self._checkpoint_handle is not None:
+            await self._checkpoint_handle.close()
         self.store.close()
 
 
@@ -347,6 +346,7 @@ def create_agent(
         workspace=workspace,
         policy=policy,
         checkpoints=agent_settings.checkpoints,
+        checkpoint_database_url=agent_settings.database_url,
         context_fraction=agent_settings.context_fraction,
         user_id=user_id,
         delivery=delivery,

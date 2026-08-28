@@ -207,6 +207,7 @@ def create_harness() -> GeneralHarness:
             backend=agent.backend,
             workspace=agent.workspace,
             checkpoints=settings.task_checkpoints,
+            checkpoint_database_url=settings.database_url,
         ),
     )
 

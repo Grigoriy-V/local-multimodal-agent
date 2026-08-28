@@ -13,13 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-import aiosqlite
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from app.agent.runtime import CHECKPOINT_TYPES
+from app.checkpoints import CheckpointHandle
 from app.agent.task_validator import ModelTaskValidator
 from app.agent.task_graph import (
     ImplementationResult,
@@ -71,6 +69,7 @@ class TaskRuntime:
         checkpoints: str | Path,
         tester: Tester | None = None,
         budget: TaskBudget | None = None,
+        checkpoint_database_url: str = "",
     ) -> None:
         self.backend = backend
         self.workspace = Path(workspace).resolve()
@@ -79,8 +78,12 @@ class TaskRuntime:
         self.budget = budget or TaskBudget(max_seconds=300.0)
         if not self.workspace.is_dir():
             raise ValueError(f"task workspace {self.workspace} is not a directory")
-        self._connection: aiosqlite.Connection | None = None
-        self._saver: AsyncSqliteSaver | None = None
+        self._checkpoint_handle = CheckpointHandle(
+            self.checkpoints,
+            database_url=checkpoint_database_url,
+            allowed_types=CHECKPOINT_TYPES,
+        )
+        self._saver: object | None = None
         self._graph: CompiledStateGraph | None = None
 
     @staticmethod
@@ -94,11 +97,7 @@ class TaskRuntime:
 
     async def _compiled(self) -> CompiledStateGraph:
         if self._graph is None:
-            self.checkpoints.parent.mkdir(parents=True, exist_ok=True)
-            self._connection = await aiosqlite.connect(str(self.checkpoints))
-            serde = JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_TYPES)
-            self._saver = AsyncSqliteSaver(self._connection, serde=serde)
-            await self._saver.setup()
+            self._saver = await self._checkpoint_handle.open()
             self._graph = build_model_task_graph(
                 self.backend,
                 self.workspace,
@@ -250,8 +249,6 @@ class TaskRuntime:
         return target
 
     async def aclose(self) -> None:
-        if self._connection is not None:
-            await self._connection.close()
-            self._connection = None
-            self._saver = None
-            self._graph = None
+        await self._checkpoint_handle.close()
+        self._saver = None
+        self._graph = None

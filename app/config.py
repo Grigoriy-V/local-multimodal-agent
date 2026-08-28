@@ -41,6 +41,9 @@ class TelegramSettings(BaseSettings):
     )
 
     token: str = ""
+    # Telegram includes this exact value in every webhook request. It is not
+    # the bot token and must be configured independently.
+    webhook_secret: str = ""
     api_base: str = "https://api.telegram.org"
     # Comma-separated numeric Telegram user ids. Empty means nobody, because the
     # safe answer has to be the default: an assistant reachable by whoever finds

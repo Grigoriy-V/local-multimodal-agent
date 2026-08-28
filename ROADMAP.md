@@ -98,13 +98,20 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      suite only when `AGENT_TEST_DATABASE_URL` is set, so no offline test can
      reach a real database. Nothing has executed a statement yet.
      `reports/2026-08-28_v2_control_plane_postgres_store.md`.
-   - The LangGraph checkpointer on the same database.
-   - A webhook that only validates, persists and spawns, with the agent loop in
-     a separate worker. The Telegram secret token and an allowed-user list are
-     checked in the application, because platform proxy auth cannot be used for
-     a Telegram webhook. Registering the webhook retires the polling transport
-     rather than joining it: Telegram refuses `getUpdates` while a webhook is
-     set.
+   - **Offline foundation written, never connected or spawned.** The local and
+     PostgreSQL LangGraph savers now share one lifecycle; webhook validation,
+     persist-before-spawn, a leased update inbox and the worker call boundary
+     are covered offline. The platform HTTP/spawn adapter, live database
+     migrations, ephemeral sandbox and deployment remain open.
+     `reports/2026-08-28_v2_control_plane_offline_foundation.md`.
+   - Live setup and contract acceptance for the conversation store,
+     checkpointer and update inbox on the same database.
+   - The platform HTTP/spawn adapter around the written webhook core, with the
+     agent loop in a separate worker. The Telegram secret token and an
+     allowed-user list are checked in the application, because platform proxy
+     auth cannot be used for a Telegram webhook. Registering the webhook retires
+     the polling transport rather than joining it: Telegram refuses
+     `getUpdates` while a webhook is set.
    - File tools over an ephemeral sandbox rather than a local path.
 
 2. **Document ingestion.** PDF, Markdown, text and office documents as a

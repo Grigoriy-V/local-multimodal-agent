@@ -279,6 +279,7 @@ class TelegramAdapter:
                 backend=agent.backend,
                 workspace=agent.workspace,
                 checkpoints=self.agent_settings.task_checkpoints,
+                checkpoint_database_url=self.agent_settings.database_url,
             ),
         )
 
