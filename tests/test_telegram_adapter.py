@@ -33,10 +33,10 @@ from ui.telegram.adapter import (
     TelegramAdapter,
     canonical_user_id,
     current_thread,
-    read_update,
     start_thread,
     task_result_text,
 )
+from ui.telegram.wire import read_update
 from ui.telegram.api import (
     MAX_MESSAGE_CHARS,
     Formatted,

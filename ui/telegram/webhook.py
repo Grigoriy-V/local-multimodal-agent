@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.config import TelegramSettings
-from ui.telegram.adapter import read_update
 from ui.telegram.inbox import UpdateInbox
+from ui.telegram.wire import read_update
 
 
 MAX_UPDATE_BYTES = 1024 * 1024

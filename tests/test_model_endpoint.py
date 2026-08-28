@@ -175,10 +175,14 @@ class DeploymentIdentityTests(unittest.TestCase):
         self.assertEqual(model_app.MIN_CONTAINERS, 0)
         self.assertEqual(model_app.MAX_CONTAINERS, 1)
 
-    def test_scales_down_at_the_platform_floor(self):
-        # Two seconds is a decision, not a leftover: idle GPU was more than half
-        # the bill, and the accepted price is a cold start on an approval pause.
-        self.assertEqual(model_app.SCALEDOWN_WINDOW, 2)
+    def test_the_idle_window_is_a_priced_choice_not_a_leftover(self):
+        # Twelve seconds: long enough that an ordinary back-and-forth finds the
+        # container warm, short enough to give up two thirds of the idle cost a
+        # 30 s window carried. Still below the ~20 s a waiting approval needs,
+        # which is the accepted pause. Changing it is a money decision, so it
+        # should fail here and be re-argued rather than drift.
+        self.assertEqual(model_app.SCALEDOWN_WINDOW, 12)
+        self.assertLess(model_app.SCALEDOWN_WINDOW, 20)
 
     def test_the_whole_start_path_fits_under_what_modal_waits_for(self):
         # Not just each budget: their sum. Readiness alone was inside the

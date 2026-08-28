@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import json
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -182,3 +186,58 @@ async def test_worker_releases_failed_update_for_a_later_retry() -> None:
         await worker.run(7)
 
     assert inbox.retried == [(7, "RuntimeError: failed turn")]
+
+
+def test_accepting_an_update_does_not_load_the_agent_stack() -> None:
+    """The webhook's import cost is a product decision, so it is a test.
+
+    A cold deployed webhook took 4.69 s to validate an update and write one
+    row. Two thirds of its import time was LangGraph and the harness, reached
+    through a single `read_update` import from the adapter — code the webhook
+    never executes. Nothing warns when an import like that comes back, so this
+    is the warning.
+
+    A subprocess because the assertion is about a fresh interpreter; by the
+    time the rest of this suite has run, everything is in `sys.modules`.
+    """
+
+    probe = (
+        "import sys;"
+        "import ui.telegram.webhook, ui.telegram.inbox;"
+        "heavy = sorted("
+        "  name for name in ('langgraph', 'langchain_core', 'langsmith', 'app.agent',"
+        "                    'ui.telegram.adapter')"
+        "  if any(loaded == name or loaded.startswith(name + '.') for loaded in sys.modules)"
+        ");"
+        "print(','.join(heavy))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
+
+
+def test_the_wire_format_module_imports_nothing_from_the_application() -> None:
+    """`wire.py` is only worth having while it stays free of dependencies."""
+
+    source = (
+        Path(__file__).resolve().parents[1] / "ui" / "telegram" / "wire.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported = {
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    } | {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+
+    assert imported <= {"__future__", "dataclasses", "typing"}

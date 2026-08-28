@@ -37,6 +37,27 @@ control_image = (
     .env({"PYTHONPATH": "/root/project"})
 )
 
+# Load the webhook's modules in the container's global scope. `Image.imports` is
+# what makes that safe: the block runs only inside the container, so importing
+# this file locally to deploy it stays as cheap as before. The function bodies
+# below still import what they use, which after this is a dictionary lookup —
+# they are left that way so each function still reads as a list of what it
+# depends on.
+#
+# Only the webhook's path is here, deliberately. Importing the agent stack would
+# put it in every webhook container too, and that import is exactly what this
+# function's cold start was paying for: 1.67-3.86 s of execution before the
+# stack was moved out of reach, 0.34-0.46 s after.
+#
+# The worker keeps its imports inside itself until its own cold start has been
+# measured rather than assumed.
+with control_image.imports():
+    from fastapi.responses import JSONResponse  # noqa: F401
+
+    from app.config import AgentSettings, TelegramSettings  # noqa: F401
+    from ui.telegram.inbox import PostgresUpdateInbox  # noqa: F401
+    from ui.telegram.webhook import TelegramWebhook  # noqa: F401
+
 
 def _settings() -> tuple[object, object]:
     from app.config import AgentSettings, TelegramSettings
@@ -318,12 +339,37 @@ async def _spawn(update_id: int) -> None:
     memory=512,
     min_containers=0,
     max_containers=20,
-    # Every message paid about three seconds of cold start here, because two
-    # seconds is shorter than any pause between two messages. Fifteen costs
-    # $0.000066 of a quarter-core and removes that from the common case.
-    scaledown_window=15,
+    # 60 s, and the reasoning is the opposite of the GPU's. What is left of this
+    # function's cold start is ~3.5 s of Modal scheduling that no code removes —
+    # measured, after both the imports and a memory snapshot were tried against
+    # it. The only remaining lever is not being cold, and here that is nearly
+    # free: a quarter-core with 512 MiB costs $0.0000044 a second, so holding the
+    # window open for a full minute after the last update costs $0.00026. A
+    # hundred wakes a day is under a dollar a month.
+    #
+    # A minute is chosen against how people actually type: it covers reading a
+    # reply and answering it, which is the case that was paying 3.5 s at 15 s.
+    scaledown_window=60,
     timeout=30,
     include_source=False,
+    # No `enable_memory_snapshot`. It was tried here and measured over nine cold
+    # starts, and the numbers said to take it out:
+    #
+    #     before snapshots      mean 5.36 s   execution 1.67-3.86 s
+    #     snapshot creation     mean 8.56 s   6 of the 9 cold starts
+    #     snapshot restore      mean 4.06 s   execution 0.34-0.46 s
+    #
+    # A restore is only about a second better than no snapshot, and subtracting
+    # execution shows why: the container itself still takes ~3.5 s either way.
+    # Restoring skips the initialization, not the scheduling — and the
+    # initialization had already been removed by keeping the agent stack out of
+    # this function's imports. The two are substitutes, and the free one won.
+    # What is left is spent creating snapshots that a later cold start may not
+    # even land on, because a snapshot only restores onto the worker type that
+    # made it and placement here is unpinned.
+    #
+    # Reconsider only for a function with real init to capture. This one has none
+    # left, which is the point.
 )
 @modal.fastapi_endpoint(method="POST", docs=False, requires_proxy_auth=False)
 async def telegram_webhook(request: Request):

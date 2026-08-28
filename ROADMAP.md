@@ -33,17 +33,17 @@ order. Everything earlier is closed and listed under **Closed stages**.
   model deployment, reached with `MODEL_AUTH_STYLE=modal_proxy`. The original
   `assistant-llm` stays deployed as rollback only; retiring it is a destructive
   human gate.
-- Two things are owed to the next `assistant-llm-v2` deploy, and neither is a
-  reason to create one:
-  - `SCALEDOWN_WINDOW` is now **2 s**, Modal's floor, chosen because a 30 s
-    window cost about $0.0092 of idle A10 per message — more than half the GPU
-    spend. The accepted price is that an interactive approval pays one restored
-    cold start (10.4 s) instead of finding the container warm. **The running app
-    still has 30 s**; the constant applies when it is next deployed, or sooner
-    through `deploy/modal/autoscale.py`, which changes it over the network.
-  - Apply the NCCL loopback rendezvous fix before snapshot creation and verify
-    the logs in that deploy's acceptance; the current warnings are harmless.
-    `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
+- The GPU idle window is **12 s**, live on `assistant-llm-v2` through
+  `deploy/modal/autoscale.py` and matching `SCALEDOWN_WINDOW` in `model_app.py`,
+  so the next deploy restores the same number. It costs about $0.0037 of idle
+  A10 per message against $0.0092 at the old 30 s. Modal's 2 s floor was tried
+  and reversed: it was shorter than the pause between two messages, so an
+  ordinary back-and-forth paid a 10.4 s restored wake almost every turn. An
+  interactive approval still pays one, which is the accepted price.
+- One thing is owed to the next `assistant-llm-v2` deploy, and it is not a
+  reason to create one: apply the NCCL loopback rendezvous fix before snapshot
+  creation and verify the logs in that deploy's acceptance; the current warnings
+  are harmless. `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
 
 ## Closed stages
 
@@ -164,6 +164,43 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      now **306 ms against 4.69 s**, 15x. First message about ten seconds, second
      nearly instant.
      `reports/2026-08-28_v2_control_plane_live_acceptance.md`.
+   - **CPU cold start: imports won, snapshots lost, ~3.5 s of platform remains.**
+     Measured over nine deployed cold starts of the webhook: **5.36 s** mean
+     before snapshots, **8.56 s** while creating one (six of the nine), **4.06 s**
+     restoring one. Execution over the same window fell from **1.67-3.86 s** to
+     **0.34-0.46 s**, and warm from 271 ms to ~200 ms — that is the import work,
+     and it is kept. The snapshot is not: subtracting execution leaves ~3.5 s of
+     container either way, because a restore skips initialization and this
+     function no longer has any, so the two changes were substitutes and the free
+     one won. Reverted with an AST test against the argument returning.
+     What is left is Modal's scheduling floor for a scale-to-zero container, and
+     no code removes it — only `min_containers`. What earned the execution
+     numbers: the wire format moved to `ui/telegram/wire.py`, which may import
+     only the standard library, and `ui/telegram/__init__.py` no longer imports
+     the adapter eagerly, so nothing on the webhook's path reaches LangGraph or
+     the harness. Two tests hold it — a subprocess with a fresh interpreter, and
+     an AST check on `wire.py`. Splitting the image was considered and dropped:
+     the image-relevant install is ~100 MB of which the Modal client and the
+     database driver are ~65 MB, so a split buys the imports this already bought,
+     not the container. Deployed in 13.504 s with the snapshot removed and the
+     webhook's `scaledown_window` at **60 s** — the only lever left against
+     scheduling is not being cold, and a minute of a quarter-core costs $0.00026,
+     so a hundred wakes a day stays under a dollar a month. The worker stays at
+     15 s.
+   - Unmeasured, and next before anything else here: the update worker's own
+     cold start, the `spawn → worker entered` gap. It can be timed without the
+     GPU by spawning a non-existent update id, which is still a worker start and
+     needs permission. Buying the webhook's remaining ~3.5 s with
+     `min_containers=1` costs about $11.4 a month at `cpu=0.25`/512 MiB, or
+     about $5.7 at 0.125/256 MiB now that the agent stack is out of it — priced,
+     not chosen, and worth deciding only after the worker's share is known.
+     `docs/control_plane_cold_start_notes.md`.
+   - **Not approved.** Waking the GPU from the webhook, in parallel with the
+     worker's cold start instead of after it, would overlap roughly 5.5 s of
+     snapshot restore with work that happens anyway. It spends no extra GPU on a
+     message that was going to reach the model, but it does start a worker on
+     every admitted update, including ones that never call the model. Recorded
+     as an option; the human has not agreed to it.
    - Chromium in the control image. Browser evidence worked while the agent ran
      on Windows and found Edge; `debian_slim` has none, so a task whose plan
      asks for a screenshot now fails validation. `/usr/bin/chromium` is already

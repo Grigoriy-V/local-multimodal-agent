@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +40,7 @@ from ui.telegram.api import (
     TelegramError,
     approval_keyboard,
 )
+from ui.telegram.wire import Incoming, read_update
 
 # A fixed namespace so a chat maps to the same canonical identity on every run
 # and on every machine. Changing it orphans every existing conversation.
@@ -58,9 +58,6 @@ HELP = (
     "/can — what I can actually see, hear, send and change\n"
     "/check — try each of those and report what really works"
 )
-
-PHOTO_MEDIA_TYPE = "image/jpeg"
-VOICE_MEDIA_TYPE = "audio/ogg"
 
 # What `_send_media` can actually put in this chat, declared where that method
 # is, so the two cannot drift apart. Images go as photos and sound as a file,
@@ -109,82 +106,6 @@ def start_thread(store: ConversationStore, user_id: str) -> str:
 
 def spoken(message: Message) -> str:
     return " ".join(part.text or "" for part in message.content if part.kind == "text").strip()
-
-
-@dataclass(frozen=True)
-class Incoming:
-    """One Telegram update, reduced to what the application needs."""
-
-    chat_id: int
-    telegram_user_id: int
-    text: str
-    files: tuple[tuple[str, str, str], ...] = ()  # (file_id, name, media_type)
-    callback_id: str | None = None
-    callback_data: str | None = None
-
-
-def read_update(update: dict[str, Any]) -> Incoming | None:
-    """Reduce a raw update, or return `None` for one this adapter ignores."""
-
-    callback = update.get("callback_query")
-    if callback:
-        message = callback.get("message") or {}
-        chat = message.get("chat") or {}
-        sender = callback.get("from") or {}
-        if not chat.get("id") or not sender.get("id"):
-            return None
-        return Incoming(
-            chat_id=int(chat["id"]),
-            telegram_user_id=int(sender["id"]),
-            text="",
-            callback_id=str(callback.get("id", "")),
-            callback_data=str(callback.get("data", "")),
-        )
-
-    message = update.get("message")
-    if not message:
-        return None
-    chat = message.get("chat") or {}
-    sender = message.get("from") or {}
-    if not chat.get("id") or not sender.get("id"):
-        return None
-
-    files: list[tuple[str, str, str]] = []
-    photos = message.get("photo") or []
-    if photos:
-        # Telegram sends every rendered size; the last is the largest.
-        largest = photos[-1]
-        files.append((str(largest["file_id"]), "photo.jpg", PHOTO_MEDIA_TYPE))
-    voice = message.get("voice")
-    if voice:
-        files.append(
-            (str(voice["file_id"]), "voice.ogg", str(voice.get("mime_type") or VOICE_MEDIA_TYPE))
-        )
-    audio = message.get("audio")
-    if audio:
-        files.append(
-            (
-                str(audio["file_id"]),
-                str(audio.get("file_name") or "audio"),
-                str(audio.get("mime_type") or ""),
-            )
-        )
-    document = message.get("document")
-    if document:
-        files.append(
-            (
-                str(document["file_id"]),
-                str(document.get("file_name") or "document"),
-                str(document.get("mime_type") or ""),
-            )
-        )
-
-    return Incoming(
-        chat_id=int(chat["id"]),
-        telegram_user_id=int(sender["id"]),
-        text=str(message.get("text") or message.get("caption") or ""),
-        files=tuple(files),
-    )
 
 
 def task_plan_text(view: TaskView, workspace: Path) -> str | Formatted:

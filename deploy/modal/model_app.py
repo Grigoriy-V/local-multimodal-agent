@@ -104,18 +104,26 @@ GPU_MEMORY_UTILIZATION = 0.80
 # without deploying — see `autoscale.py` — but a deploy resets it to this value,
 # so this constant is the intended default and not merely a starting point.
 #
-# Set to Modal's floor deliberately, and it is the largest single lever on this
-# project's bill: a 30-second window costs about $0.0092 of idle A10 per
-# message, which was more than half the GPU spend for a service that is idle by
-# design between messages. A restored wake measured 10.4 seconds, so the price
-# of the floor is that an interactive approval — where a person reads a plan and
-# presses a button — pays one restored cold start instead of finding the
-# container still warm. The human chose the bill over the pause, knowing that.
+# The largest single lever on this project's bill, so the number is a priced
+# choice rather than a default. At $0.000306 a second for an A10, an idle window
+# costs per message:
+#
+#     30 s  $0.0092   what this used to be, more than half the GPU spend
+#     12 s  $0.0037   the current value
+#      2 s  $0.0006   Modal's floor, tried and found too sharp
+#
+# A restored wake measured 10.4 s, which is what the floor charged to the person
+# instead of to the bill: at 2 s, a second message in the same conversation
+# usually arrived after the container had gone, so an ordinary back-and-forth
+# paid a wake almost every turn. Twelve seconds covers a normal reply and still
+# gives up two thirds of the old idle cost. It is deliberately below the ~20 s an
+# interactive approval needs — someone reading a plan before pressing a button
+# still pays a wake, and that pause is the accepted price.
 #
 # Adaptive scaledown, which would hold the window open only while someone is
 # actually replying, is queued under measurement and economics. Until then this
 # is a fixed number and a fixed trade.
-SCALEDOWN_WINDOW = 2
+SCALEDOWN_WINDOW = 12
 
 # Scale-to-zero is the product requirement, so the floor is stated rather than
 # inherited from a platform default that could change. The ceiling caps cost:

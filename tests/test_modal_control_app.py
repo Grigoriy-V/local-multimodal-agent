@@ -114,3 +114,32 @@ def test_the_two_databases_are_measured_in_one_invocation() -> None:
 def test_webhook_explicitly_stays_outside_modal_proxy_auth() -> None:
     assert "requires_proxy_auth=False" in source()
     assert "request: Request" in source()
+
+
+def test_the_webhook_does_not_ask_for_a_memory_snapshot() -> None:
+    """Measured, not assumed, and the measurement said no.
+
+    Nine deployed cold starts: 5.36 s mean without snapshots, 8.56 s while
+    creating one, 4.06 s restoring one. Subtracting execution shows the
+    container itself costs ~3.5 s either way — a restore skips initialization,
+    not scheduling, and this function's initialization had already been removed
+    by keeping the agent stack out of its imports. Six of the nine were still
+    creating, because a snapshot only restores onto the worker type that made
+    it and placement here is unpinned.
+
+    Turning it back on needs a new measurement, not a new hope.
+    """
+
+    tree = ast.parse(source())
+    passed = {
+        keyword.arg
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for decorator in node.decorator_list
+        if isinstance(decorator, ast.Call)
+        for keyword in decorator.keywords
+    }
+
+    # The name appears in the comment that explains the decision, so this asks
+    # the syntax whether it is an argument rather than asking the text.
+    assert "enable_memory_snapshot" not in passed
