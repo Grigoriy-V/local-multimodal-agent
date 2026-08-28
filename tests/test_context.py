@@ -87,6 +87,71 @@ def test_the_prompt_is_prelude_then_history_then_the_new_turn() -> None:
     assert [m.content[0].text for m in prompt] == ["rules", "old", "older answer", "new"]
 
 
+def voice(data: bytes = b"OggS") -> Message:
+    return Message(
+        role="user", content=[ContentPart(kind="audio", data=data, media_type="audio/ogg")]
+    )
+
+
+def test_a_second_voice_message_does_not_replay_the_first() -> None:
+    """The served model accepts one audio per prompt; two is an HTTP 400."""
+
+    context = Context(history=[voice(b"first")])
+
+    prompt = context.prompt([voice(b"second")])
+
+    assert [part.kind for part in prompt[0].content] == ["text"]
+    assert prompt[0].content[0].text == "[audio audio/ogg]"
+    assert prompt[1].content[0].data == b"second"
+
+
+def test_a_stored_voice_message_is_replayed_when_the_new_turn_is_text() -> None:
+    """The budget is spent by the turn, not by the calendar: text asks nothing."""
+
+    context = Context(history=[voice(b"first")])
+
+    prompt = context.prompt([user("what did I just say?")])
+
+    assert prompt[0].content[0].data == b"first"
+
+
+def test_pictures_past_the_budget_become_placeholders_newest_first() -> None:
+    def picture(tag: bytes) -> Message:
+        return Message(role="user", content=[ContentPart(kind="image", data=tag, media_type="image/png")])
+
+    history = [picture(bytes([index])) for index in range(6)]
+    context = Context(history=history)
+
+    prompt = context.prompt([user("compare them")])
+
+    kept = [m.content[0].data for m in prompt if m.content[0].kind == "image"]
+    assert kept == [bytes([2]), bytes([3]), bytes([4]), bytes([5])]
+
+
+def test_a_past_turn_keeps_its_text_beside_the_placeholder() -> None:
+    asked = Message(
+        role="user",
+        content=[
+            ContentPart(kind="text", text="what is this?"),
+            ContentPart(kind="audio", data=b"OggS", media_type="audio/ogg"),
+        ],
+    )
+    context = Context(history=[asked])
+
+    recalled_turn, _new = context.prompt([voice()])
+
+    assert [part.text for part in recalled_turn.content] == ["what is this?", "[audio audio/ogg]"]
+
+
+def test_a_text_only_history_turn_is_left_untouched() -> None:
+    original = user("old")
+    context = Context(history=[original])
+
+    [recalled_turn] = context.prompt([])
+
+    assert recalled_turn is original
+
+
 def test_the_context_does_not_mutate_when_a_prompt_is_built() -> None:
     context = Context(prelude=[system("rules")], history=[user("old")])
 

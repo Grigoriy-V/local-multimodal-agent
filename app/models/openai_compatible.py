@@ -35,6 +35,14 @@ AUDIO_FORMATS = {
     "audio/ogg": "ogg",
 }
 
+# OpenAI's `input_audio` part validates `format` against a literal, so anything
+# else is refused by the schema before the server decodes a byte — which is how
+# a Telegram voice message, always Ogg/Opus, used to fail after waking the GPU.
+# The rest go as an `audio_url` data URI: the container that serves this model
+# reads the format from the URI and decodes whatever soundfile/PyAV supports.
+# Splitting them keeps the common case on the portable, standard part.
+OPENAI_AUDIO_FORMATS = frozenset({"wav", "mp3"})
+
 # Statuses that mean "later", not "no": a server still starting, a queue that is
 # full, a proxy that gave up early. A 4xx about the request itself is excluded —
 # sending the same bad request again only wastes the time it takes to refuse it.
@@ -76,7 +84,15 @@ def _content_part(part: ContentPart) -> dict[str, Any]:
     audio_format = AUDIO_FORMATS.get(part.media_type or "")
     if audio_format is None:
         raise BackendError(f"unsupported audio media type: {part.media_type!r}")
-    return {"type": "input_audio", "input_audio": {"data": _encode(part), "format": audio_format}}
+    if audio_format in OPENAI_AUDIO_FORMATS:
+        return {
+            "type": "input_audio",
+            "input_audio": {"data": _encode(part), "format": audio_format},
+        }
+    return {
+        "type": "audio_url",
+        "audio_url": {"url": f"data:{part.media_type};base64,{_encode(part)}"},
+    }
 
 
 def build_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:

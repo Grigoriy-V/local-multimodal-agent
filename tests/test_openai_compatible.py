@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.attachments import MEDIA_KINDS
 from app.config import ModelSettings
 from app.models import ContentPart, Message, ToolCall
 from app.models.openai_compatible import (
@@ -80,12 +81,50 @@ def test_audio_part_carries_bare_base64_and_a_format() -> None:
     assert audio == {"data": base64.b64encode(b"RIFF").decode(), "format": "wav"}
 
 
-def test_audio_media_type_maps_to_the_provider_format() -> None:
+def test_mp3_also_uses_the_standard_part() -> None:
+    part = ContentPart(kind="audio", data=b"ID3", media_type="audio/mpeg")
+
+    [message] = build_messages([Message(role="user", content=[part])])
+
+    assert message["content"][0]["type"] == "input_audio"
+    assert message["content"][0]["input_audio"]["format"] == "mp3"
+
+
+def test_a_voice_message_goes_as_an_audio_url_not_input_audio() -> None:
+    """Ogg is what Telegram sends, and `input_audio` refuses it by schema."""
+
+    part = ContentPart(kind="audio", data=b"OggS", media_type="audio/ogg")
+
+    [message] = build_messages([Message(role="user", content=[part])])
+
+    assert message["content"][0]["type"] == "audio_url"
+    url = message["content"][0]["audio_url"]["url"]
+    assert url == f"data:audio/ogg;base64,{base64.b64encode(b'OggS').decode()}"
+
+
+def test_flac_also_avoids_the_rejected_format_literal() -> None:
     part = ContentPart(kind="audio", data=b"fLaC", media_type="audio/flac")
 
     [message] = build_messages([Message(role="user", content=[part])])
 
-    assert message["content"][0]["input_audio"]["format"] == "flac"
+    assert message["content"][0]["type"] == "audio_url"
+
+
+def test_every_admitted_audio_type_has_a_sendable_part() -> None:
+    """The two lists must not drift again.
+
+    `attachments.py` decides what a person may upload; this module decides what
+    can be put on the wire. When they disagree the mismatch is only discovered
+    by a paid request that the server refuses, so assert it offline instead.
+    """
+
+    admitted = [media for media, kind in MEDIA_KINDS.items() if kind == "audio"]
+    assert admitted
+
+    for media in admitted:
+        part = ContentPart(kind="audio", data=b"\x00", media_type=media)
+        [message] = build_messages([Message(role="user", content=[part])])
+        assert message["content"][0]["type"] in {"input_audio", "audio_url"}
 
 
 def test_unknown_audio_media_type_is_refused() -> None:

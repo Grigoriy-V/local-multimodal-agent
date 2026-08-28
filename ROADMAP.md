@@ -286,13 +286,23 @@ this roadmap when a concrete assistant use case needs them.
    future rebuild, record that it removes PyTorch's protection against a stuck
    NCCL watchdog and reassess it before any multi-GPU or parallel deployment.
    Evidence: `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
-2. Close the remaining Telegram work-flow acceptance debt. This is not a new
-   product step after 3b: Step 2 implemented both conversation and autonomous
-   work through the same adapter, but only the conversational E2E has run. The
-   next separately authorized live run is one bounded work request, including
-   the capability-approval interaction and final result. The persistent local
-   profile already targets v2; the rollback App need not be retired for this.
-3. Start step 3c control-plane work after Telegram acceptance.
+2. Step 2 is closed. The bounded work request ran through Telegram to a real
+   result — `circle.html` created and delivered, `Status: completed;
+   iterations: 1; tool calls: 5` — and the same live session
+   exposed two defects that made voice messages impossible: an `input_audio`
+   part whose `format` literal refuses Ogg, and a prompt that replayed stored
+   media past the served `MM_LIMITS` audio cap. Both are fixed client-side, with
+   no deploy or snapshot rebuild; four consecutive voice messages then succeeded
+   in one thread. Recognition quality on Telegram voice is mediocre and is
+   deferred as separate work, not a blocker. A third, pre-existing defect was
+   fixed alongside: importing `chainlit` loaded the developer's `.env` into the
+   environment, so thirteen offline tests failed according to local
+   configuration. One gap stays open and is not a step-2 blocker: the Telegram
+   adapter delivers text, tool-call names and on-disk artifacts, but never the
+   media parts of a message, so a browser screenshot the task produced reaches
+   the store and Chainlit but not the Telegram user. Evidence:
+   `reports/2026-08-28_v2_telegram_voice_and_media_budget.md`.
+3. Start step 3c control-plane work.
 4. Continue to step 4 document ingestion; it remains planned and has not been
    removed or folded into deployment work.
 

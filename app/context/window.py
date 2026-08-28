@@ -13,9 +13,16 @@ only once the summary covers it, which is why this module never truncates.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.models import ContentPart, Message
+
+# How many media items of each kind one request may carry. This mirrors the
+# served model's own per-prompt limits — `MM_LIMITS` in `deploy/modal/model_app.py`
+# — and is duplicated rather than imported because the application never depends
+# on a deployment. A model served with different limits needs this changed too;
+# exceeding them is an HTTP 400, not a degraded answer.
+MEDIA_BUDGET = {"image": 4, "audio": 1}
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a local assistant with tools. Use list_files and read_file to look at the "
@@ -64,7 +71,11 @@ class Context:
     history: list[Message] = field(default_factory=list)
 
     def prompt(self, new: Sequence[Message]) -> list[Message]:
-        return [*self.prelude, *self.history, *new]
+        # The new turn is never trimmed: it is what the person just asked. What
+        # it spends of the budget is what history may no longer replay.
+        used = count_media(new)
+        budget = {kind: limit - used.get(kind, 0) for kind, limit in MEDIA_BUDGET.items()}
+        return [*self.prelude, *within_media_budget(self.history, budget), *new]
 
 
 def system(text: str) -> Message:
@@ -75,6 +86,50 @@ def describe(part: ContentPart) -> str:
     if part.kind == "text":
         return part.text or ""
     return f"[{part.kind} {part.media_type}]"
+
+
+def count_media(messages: Sequence[Message]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for message in messages:
+        for part in message.content:
+            if part.kind != "text":
+                counts[part.kind] = counts.get(part.kind, 0) + 1
+    return counts
+
+
+def within_media_budget(
+    history: Sequence[Message], budget: dict[str, int]
+) -> list[Message]:
+    """Replay recent media, but only as much of it as one prompt may carry.
+
+    A server caps how many items of each kind a single prompt may contain, and
+    the whole conversation is re-sent every turn. Without a budget the second
+    voice message in a thread is refused outright, for a reason that has nothing
+    to do with what the person asked — that happened. Older media past the cap
+    becomes the same placeholder summaries use, so the model still knows a voice
+    message or a picture was there.
+
+    The newest media survives: it is the one a follow-up question is about.
+    """
+
+    kept: list[Message] = []
+    remaining = dict(budget)
+    for message in reversed(history):
+        if all(part.kind == "text" for part in message.content):
+            kept.append(message)
+            continue
+        content: list[ContentPart] = []
+        for part in message.content:
+            if part.kind == "text":
+                content.append(part)
+            elif remaining.get(part.kind, 0) > 0:
+                remaining[part.kind] -= 1
+                content.append(part)
+            else:
+                content.append(ContentPart(kind="text", text=describe(part)))
+        kept.append(replace(message, content=content))
+    kept.reverse()
+    return kept
 
 
 def transcript(messages: Sequence[Message]) -> str:
