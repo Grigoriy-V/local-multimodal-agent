@@ -68,7 +68,22 @@ control_image = _with_source(_dependencies)
 # The agent's image is the same thing with a browser under it. The webhook — the
 # one function whose cold start a person waits on — never renders anything, so it
 # stays on the smaller one.
-agent_image = _with_source(_with_browser).env({"AGENT_WORKSPACE": WORKSPACE_ROOT})
+#
+# `WEB_LOCAL_BROWSER=0` is part of the image rather than of the secret because it
+# is a fact about this container, not a credential: the agent worker holds the
+# bot token, the model key and the database URL, so it does not open a web page
+# in a browser of its own. It carries Chromium for `inspect_page`, which renders
+# a local artifact with the network blocked; a page from the internet goes to
+# `render_web_page` below. If that renderer is not configured, viewing fails and
+# says so instead of silently running someone's JavaScript next to the secrets.
+agent_image = _with_source(_with_browser).env(
+    {"AGENT_WORKSPACE": WORKSPACE_ROOT, "WEB_LOCAL_BROWSER": "0"}
+)
+
+# The renderer runs the same code from the same layers and is a different image
+# only in what it is *not* given: no workspace path, and below, no secret and no
+# volume. Sharing the build keeps the browser a single installation.
+render_image = _with_source(_with_browser)
 
 # Where the workspace stops dying with the container. A container's filesystem
 # is gone the moment it scales down, so a file the assistant wrote in one
@@ -176,6 +191,62 @@ async def process_telegram_update(update_id: int) -> bool:
 
 
 @app.function(
+    image=render_image,
+    # Deliberately empty, and this is the whole point of the function. No
+    # `secrets`: no TELEGRAM_TOKEN, no MODEL_API_KEY, no AGENT_DATABASE_URL. No
+    # `volumes`: no person's workspace. This is the only place in the deployment
+    # where a page's own JavaScript is executed, and Chromium under
+    # `--no-sandbox` as root has no isolation of its own — so the container it
+    # can reach is one that holds nothing worth reaching.
+    #
+    # Proxy authentication, so the renderer is not a public URL-fetching service
+    # for whoever finds it. The caller is the update worker, which has the token.
+    cpu=1.0,
+    memory=2048,
+    min_containers=0,
+    max_containers=4,
+    # Short. A person waits on this only while they wait on the whole turn, and
+    # unlike the worker there is no conversation to keep warm — but a page often
+    # arrives as one of several, so a few seconds of reuse is worth the cent.
+    scaledown_window=20,
+    timeout=180,
+    include_source=False,
+)
+@modal.fastapi_endpoint(method="POST", docs=False, requires_proxy_auth=True)
+async def render_web_page(request: Request):
+    """Open one public page in a browser that can reach nothing else here.
+
+    The URL is validated again on this side. The caller already refused to send
+    an internal address; this refuses to open one, and neither half assumes the
+    other did its job.
+    """
+
+    import base64
+
+    from fastapi.responses import JSONResponse
+
+    from app.web import WebError, render_locally
+
+    payload = await request.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("url"), str):
+        return JSONResponse({"detail": "a JSON object with a url is required"}, status_code=400)
+    try:
+        rendered = await render_locally(payload["url"], full_page=bool(payload.get("full_page")))
+    except WebError as error:
+        return JSONResponse({"detail": str(error)}, status_code=400)
+    return JSONResponse(
+        {
+            "url": rendered.url,
+            "title": rendered.title,
+            "text": rendered.text,
+            "screenshot": base64.b64encode(rendered.screenshot).decode("ascii"),
+            "console_errors": list(rendered.console_errors),
+            "refused": list(rendered.refused),
+        }
+    )
+
+
+@app.function(
     image=agent_image,
     secrets=[control_secret],
     volumes={WORKSPACE_ROOT: workspaces},
@@ -184,10 +255,10 @@ async def process_telegram_update(update_id: int) -> bool:
     min_containers=0,
     max_containers=1,
     scaledown_window=2,
-    timeout=180,
+    timeout=300,
     include_source=False,
 )
-async def self_test(include_model: bool = False) -> str:
+async def self_test(include_model: bool = False, include_credit: bool = False) -> str:
     """Try every capability here, in the environment the assistant runs in.
 
     The point is the environment, not the code: the offline suite already covers
@@ -196,7 +267,9 @@ async def self_test(include_model: bool = False) -> str:
     something runs inside a deployed container.
 
     Free by default. `include_model` adds one completion, which wakes the GPU,
-    so it is a separate decision every time it is made.
+    and `include_credit` adds the probes that spend an outside provider's
+    allowance — one search, two Firecrawl credits. Each is a separate decision
+    every time it is made.
     """
 
     from app.agent.runtime import create_agent
@@ -209,7 +282,11 @@ async def self_test(include_model: bool = False) -> str:
         agent_settings=AgentSettings(), user_id=owner, delivery=DELIVERY
     )
     try:
-        costs = ("free", "gpu") if include_model else ("free",)
+        costs = ("free",)
+        if include_credit:
+            costs += ("credit",)
+        if include_model:
+            costs += ("gpu",)
         return await agent.selftest(f"self-test-{owner}", costs)
     finally:
         await agent.aclose()

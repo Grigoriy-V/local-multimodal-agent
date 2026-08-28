@@ -7,6 +7,9 @@ from app.tools.capabilities import (
     FILESYSTEM_READ,
     FILESYSTEM_WRITE,
     PRESENT_FILES,
+    WEB_FETCH,
+    WEB_SEARCH,
+    WEB_VIEW,
     Capability,
     CapabilityGrant,
     CapabilityRegistry,
@@ -15,6 +18,7 @@ from app.tools.documents import document_tools
 from app.tools.filesystem import filesystem_tools
 from app.tools.memory import memory_tools
 from app.tools.presentation import presentation_tools, send_file
+from app.tools.web import web_fetch_tools, web_search_tools, web_tools, web_view_tools
 
 __all__ = [
     "BROWSER_INSPECT",
@@ -23,6 +27,9 @@ __all__ = [
     "FILESYSTEM_READ",
     "FILESYSTEM_WRITE",
     "PRESENT_FILES",
+    "WEB_FETCH",
+    "WEB_SEARCH",
+    "WEB_VIEW",
     "Capability",
     "CapabilityGrant",
     "CapabilityRegistry",
@@ -37,4 +44,8 @@ __all__ = [
     "memory_tools",
     "presentation_tools",
     "send_file",
+    "web_fetch_tools",
+    "web_search_tools",
+    "web_tools",
+    "web_view_tools",
 ]

@@ -198,6 +198,28 @@ This transport uses long polling and is the local profile. The deployed profile
 replaces it with a webhook that hands each update to a worker; the adapter
 itself does not change.
 
+## The web
+
+The assistant reaches the public internet through three separate tools, because
+they cost differently: `search_web` asks Firecrawl for links and spends its
+credit, `fetch_page` reads one page over a bounded direct HTTP request and
+spends nothing, and `view_web_page` opens a page in a real browser and returns a
+screenshot for the assistant to look at. As with documents, looking is not
+sending: the screenshot lands in the workspace and reaches you only if the
+assistant chooses `send_file`.
+
+Set `WEB_FIRECRAWL_API_KEY` to enable search; without it the assistant has no
+search tool at all rather than one that fails. Only public `http`/`https`
+addresses on ports 80 and 443 are allowed, checked again on every redirect, so
+loopback, private and cloud-metadata addresses cannot be reached. A few sites —
+Wikipedia among them — refuse a browser-shaped client and ask for one that
+identifies itself; set `WEB_FALLBACK_USER_AGENT` to `name/version (contact)` to
+make those readable.
+
+Locally the browser runs on your own machine. Deployed, pages are opened by a
+separate renderer function that holds no token, no database URL and no
+workspace, because that is the only place a stranger's JavaScript runs.
+
 ## Version 1.5 product evidence
 
 One ordinary request enters the same harness used for direct conversation. The

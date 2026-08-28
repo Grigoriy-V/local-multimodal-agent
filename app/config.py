@@ -67,6 +67,73 @@ class TelegramSettings(BaseSettings):
         return frozenset(found)
 
 
+class WebSettings(BaseSettings):
+    """How the assistant reaches the public web, and how far it may go.
+
+    Three capabilities, configured separately because they cost differently.
+    Search asks a provider and spends its credit. Fetching spends nothing and
+    runs wherever the agent runs. Viewing runs a browser over someone else's
+    JavaScript, which is why it can be pointed at a renderer that holds none of
+    this deployment's secrets — and why an unset renderer URL means the browser
+    runs here, which is the right answer on a personal machine and the wrong one
+    in a container full of credentials.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="WEB_", env_file=".env", extra="ignore")
+
+    # Search. Empty means the assistant has no search tool at all rather than a
+    # tool that fails when it is used.
+    firecrawl_api_key: str = ""
+    firecrawl_endpoint: str = "https://api.firecrawl.dev/v1"
+    search_results: int = 5
+    search_timeout: float = 30.0
+
+    # Direct fetch. The byte cap is what a page is allowed to spend of the
+    # context it is about to be pasted into, not a network limit.
+    #
+    # Two identities, because sites disagree about what an honest client looks
+    # like. Most answer an unknown client with a challenge page, so the default
+    # is browser-shaped. A few — Wikimedia measurably — refuse browser strings
+    # from anything that is not a browser and ask for a client that names itself
+    # and a way to be contacted. That second identity is empty by default,
+    # because inventing a contact address for someone would be worse than the
+    # refusal: set it to `name/version (contact)` and a page that asks for one
+    # becomes readable. Measured: Wikipedia 403 with the browser string, 200
+    # with a contactable identity, unchanged on five other sites.
+    user_agent: str = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    )
+    fallback_user_agent: str = ""
+    # Per-wait and overall. The first is what httpx bounds — connect, read one
+    # chunk — and a server that sends one byte per second satisfies it forever,
+    # so the second bounds the whole call including its redirects.
+    fetch_timeout: float = 20.0
+    fetch_total_timeout: float = 45.0
+    max_redirects: int = 3
+    max_bytes: int = 1_000_000
+
+    # Viewing. `renderer_url` is the isolated CPU function; `renderer_key` is its
+    # Modal proxy token pair, in the same `<wk-...>.<ws-...>` form as MODEL_API_KEY.
+    #
+    # `local_browser` is a statement about *this* process, made by whoever built
+    # the environment: may a stranger's JavaScript run beside what is in here?
+    # True on a personal machine, where the browser, the agent and the person are
+    # already one trust boundary. The deployed agent image sets it to 0, so a
+    # container holding the bot token and the database URL fails loudly instead
+    # of quietly rendering when the renderer URL is missing.
+    local_browser: bool = True
+    renderer_url: str = ""
+    renderer_key: str = ""
+    renderer_timeout: float = 120.0
+    viewport_width: int = 1200
+    viewport_height: int = 900
+    render_timeout: float = 30.0
+    # A tall page is still one screenshot, and one screenshot is tokens. This is
+    # where a full-page capture stops growing.
+    max_render_height: int = 4000
+
+
 class AgentSettings(BaseSettings):
     """Where the agent stores memory, what it may read, and how much it keeps."""
 

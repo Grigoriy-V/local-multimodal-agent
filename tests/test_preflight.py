@@ -172,3 +172,31 @@ async def test_the_probe_list_matches_what_the_agent_claims(
     assert "inspect_page" in claimed and "browser.inspect" in probed
     assert "write_file" in claimed and "filesystem" in probed
     assert "remember_fact" in claimed and "store.memory" in probed
+    assert "fetch_page" in claimed and "web.fetch" in probed
+    assert "view_web_page" in claimed and "web.view" in probed
+
+
+async def test_an_async_tool_is_probed_through_the_path_it_actually_takes(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Found by running `/check`, not by reading the code.
+
+    `Toolbox.run` refuses an async tool instead of running it, so the two web
+    probes reported the capability broken while the tools worked. A probe that
+    lies about a working capability is the same failure as one that hides a
+    broken one.
+    """
+
+    from app.config import WebSettings
+    from app.tools import Toolbox, web_fetch_tools
+    from app.web import Fetched
+
+    async def fetched(url, settings=None, client=None, resolve=None):
+        return Fetched(url, 200, "text/html", "Example", "Example Domain", False)
+
+    monkeypatch.setattr("app.tools.web.fetch_page", fetched)
+    tools = Toolbox(web_fetch_tools(workspace, WebSettings(_env_file=None)))
+
+    checks = await run(tool_probes(tools, workspace))
+
+    assert [(check.name, check.ok) for check in checks] == [("web.fetch", True)]

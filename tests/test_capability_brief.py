@@ -182,6 +182,12 @@ def test_the_default_prompt_names_only_tools_that_exist(
     The prompt says which tool suits which job, which is worth keeping in
     words. What is not worth keeping is a name that stops existing, so the only
     snake_case words the prompt is allowed to contain are real tool names.
+
+    A tool a grant can withhold cannot be named here at all — a fixed sentence
+    would advertise it to an agent that does not have it, which is the same
+    dishonesty from the other direction. Its guidance belongs in the brief,
+    which is generated from the toolbox; the second assertion is that every
+    wired tool is guided by one of the two.
     """
 
     store = SqliteStore(":memory:")
@@ -193,9 +199,17 @@ def test_the_default_prompt_names_only_tools_that_exist(
         store.close()
 
     mentioned = set(re.findall(r"\b[a-z]+_[a-z_]+\b", DEFAULT_SYSTEM_PROMPT))
+    # Everything except the exhaustive inventory line, which names every tool by
+    # construction and so would make this assertion say nothing.
+    guidance = "\n".join(
+        line
+        for line in capability_brief(tools).splitlines()
+        if "Your tools are exactly" not in line
+    )
+    guided = mentioned | set(re.findall(r"\b[a-z]+_[a-z_]+\b", guidance))
 
     assert mentioned <= set(tools.names)
-    assert mentioned == set(tools.names), "a wired-up tool is undocumented in the prompt"
+    assert set(tools.names) <= guided, "a wired-up tool is guided by neither"
 
 
 def test_the_inventory_closes_the_list_wherever_tools_are_given() -> None:

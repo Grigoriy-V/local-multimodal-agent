@@ -223,7 +223,7 @@ def test_the_workspace_outlives_the_container() -> None:
     assert 'modal.Volume.from_name("assistant-workspaces"' in source()
     assert _volumes_of("process_telegram_update") == "{WORKSPACE_ROOT: workspaces}"
     assert _volumes_of("self_test") == "{WORKSPACE_ROOT: workspaces}"
-    assert '.env({"AGENT_WORKSPACE": WORKSPACE_ROOT})' in source()
+    assert '"AGENT_WORKSPACE": WORKSPACE_ROOT' in source()
 
 
 def test_the_webhook_has_no_workspace_because_it_runs_no_tools() -> None:
@@ -256,6 +256,70 @@ def test_one_volume_is_not_one_workspace() -> None:
 
     assert first != second
     assert first.parent == second.parent
+
+
+def _keywords_of(name: str) -> dict[str, str]:
+    """Every keyword argument on every decorator of one Modal function."""
+
+    tree = ast.parse(source())
+    node = next(
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+    )
+    return {
+        keyword.arg: ast.unparse(keyword.value)
+        for decorator in node.decorator_list
+        if isinstance(decorator, ast.Call)
+        for keyword in decorator.keywords
+        if keyword.arg is not None
+    }
+
+
+def test_the_page_renderer_holds_nothing_worth_reaching() -> None:
+    """The isolation is what this function *is*, so it is asserted, not trusted.
+
+    A page's own JavaScript runs here and nowhere else in the deployment, and
+    Chromium under `--no-sandbox` as root has no isolation of its own. Rendering
+    inside the update worker would put that code in the same container as
+    TELEGRAM_TOKEN, MODEL_API_KEY and AGENT_DATABASE_URL. So this container gets
+    no secret, no database, no workspace volume — and the assertion is here
+    because the cheapest way to lose all of that is someone adding
+    `secrets=[control_secret]` to make one thing easier.
+    """
+
+    renderer = _keywords_of("render_web_page")
+    worker = _keywords_of("process_telegram_update")
+
+    assert _image_of("render_web_page") == "render_image"
+    assert "secrets" not in renderer
+    assert "volumes" not in renderer
+    # The contrast is the point: the worker does hold them.
+    assert worker["secrets"] == "[control_secret]"
+    assert worker["volumes"] == "{WORKSPACE_ROOT: workspaces}"
+
+
+def test_the_page_renderer_is_not_a_url_fetcher_for_whoever_finds_it() -> None:
+    """Unauthenticated, it would open any address for anyone on the internet."""
+
+    assert _keywords_of("render_web_page")["requires_proxy_auth"] == "True"
+    assert _keywords_of("telegram_webhook")["requires_proxy_auth"] == "False"
+
+
+def test_the_renderer_shares_the_browser_layer_it_needs() -> None:
+    assert "render_image = _with_source(_with_browser)" in source()
+
+
+def test_the_worker_declares_that_it_does_not_open_web_pages_itself() -> None:
+    """The worker's Chromium is for local artifacts with the network blocked.
+
+    Without this the boundary would depend on one secret value being present:
+    forget `WEB_RENDERER_URL` and the worker would fall back to its own browser,
+    beside the bot token and the database URL, with nothing looking wrong.
+    """
+
+    assert '"WEB_LOCAL_BROWSER": "0"' in source()
+    assert '"WEB_LOCAL_BROWSER"' not in _keywords_of("render_web_page").get("image", "")
 
 
 def test_the_browser_is_installed_before_the_source_is_copied() -> None:

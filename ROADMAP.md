@@ -40,7 +40,8 @@ refused before a model request.
 - `assistant-control` serves the Telegram webhook and the update worker. Idle
   windows: 60 s on both CPU functions, 12 s on the GPU. The GPU value is live
   through `deploy/modal/autoscale.py` and matches `SCALEDOWN_WINDOW`, so a
-  deploy restores it.
+  deploy restores it. A third function, `render_web_page`, is defined and has
+  never been deployed or run.
 - Owed to the next `assistant-llm-v2` deploy, and not a reason to create one:
   the NCCL loopback rendezvous fix before snapshot creation.
   `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
@@ -134,14 +135,23 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    - **Browser image layering is deployed but its cache benefit is unconfirmed.**
      Chromium is installed below the copied source. v14 paid the slow build once;
      the next deploy is the first measurement of whether that layer is reused.
-   - **Web: search, fetch and visual view — three tools, not one.** Not started.
-     Search uses Firecrawl and `WEB_FIRECRAWL_API_KEY`. `fetch_page` is our own
-     bounded direct HTTP tool and spends no provider credit. `view_web_page`
-     uses our Chromium in a separate secretless CPU renderer with no workspace
-     mount. Firecrawl scrape is an explicit fallback for pages our datacenter
-     browser cannot read, never the default fetch path. A general-purpose
-     sandbox is not part of this capability.
+   - **Web: search, fetch and visual view — three tools, not one.** Built and
+     accepted in the local profile: `/check` 9/9 free plus the credit-costing
+     search probe 1/1, against real pages and a real browser. `search_web` uses
+     Firecrawl and `WEB_FIRECRAWL_API_KEY`; `fetch_page` is our own bounded
+     direct HTTP tool and spends no provider credit; `view_web_page` renders in
+     the isolated CPU function `render_web_page` when `WEB_RENDERER_URL` is set,
+     and the deployed agent image refuses to render locally without it.
+     Firecrawl scrape stays the fallback for pages neither client can read and
+     is not implemented. `reports/2026-08-29_v2_web_capability.md`,
      `reports/2026-08-29_v2_web_capability_options.md`.
+
+     **Outstanding, and the item's remaining acceptance:** nothing is deployed.
+     The renderer has never run, the deployed `/check` cannot include
+     `web.view` until `WEB_RENDERER_URL` and `WEB_RENDERER_KEY` are in the
+     `assistant-control` secret, and no live turn has made the agent choose
+     among the three. Each of those steps starts a worker and is asked for
+     separately.
 
 2. **Baseline chat product and live evidence.** Confirm in the real interface
    that the assistant answers a capability question correctly, `/can` agrees,

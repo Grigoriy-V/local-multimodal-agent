@@ -11,18 +11,29 @@ from app.tools.browser import browser_tools
 from app.tools.documents import document_tools
 from app.tools.filesystem import filesystem_tools
 from app.tools.presentation import presentation_tools
+from app.tools.web import web_fetch_tools, web_search_tools, web_view_tools
 
 FILESYSTEM_READ = "filesystem.read"
 FILESYSTEM_WRITE = "filesystem.write"
 BROWSER_INSPECT = "browser.inspect"
 DOCUMENTS_READ = "documents.read"
 PRESENT_FILES = "presentation.files"
+# Three, not one. They differ in what they cost and in what they let run: search
+# spends a provider's credit, fetching spends nothing and executes nothing, and
+# viewing runs a page's own JavaScript. A grant that could only say "the web"
+# could not withhold the expensive one.
+WEB_SEARCH = "web.search"
+WEB_FETCH = "web.fetch"
+WEB_VIEW = "web.view"
 DEFAULT_CAPABILITIES = (
     FILESYSTEM_READ,
     FILESYSTEM_WRITE,
     BROWSER_INSPECT,
     DOCUMENTS_READ,
     PRESENT_FILES,
+    WEB_SEARCH,
+    WEB_FETCH,
+    WEB_VIEW,
 )
 
 
@@ -73,6 +84,9 @@ class CapabilityRegistry:
                 Capability(BROWSER_INSPECT, browser_tools),
                 Capability(DOCUMENTS_READ, document_tools),
                 Capability(PRESENT_FILES, presentation_tools),
+                Capability(WEB_SEARCH, web_search_tools),
+                Capability(WEB_FETCH, web_fetch_tools),
+                Capability(WEB_VIEW, web_view_tools),
             )
         )
         self._capabilities = {capability.name: capability for capability in configured}

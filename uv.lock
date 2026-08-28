@@ -804,6 +804,7 @@ dev = [
     { name = "reportlab" },
 ]
 documents = [
+    { name = "pillow" },
     { name = "pypdf" },
     { name = "pypdfium2" },
     { name = "python-docx" },
@@ -838,6 +839,7 @@ dev = [
     { name = "reportlab", specifier = ">=4.2" },
 ]
 documents = [
+    { name = "pillow", specifier = ">=11.0" },
     { name = "pypdf", specifier = ">=5.1" },
     { name = "pypdfium2", specifier = ">=4.30" },
     { name = "python-docx", specifier = ">=1.1" },

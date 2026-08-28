@@ -17,9 +17,10 @@ Every failure this exists to catch has already happened, in production, today:
 None of those are visible offline, so this is built to run **where the agent
 runs** — the same code in the local profile and inside a deployed worker.
 
-Cost is part of the contract. A probe declares whether it is free or wakes the
-GPU, and the expensive ones stay out unless asked for by name. A diagnostic that
-quietly spends money is one nobody runs.
+Cost is part of the contract. A probe declares whether it is free, spends a
+provider's credit, or wakes the GPU, and everything but the free ones stays out
+unless asked for by name. A diagnostic that quietly spends money is one nobody
+runs.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from typing import Literal
 from app.models import ToolCall
 from app.tools import Toolbox, ToolError
 
-Cost = Literal["free", "gpu"]
+Cost = Literal["free", "credit", "gpu"]
 
 
 @dataclass(frozen=True)
@@ -143,12 +144,24 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
     underlying function directly would pass while the model's call failed.
     """
 
-    def call(name: str, **arguments: object) -> str:
-        result = tools.run(ToolCall(f"preflight-{name}", name, arguments))
+    def _text(result) -> str:
         text = " ".join(part.text or "" for part in result.content)
         if text.startswith("error:"):
             raise ToolError(text)
         return text
+
+    def call(name: str, **arguments: object) -> str:
+        return _text(tools.run(ToolCall(f"preflight-{name}", name, arguments)))
+
+    async def call_async(name: str, **arguments: object) -> str:
+        """The path an async tool actually takes.
+
+        `Toolbox.run` refuses an async tool rather than running it half-way, and
+        a probe that used it reported the capability broken while the tool was
+        fine. Caught by `/check` itself, which is the job.
+        """
+
+        return _text(await tools.run_async(ToolCall(f"preflight-{name}", name, arguments)))
 
     async def files() -> str:
         name = f"preflight-{uuid.uuid4().hex[:8]}.txt"
@@ -271,6 +284,54 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
             (root / name).unlink(missing_ok=True)
         return "a workspace file became one explicit outbound item"
 
+    async def fetch() -> str:
+        """Reach one real public page, because egress is the thing in doubt.
+
+        `example.com` is IANA's own reserved documentation domain: it exists to
+        be requested by things like this, it has no owner to inconvenience, and
+        its content does not change. What this catches is a container with no
+        outbound network at all — invisible offline, and indistinguishable from
+        "the page was empty" to whoever asked a question about it.
+        """
+
+        text = await call_async("fetch_page", url="https://example.com/")
+        if "example" not in text.lower():
+            raise RuntimeError("the page was fetched and carried nothing recognisable")
+        return "a public page was fetched and read as text"
+
+    async def view() -> str:
+        """Render the same page wherever this profile renders, and read it back.
+
+        Both halves are checked because they failed separately. A picture with
+        no text is what a broken DevTools session produced — screenshots kept
+        arriving while every page came back untitled and empty — and a probe
+        that looked only at the PNG called that working.
+        """
+
+        result = await tools.run_async(
+            ToolCall("preflight-view", "view_web_page", {"url": "https://example.com/"})
+        )
+        text = " ".join(part.text or "" for part in result.content)
+        if text.startswith("error:"):
+            raise ToolError(text)
+        if "example domain" not in text.lower():
+            raise RuntimeError("the page was rendered but its text did not come back")
+        images = [part for part in result.content if part.kind == "image"]
+        if not images or not (images[0].data or b"").startswith(b"\x89PNG"):
+            raise RuntimeError("a page was viewed and no screenshot came back")
+        saved = root / ".agent" / "web"
+        for shot in saved.glob("page-*.png"):
+            shot.unlink(missing_ok=True)
+        return f"a public page was rendered into {len(images[0].data or b'')} bytes of PNG"
+
+    async def search() -> str:
+        """The only probe that spends someone else's allowance, so it says so."""
+
+        text = await call_async("search_web", query="Firecrawl", count=1)
+        if "http" not in text:
+            raise RuntimeError("the search provider answered with no result")
+        return "the search provider answered with at least one result"
+
     available = set(tools.names)
     probes: list[Probe] = []
     if {"write_file", "read_file", "list_files"} <= available:
@@ -283,6 +344,12 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
         probes.append(Probe("documents.view", "free", pages))
     if "send_file" in available:
         probes.append(Probe("presentation.file", "free", presentation))
+    if "fetch_page" in available:
+        probes.append(Probe("web.fetch", "free", fetch))
+    if "view_web_page" in available:
+        probes.append(Probe("web.view", "free", view))
+    if "search_web" in available:
+        probes.append(Probe("web.search", "credit", search))
     return probes
 
 

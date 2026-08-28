@@ -32,6 +32,13 @@ def test_read_only_grant_exposes_only_read_tools(workspace: Path) -> None:
 
 
 def test_full_grant_exposes_general_browser_and_filesystem_tools(workspace: Path) -> None:
+    """`search_web` is absent here because no provider key is configured.
+
+    That is the wiring being honest rather than an omission: the offline suite
+    runs with the search provider unset, so the assistant holds the two web tools
+    that need nobody's account and not the one that does.
+    """
+
     registry = CapabilityRegistry(workspace)
     toolbox = registry.toolbox(registry.grant())
 
@@ -44,6 +51,8 @@ def test_full_grant_exposes_general_browser_and_filesystem_tools(workspace: Path
         "read_document",
         "view_pages",
         "send_file",
+        "fetch_page",
+        "view_web_page",
     )
 
 
