@@ -19,8 +19,8 @@ it.
 | Unit | What it is | Why separate |
 |---|---|---|
 | `assistant-control` | CPU app: Telegram webhook, worker function, LangGraph, tool routing | Deploys often; must not re-version the GPU app |
-| `assistant-llm` | GPU app: vLLM behind an OpenAI-compatible HTTP server | Deploys rarely; owns the expensive image and weights |
-| `assistant-llm-v2` | The same shape with CPU+GPU snapshots; defined, not deployed | A measured configuration is not silently redefined, so the replacement is a second identity until it is accepted |
+| `assistant-llm-v2` | Primary GPU app: vLLM behind an OpenAI-compatible HTTP server with CPU+GPU snapshots | Accepted through Telegram; deploys rarely and owns the expensive image and weights |
+| `assistant-llm` | Original unsnapshotted GPU app | Retained only for rollback and historical comparison |
 | `assistant-sandbox` | Modal Sandboxes for ephemeral coding work | Created at runtime, not deployed |
 | Postgres | External managed provider | Modal has no managed Postgres |
 | Modal Volume | Model weights, vLLM compile cache, task artifacts | Write-once-read-many only |
@@ -63,14 +63,16 @@ exists; do not add Modal-specific code to reach the model.
   before vLLM can answer 401. `@app.server` requires authentication by default,
   so the fix is to omit that argument rather than to add anything.
 
-**Proxy auth needs no code change** (verified 2026-08-28, corrects an earlier
-note here). Modal accepts proxy tokens two ways: the `Modal-Key` and
-`Modal-Secret` headers, or `Authorization: Bearer <token-id>.<token-secret>`,
-which the documentation calls compatible with OpenAI-style clients. The second
-form is what `OpenAICompatibleBackend` already sends, so the token goes in
-`MODEL_API_KEY` and nothing in `app/models/` changes. Token ids start with `wk-`
-and secrets with `ws-`; create them in the dashboard or with
-`modal workspace proxy-tokens`.
+Modal accepts proxy tokens two ways: the `Modal-Key` and `Modal-Secret` headers,
+or `Authorization: Bearer <token-id>.<token-secret>`, which the documentation
+calls compatible with OpenAI-style clients. Bearer compatibility was verified
+on the step 3a `.modal.direct` endpoint. The snapshot-based step 3b
+`.modal.run` endpoint has been accepted with the documented two-header form,
+not with bearer auth. `OpenAICompatibleBackend` therefore supports both
+explicitly: leave `MODEL_AUTH_STYLE=bearer` for ordinary OpenAI-compatible
+services, or set `MODEL_AUTH_STYLE=modal_proxy` for the two Modal headers. In
+both cases the joined token remains in `MODEL_API_KEY`; token ids start with
+`wk-` and secrets with `ws-`.
 
 ## Webhook and long-running work
 
@@ -203,13 +205,12 @@ functions. So the baseline's `.modal.direct` URL and the replacement's
 `@modal.enter(snap=…)` hooks, which `app.server()` cannot express — not because
 one of them is unprotected.
 
-The consequence is not cosmetic. Step 3a's headline result was that a proxy
-token doubles as an ordinary bearer token, so `OpenAICompatibleBackend` needed
-no change. That was established against `.modal.direct`. Whether the same
-equivalence holds for a `.modal.run` endpoint whose documented mechanism is two
-named headers is **unverified**, and it is the thing to test before
-`MODEL_ENDPOINT` moves. If it does not hold, the application does need the
-change this project's notes originally predicted.
+The consequence is not cosmetic. Step 3a established that a proxy token doubles
+as an ordinary bearer token against `.modal.direct`. The `.modal.run` endpoint
+instead requires the documented `Modal-Key` and `Modal-Secret` headers. The
+application now selects that form explicitly with
+`MODEL_AUTH_STYLE=modal_proxy`; offline request tests and the real Telegram E2E
+both passed before the persistent profile moved to v2.
 
 Proxy tokens are workspace-scoped — they are created under `modal workspace
 proxy-tokens`, not per app — so one token covers both Apps and no new
@@ -235,8 +236,9 @@ defaults:
   idle A10 while a user reads or steps away. Revisit it from observed traffic
   and cost.
 
-The optimized deployment uses a new App identity. The measured baseline stays
-deployed until the replacement passes backend, multimodal and Telegram checks.
+The optimized deployment uses a new App identity and is now the primary model
+endpoint. The original measured deployment remains available only for rollback
+and historical comparison; deleting it is a separate destructive human gate.
 
 ## Re-check before relying on these
 

@@ -287,6 +287,35 @@ async def test_invoke_posts_a_complete_request() -> None:
     assert "stream" not in seen["body"]
 
 
+async def test_modal_proxy_auth_sends_the_two_modal_headers() -> None:
+    seen: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["authorization"] = request.headers.get("authorization")
+        seen["modal_key"] = request.headers.get("modal-key")
+        seen["modal_secret"] = request.headers.get("modal-secret")
+        return httpx.Response(200, json=completion_payload(content="pong"))
+
+    async with backend(
+        handler,
+        api_key="wk-example.ws-example",
+        auth_style="modal_proxy",
+    ) as client:
+        await client.invoke([Message(role="user", content=[text_part()])])
+
+    assert seen == {
+        "authorization": None,
+        "modal_key": "wk-example",
+        "modal_secret": "ws-example",
+    }
+
+
+@pytest.mark.parametrize("api_key", [None, "", "secret", "wk-example.bad-secret"])
+def test_modal_proxy_auth_refuses_a_missing_or_malformed_token(api_key: str | None) -> None:
+    with pytest.raises(ValueError, match="MODEL_API_KEY"):
+        backend(lambda _request: httpx.Response(500), api_key=api_key, auth_style="modal_proxy")
+
+
 async def test_a_request_without_tools_omits_them() -> None:
     seen: dict[str, Any] = {}
 

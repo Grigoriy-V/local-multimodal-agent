@@ -4,13 +4,13 @@ The GPU half of the deployed profile: vLLM serving Gemma 4 12B behind an
 OpenAI-compatible API, scaled to zero so no GPU runs while the assistant is
 idle.
 
-Two App identities, on purpose. The live `assistant-llm` is the unsnapshotted
-baseline measured in `reports/2026-08-28_v2_step3a_model_endpoint.md`, and it is
-not defined by this file any more. `model_app.py` now defines
-**`assistant-llm-v2`**, the CPU+GPU snapshot replacement: deployed, at zero
-containers, and never invoked. Its cold start and its snapshot are both
-unmeasured, so no claim about either is available yet, and `MODEL_ENDPOINT`
-still points at the baseline.
+Two App identities remain on purpose. **`assistant-llm-v2`** is the primary
+deployment defined by `model_app.py`: CPU+GPU snapshot enabled, deployed, at zero
+containers when idle, and accepted through the real Telegram path. Its reusable
+snapshot restored to serving in 10.4 seconds in the final control. The original
+unsnapshotted `assistant-llm`, measured in
+`reports/2026-08-28_v2_step3a_model_endpoint.md`, is no longer the configured
+endpoint and remains deployed only for rollback and historical comparison.
 
 Every command below that would start a container is a separate human gate.
 
@@ -73,13 +73,23 @@ project's tooling generates for you:
 .venv\Scripts\python.exe -m modal workspace proxy-tokens create
 ```
 
-It prints a token id (`wk-…`) and a secret (`ws-…`). Modal accepts them joined
-by a period as an ordinary bearer token, which is what the application already
-sends, so no code changes and the value goes straight into `.env`:
+It prints a token id (`wk-…`) and a secret (`ws-…`). Keep them joined by a
+period in `.env`. The baseline `.modal.direct` endpoint accepted that value as
+an ordinary bearer token. The v2 `.modal.run` endpoint has been verified with
+Modal's explicit two-header form, selected by `MODEL_AUTH_STYLE=modal_proxy`:
 
 ```text
 MODEL_ENDPOINT=https://grigoriy-v--assistant-llm-server.us-east.modal.direct/v1
 MODEL_API_KEY=wk-....ws-...
+MODEL_AUTH_STYLE=bearer
+```
+
+The active v2 profile is:
+
+```text
+MODEL_ENDPOINT=https://grigoriy-v--assistant-llm-v2-server-serve.modal.run/v1
+MODEL_API_KEY=wk-....ws-...
+MODEL_AUTH_STYLE=modal_proxy
 ```
 
 Never commit the token. `.env` is ignored; `.env.example` holds the shape only.
@@ -101,10 +111,10 @@ the free row of that table.
 `autoscale.py` changes revert to `SCALEDOWN_WINDOW` in `model_app.py` on the
 next deploy. That constant is the decision; the script is for experiments.
 
-The replacement starts explicitly at `min_containers=0`, `max_containers=1`.
+The primary deployment starts explicitly at `min_containers=0`, `max_containers=1`.
 The zero preserves scale-to-zero; the one caps cost for the initial private
-service. The baseline App remains available until text, multimodal, backend and
-Telegram acceptance pass on the replacement.
+service. The original App remains available only as a rollback/reference until
+the human separately authorizes its retirement.
 
 ## Readiness
 

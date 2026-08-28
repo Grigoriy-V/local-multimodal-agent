@@ -1,0 +1,14 @@
+.venv\Scripts\python.exe -m modal container list --json | .venv\Scripts\python.exe -c "import sys,json; [print(c['Container ID']) for c in json.load(sys.stdin) if c['App Name']=='assistant-llm-v2']" | ForEach-Object { .venv\Scripts\python.exe -m modal container stop -y $_ }
+
+
+.venv/Scripts/python.exe -m modal container stop -y ta-XXXXXXXX
+
+
+.venv/Scripts/python.exe deploy/modal/autoscale.py --window 2
+
+
+
+-----
+
+
+.venv/Scripts/python.exe scripts/measure_endpoint_wake.py --url https://grigoriy-v--assistant-llm-v2-server-serve.modal.run --auth bearer

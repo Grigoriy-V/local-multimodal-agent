@@ -180,7 +180,19 @@ class OpenAICompatibleBackend(ModelBackend):
         self.settings = settings or ModelSettings()
         headers = {"Content-Type": "application/json"}
         if self.settings.api_key:
-            headers["Authorization"] = f"Bearer {self.settings.api_key}"
+            if self.settings.auth_style == "bearer":
+                headers["Authorization"] = f"Bearer {self.settings.api_key}"
+            else:
+                key, separator, secret = self.settings.api_key.partition(".")
+                if not separator or not key.startswith("wk-") or not secret.startswith("ws-"):
+                    raise ValueError(
+                        "MODEL_API_KEY must be '<wk-token-id>.<ws-token-secret>' "
+                        "when MODEL_AUTH_STYLE=modal_proxy"
+                    )
+                headers["Modal-Key"] = key
+                headers["Modal-Secret"] = secret
+        elif self.settings.auth_style == "modal_proxy":
+            raise ValueError("MODEL_API_KEY is required when MODEL_AUTH_STYLE=modal_proxy")
         self._client = httpx.AsyncClient(
             base_url=self.settings.endpoint.rstrip("/"),
             timeout=self.settings.timeout,

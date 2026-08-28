@@ -60,8 +60,8 @@ reconsidered; this roadmap wins any conflict.
   in `reports/test_v1.5/`.
 - The Version 2 direction is agreed and recorded below. Step 1 is closed and
   step 2 is implemented; the local database is at schema version 1 and both
-  conversations and files are scoped by user. Step 3a is closed. Step 3b is
-  implemented and its first restored cold start measured at **25.0 s**, roughly
+  conversations and files are scoped by user. Step 3a and Step 3b are closed.
+  The optimized endpoint's first restored cold start measured at **25.0 s**, roughly
   an 8x reduction against the baseline's 189-201 s, with the documented
   `Modal-Key` / `Modal-Secret` proxy headers confirmed on the `.modal.run`
   endpoint. One restored wake
@@ -79,12 +79,19 @@ reconsidered; this roadmap wins any conflict.
   new snapshot build, and scale-to-zero confirmed. The repeating NCCL TCPStore
   warnings are now diagnosed as a restored heartbeat monitor polling a stale
   pre-snapshot worker address; they are noisy but did not affect inference.
+  The final product-wiring test then sent one real Telegram message through the
+  shared harness and `MODEL_AUTH_STYLE=modal_proxy` to v2. The user received the
+  model's reply; one restored container served the harness's two completion
+  calls in 17.8 s and 1.66 s, then scaled to zero. Step 2's conversational
+  acceptance is therefore closed; its work-request acceptance remains.
   Evidence:
   `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
   `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`,
   building on `reports/2026-08-28_v2_step3b_snapshot_boot.md` and
-  `reports/2026-08-28_v2_step3b_first_boot_failure.md`. The baseline
-  `assistant-llm` still serves `MODEL_ENDPOINT`. Step 3c is not authorized.
+  `reports/2026-08-28_v2_step3b_first_boot_failure.md`. `assistant-llm-v2` is
+  now the primary model deployment and the persistent local profile targets it.
+  The original `assistant-llm` remains deployed only as a rollback/reference
+  App. Step 3c is not authorized.
 
 ## Closed stages
 
@@ -116,7 +123,8 @@ Ordered plan:
    step 2: each user now has their own workspace root, so the file tools cannot
    read across people. Evidence:
    `reports/2026-08-27_v2_step1_store_contract.md`.
-2. **Implemented, not yet accepted.** `ui/telegram/` is a thin adapter over the
+2. **Implemented; conversational acceptance passed, work acceptance pending.**
+   `ui/telegram/` is a thin adapter over the
    same harness surface: identity is derived rather than adopted, the open
    conversation lives in the store, consent reuses the durable interrupts, and
    the polling transport is isolated in `run.py` so a webhook replaces it
@@ -125,14 +133,16 @@ Ordered plan:
    start-up. Real Telegram traffic reached the adapter and was recorded under a
    derived owner with its own workspace directory. Evidence:
    `reports/2026-08-28_v2_step2_telegram_adapter.md`. Acceptance still needs a
-   conversational turn, which needs a model server; the machine currently has no
-   GPU.
+   work request with its capability approval. A real conversational turn has
+   now passed through Telegram, the shared harness and `assistant-llm-v2`; the
+   user received the model reply and the GPU scaled back to zero. Evidence:
+   `reports/2026-08-28_v2_step3b_telegram_live_acceptance.md`.
 3. **Deployed profile.** The first model endpoint proved compatibility, but its
-   roughly three-minute wake is not acceptable as the assistant's normal
-   behaviour. The optimized model deployment is therefore a separate product
-   stage before the control plane. It gets a new Modal App identity; the
-   measured baseline remains available for comparison and rollback until the
-   replacement is accepted.
+   roughly three-minute wake was not acceptable as the assistant's normal
+   behaviour. The optimized model deployment was therefore built as a separate
+   product stage before the control plane, with a new Modal App identity. It is
+   now accepted and primary; the measured original deployment remains available
+   only for rollback and historical comparison.
 
    a. **Closed.** `deploy/modal/` serves Gemma 4 12B on an A10 through vLLM's
       OpenAI-compatible API. Weights load into a Volume once from CPU, the
@@ -148,8 +158,8 @@ Ordered plan:
       deployed App does not use memory snapshots.
       Evidence: `reports/2026-08-28_v2_step3a_model_endpoint.md`.
 
-   b. **Optimized replacement model deployment: deployed and technically
-      accepted; product wiring remains.** A new App identity was built and
+   b. **Closed — optimized replacement deployed and accepted through Telegram.**
+      A new App identity was built and
       validated without overwriting `assistant-llm`:
 
       1. **Done.** `deploy/modal/model_app.py` defines `assistant-llm-v2`, so a
@@ -206,13 +216,19 @@ Ordered plan:
          `FAST_BOOT` / `--enforce-eager` as the fallback. Weight prefetch and
          removal of the two inherited WSL environment variables are later,
          one-variable A/B tests;
-      8. switch `MODEL_ENDPOINT` only after the replacement passes the same
-         backend and Telegram acceptance checks. The current application sends
-         `MODEL_API_KEY` as a bearer token, while v2 has only been accepted with
-         `Modal-Key` / `Modal-Secret`; either bearer compatibility must be
-         demonstrated on v2 or the backend must gain the two-header auth style
-         before v2 becomes the normal endpoint. Retiring the baseline App is a
-         later destructive human gate, not part of deployment.
+      8. **Done. Auth wiring and live Telegram acceptance passed.**
+         `OpenAICompatibleBackend` now keeps bearer auth as its default and adds
+         an explicit `MODEL_AUTH_STYLE=modal_proxy` mode that splits the existing
+         joined proxy token into the already proven `Modal-Key` /
+         `Modal-Secret` headers. Offline request tests cover both valid headers
+         and malformed credentials. The local `.env` still targeted the original
+         deployment before the run. One process-level v2 configuration then carried a real
+         Telegram turn through the shared harness: the user received the model
+         reply, logs show one restored container and two successful completion
+         calls, and scale-to-zero was confirmed. After that acceptance, the
+         persistent local `.env` was promoted to v2 with
+         `MODEL_AUTH_STYLE=modal_proxy`. The original App is rollback/reference
+         only; retiring it remains a later destructive human gate.
 
       Target: a reproducible scale-to-zero endpoint whose restored cold start
       is short enough for a private interactive assistant. No target number is
@@ -266,13 +282,12 @@ this roadmap when a concrete assistant use case needs them.
    future rebuild, record that it removes PyTorch's protection against a stuck
    NCCL watchdog and reassess it before any multi-GPU or parallel deployment.
    Evidence: `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
-2. Accept step 2 against a real model: one conversational turn and one work
-   request through Telegram. The configured local profile currently targets
-   the baseline endpoint and can run the first conversational test immediately.
-   To use the optimized replacement instead, first close its one remaining auth
-   seam: prove bearer compatibility or add the already proven two-header proxy
-   auth style. The optimized replacement should then become the normal product
-   endpoint.
+2. Close the remaining Telegram work-flow acceptance debt. This is not a new
+   product step after 3b: Step 2 implemented both conversation and autonomous
+   work through the same adapter, but only the conversational E2E has run. The
+   next separately authorized live run is one bounded work request, including
+   the capability-approval interaction and final result. The persistent local
+   profile already targets v2; the rollback App need not be retired for this.
 3. Start step 3c control-plane work after Telegram acceptance.
 4. Continue to step 4 document ingestion; it remains planned and has not been
    removed or folded into deployment work.

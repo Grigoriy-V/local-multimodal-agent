@@ -6,6 +6,8 @@ change; this is the only place that reads the environment.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +19,10 @@ class ModelSettings(BaseSettings):
     endpoint: str = "http://127.0.0.1:8000/v1"
     name: str = "gemma-4-12b-it"
     api_key: str | None = None
+    # Ordinary OpenAI-compatible services use bearer auth. Modal web endpoints
+    # can instead require the proxy token as two headers; keeping this explicit
+    # avoids guessing from a URL or from the shape of a secret.
+    auth_style: Literal["bearer", "modal_proxy"] = "bearer"
     timeout: float = 120.0
     # Version 1.5 coding profile. This is an output cap, not reserved output and
     # not the server context length; the validated server context stays 16k.
