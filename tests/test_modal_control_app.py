@@ -21,8 +21,13 @@ def test_control_app_is_cpu_only_and_separate_from_the_model_app() -> None:
 
 def test_image_copies_only_application_source_not_secrets_or_workspaces() -> None:
     text = source()
+    assert '.uv_sync(\n        "."' in text
     assert '.add_local_dir("app"' in text
     assert '.add_local_dir("ui"' in text
+    assert (
+        '"deploy/modal/control_app.py", "/root/project/control_app.py", copy=True'
+        in text
+    )
     assert '.add_local_dir("."' not in text
     assert 'add_local_file(".env"' not in text
     assert 'extra_options="--no-install-project"' in text

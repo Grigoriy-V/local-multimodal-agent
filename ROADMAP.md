@@ -101,15 +101,19 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    - **Offline foundation written, never connected or spawned.** The local and
      PostgreSQL LangGraph savers now share one lifecycle; webhook validation,
      persist-before-spawn, a leased update inbox and the worker call boundary
-     are covered offline. The platform HTTP/spawn adapter, live database
-     migrations, ephemeral sandbox and deployment remain open.
+     are covered offline. The platform HTTP/spawn adapter is deployed but has
+     not been invoked; the ephemeral sandbox remains open.
      `reports/2026-08-28_v2_control_plane_offline_foundation.md`.
-   - **CPU platform adapter written, never deployed or spawned.**
+   - **CPU platform adapter deployed but its first start failed.**
      `assistant-control` has separate scale-to-zero webhook and update-worker
      functions plus one explicit migration command. Its locked image excludes
      local secrets and workspaces. Offline registration and the full regression
-     suite passed. The allow-listed Modal control Secret now exists; no image,
-     deployment or worker exists yet.
+     suite passed. The allow-listed Modal control Secret exists, and the
+     `assistant-control` app deployed successfully in 6.748 s. Opening the web
+     URL caused repeated CPU starts for the browser's `GET /favicon.ico`; every
+     container failed before application code with `ModuleNotFoundError` because
+     the deployment module was absent from the image. The packaging correction
+     is written and offline-only until a separately approved redeploy.
      `reports/2026-08-28_v2_control_plane_cpu_adapter.md`.
    - **Neon live correctness acceptance passed; performance remains open.** The
      pooled endpoint passed the conversation contract and the real
@@ -126,11 +130,12 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      the budget. Cold must be **<=500 ms** and warm must be **<=100 ms**; missing
      either limit keeps the control-plane stage open. Acceptance must run from
      the deployed CPU path, not from the developer machine, and records the
-     physical container region. The production-shared CPU probe is written and
-     offline-verified, uses Modal's default unpinned placement to avoid a region
-     price multiplier, and has not been deployed or invoked.
+     physical container region. The production-shared CPU probe is written,
+     offline-verified and present in the broken `assistant-control` deployment;
+     it uses Modal's default unpinned placement to avoid a region price
+     multiplier. It has not reached application code.
      `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
-   - Build/deploy and accept the written platform adapter. The Telegram secret
+   - Accept the deployed platform adapter. The Telegram secret
      token and allowed-user list are checked in the application, because
      platform proxy auth cannot be used for a Telegram webhook. Registering the
      webhook retires polling rather than joining it: Telegram refuses

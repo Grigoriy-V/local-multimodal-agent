@@ -1,7 +1,7 @@
 # Control-plane database latency probe
 
 **Date:** 2026-08-28  
-**Scope:** offline implementation plus Modal Secret creation; no deployment or worker run
+**Scope:** offline implementation, Modal Secret creation and failed CPU control-plane runtime start
 
 ## Result
 
@@ -49,17 +49,49 @@ The Modal Secret `assistant-control` was created from 10 allow-listed runtime
 keys. `AGENT_TEST_DATABASE_URL` and unrelated `.env` values were not copied.
 The secret values were not printed or written into the repository.
 
-No image build, deploy, Modal Function, Telegram request, model request or GPU
-worker occurred. VRAM use was **0** and compute cost from this work was **0**.
-No latency result exists yet, so the database performance gate remains open.
+The `assistant-control` app was successfully deployed after the human ran the
+UTF-8-enabled Modal client command. Modal reported **6.748 s** and published
+`process_telegram_update`, `measure_database_latency`, and the
+`telegram_webhook` endpoint. Opening the endpoint in a browser then generated a
+`GET /favicon.ico`. Modal repeatedly started CPU containers, but every start
+failed before application code with `ModuleNotFoundError: No module named
+'control_app'`: `include_source=False` was correct for excluding unrelated
+repository content, but the allow-listed image inputs omitted the deployment
+module itself. The corrected image now copies exactly that file to
+`/root/project/control_app.py`. It has not been redeployed.
+
+No Telegram update, database operation, model request or GPU worker reached
+application code. VRAM use was **0**. Deployment and failed CPU-start cost was
+not measured. No latency result exists, so the database performance gate
+remains open.
+
+The first authorized deploy attempt built two small intermediate image layers
+and then stopped before publication: `uv_sync` had incorrectly been given a
+remote Linux path even though its argument is a local project path. On Windows
+that became `/root/project\\pyproject.toml`. The image definition now passes
+`.`; `uv_sync` uploads only the local `pyproject.toml` and `uv.lock` itself.
+No application Function was invoked. A retry is a new worker/deploy gate.
+
+The second authorized attempt was terminated by the local command wrapper's
+10-second timeout while Modal was still building. A read-only App listing
+showed the new `assistant-control` attempt as `stopped` with zero tasks. This is
+not a deployment result and no application Function was invoked. The next
+attempt must use a command timeout long enough for the image build and remains
+a separate deploy gate.
+
+The third authorized attempt built the corrected image layers, then the local
+Windows Modal client failed while encoding its Unicode checkmark through the
+system `charmap` codec. The resulting App attempt is again `stopped` with zero
+tasks. The next command must set `PYTHONUTF8=1` for the client process; this does
+not alter the image or runtime configuration and remains a separate deploy
+gate.
 
 ## Remaining acceptance sequence
 
 Each item starts a distinct CPU worker and therefore needs fresh explicit
 permission immediately before it runs:
 
-1. deploy `assistant-control` (the deploy may build an image but must not invoke
-   a function);
+1. redeploy the corrected `assistant-control` image without invoking a function;
 2. invoke `prepare` once;
 3. after Neon has scaled to zero, invoke `read` once;
 4. after Neon has scaled to zero again, invoke `write` once.

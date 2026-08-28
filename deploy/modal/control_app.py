@@ -23,16 +23,17 @@ control_secret = modal.Secret.from_name(SECRET_NAME)
 # image layer.
 control_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .add_local_file("pyproject.toml", "/root/project/pyproject.toml", copy=True)
-    .add_local_file("uv.lock", "/root/project/uv.lock", copy=True)
     .uv_sync(
-        "/root/project",
+        ".",
         groups=["app", "agent", "postgres", "deploy"],
         frozen=True,
         extra_options="--no-install-project",
     )
     .add_local_dir("app", "/root/project/app", copy=True)
     .add_local_dir("ui", "/root/project/ui", copy=True)
+    .add_local_file(
+        "deploy/modal/control_app.py", "/root/project/control_app.py", copy=True
+    )
     .env({"PYTHONPATH": "/root/project"})
 )
 
