@@ -23,29 +23,30 @@ refused before a model request.
 
 ## Current state
 
-- **Version 1** is the persistent local multimodal chat baseline.
-  Evidence: `reports/2026-08-01_v1_product_smoke.md`.
-- **Version 1.5** is closed: one entry point, model-authored plans and
-  validation, scoped grants, bounded implement/evaluate/repair, browser and
-  filesystem evidence, durable cancellation, downloadable artifacts, and a known
-  16,384-token boundary. Evidence:
-  `reports/2026-08-02_v15_product_acceptance.md`, screenshots in
-  `reports/test_v1.5/`.
-- **Version 2** is in progress: everything under **Done** below is finished, and
-  the **Queue** is the remaining order. The local database is at schema version
-  1 and conversations, memory and files are scoped by user. `assistant-llm-v2`
-  is the primary model deployment and the local profile targets it with
-  `MODEL_AUTH_STYLE=modal_proxy`; the original `assistant-llm` remains deployed
-  as rollback only, and retiring it is a destructive human gate.
+Version 2 is in progress: **Done** below is finished, **Queue** is the remaining
+order. Everything earlier is closed and listed under **Closed stages**.
+
+- The local database is at schema version 1; conversations, memory and files are
+  scoped by user.
+- `assistant-llm-v2` at
+  `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run` is the primary
+  model deployment, reached with `MODEL_AUTH_STYLE=modal_proxy`. The original
+  `assistant-llm` stays deployed as rollback only; retiring it is a destructive
+  human gate.
+- Standing constraint on the next `assistant-llm-v2` deploy, and never a reason
+  to create one: apply the NCCL loopback rendezvous fix before snapshot creation
+  and verify the logs in that deploy's acceptance. The current warnings are
+  harmless. `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
 
 ## Closed stages
 
 - Stage 1 — multimodal smoke: `reports/2026-08-01_stage1_smoke_script.md`.
 - Stage 2 — minimal LangGraph agent: `reports/2026-08-01_stage2_agent.md`.
-- Stage 3 / Version 1 — working product: `reports/2026-08-01_v1_product_smoke.md`.
-- Version 1.5 — general autonomous harness:
-  `reports/2026-08-02_v15_product_acceptance.md`, with per-step evidence in the
-  `reports/2026-08-0[12]_v15_step*.md` series.
+- Stage 3 / Version 1 — the persistent local multimodal product:
+  `reports/2026-08-01_v1_product_smoke.md`.
+- Version 1.5 — general autonomous harness, with a known 16,384-token boundary:
+  `reports/2026-08-02_v15_product_acceptance.md`, screenshots in
+  `reports/test_v1.5/`, per-step evidence in `reports/2026-08-0[12]_v15_step*.md`.
 
 ## Version 2 — Deployable personal assistant
 
@@ -60,69 +61,28 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
 
 ### Done
 
-- **Persistence contract.** `ConversationStore` is the contract,
-  `SqliteStore` its first implementation, conversations and facts are scoped by
-  owner, a shared contract suite is parameterised over implementations, and a
-  `PRAGMA user_version` migration carried the existing database forward.
-  Evidence: `reports/2026-08-27_v2_step1_store_contract.md`.
-
-- **Telegram adapter.** `ui/telegram/` is a thin adapter over the same
-   harness surface: identity is derived rather than adopted, the open
-   conversation lives in the store, consent reuses the durable interrupts, and
-   the polling transport is isolated in `run.py` so a webhook replaces it without
-   touching the adapter. Access is an explicit allow list, empty by default.
-   Both acceptances passed live: a conversational turn, and a bounded work
-   request that created and delivered a file. The same session exposed and fixed
-   three defects — an `input_audio` format literal that refused Ogg, history
-   replay past the served audio cap, and an adapter that never sent a message's
-   own media. Evidence:
-   `reports/2026-08-28_v2_step2_telegram_adapter.md`,
-   `reports/2026-08-28_v2_step3b_telegram_live_acceptance.md`,
+- **Persistence contract** — `ConversationStore`, `SqliteStore`, per-owner
+  scoping, one contract suite over every implementation, a `user_version`
+  migration. `reports/2026-08-27_v2_step1_store_contract.md`.
+- **Telegram adapter** — derived identity, allow list empty by default,
+  transport isolated in `run.py`; conversational and work acceptance both passed
+  live, and voice and media delivery were fixed after them.
+  `reports/2026-08-28_v2_step2_telegram_adapter.md`,
+  `reports/2026-08-28_v2_step3b_telegram_live_acceptance.md`,
   `reports/2026-08-28_v2_telegram_voice_and_media_budget.md`.
-
-- **First model endpoint.** `deploy/modal/` serves Gemma 4 12B on an A10
-  through vLLM's OpenAI-compatible API, with weights in a Volume, proxy auth at
-  the edge and no change to `app/`. Measured 189-201 s to answer from idle,
-  1.8-2.4 s warm; the wake is dominated by vLLM import, profiling, compilation
-  and CUDA graph capture, not by loading weights. Its roughly three-minute wake
-  is why the optimized endpoint became its own stage before the control plane.
-  Evidence: `reports/2026-08-28_v2_step3a_model_endpoint.md`.
-
-- **Optimized endpoint, accepted through Telegram.** `assistant-llm-v2` is a
-  separate App identity at
-  `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run`, using CPU + GPU
-  memory snapshots, explicit `min_containers=0` / `max_containers=1` /
-  `scaledown_window`, and readiness hooks that wait on vLLM's `/health`.
-  Restored cold start measured **10.4 s** request-to-serving with no new
-  snapshot build, against the 189-201 s baseline; text, image and audio all
-  pass; scale to zero confirmed. Unauthenticated and invalid-credential requests
-  are refused with 401 at the edge in under 1.2 s without starting a container,
-  so the public URL is not a secret. Credentials are the documented
-  `Modal-Key` / `Modal-Secret` headers, which `OpenAICompatibleBackend` sends
-  under `MODEL_AUTH_STYLE=modal_proxy`. Evidence:
+- **First model endpoint** — Gemma 4 12B on an A10 through vLLM, 189-201 s from
+  idle. That wake is why the optimized endpoint became its own stage.
+  `reports/2026-08-28_v2_step3a_model_endpoint.md`.
+- **Optimized endpoint** — CPU + GPU snapshots, scale to zero, restored cold
+  start **10.4 s**, text, image and audio all served, unauthorized callers
+  refused at the edge without starting a container.
   `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
   `reports/2026-08-28_v2_step3b_edge_auth_refusal.md`,
   `reports/2026-08-28_v2_step3b_snapshot_boot.md`,
   `reports/2026-08-28_v2_step3b_first_boot_failure.md`.
-
-  *Carried forward to the next v2 deploy, and never a reason to create one:*
-  apply the NCCL loopback rendezvous fix before snapshot creation and verify the
-  logs as part of that deploy's acceptance. The current TCPStore warnings are a
-  restored heartbeat monitor polling a stale pre-snapshot address — noisy,
-  harmless. If `TORCH_NCCL_ENABLE_MONITORING=0` is reconsidered, record that it
-  removes PyTorch's protection against a stuck NCCL watchdog. Evidence:
-  `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
-
-- **The assistant stopped misdescribing itself.** `app/capabilities.py`
-  generates what it can do from the toolbox the graph is compiled with, the
-  attachment admission policy, and a `Delivery` each adapter declares beside its
-  own rendering code; the same sentence closes the tool list for the task
-  implementer and validator, which is where the invented `browser.inspect` came
-  from. `/can` answers the same question in Telegram from the wiring, with no
-  model call. Telegram gained headings for the plan a person approves and for
-  the finished task, with model text escaped and a plain-text fallback, and
-  `autoscale.py` warns below the 20 s an approval pause needs. Offline only —
-  none of it has been seen in a real chat. Evidence:
+- **Capability honesty and Telegram shape** — the assistant describes itself
+  from its own wiring, `/can` answers the same without a model call, and the
+  plan and result have a readable form. Offline only; queue 3 is its evidence.
   `reports/2026-08-28_v2_capability_honesty_and_telegram_shape.md`.
 
 ### Queue
