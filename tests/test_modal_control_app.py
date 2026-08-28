@@ -15,8 +15,24 @@ def test_control_app_is_cpu_only_and_separate_from_the_model_app() -> None:
     assert 'APP_NAME = "assistant-control"' in text
     assert "gpu=" not in text
     assert "assistant-llm-v2" not in text
-    assert "CONTROL_REGION" not in text
-    assert "region=CONTROL_REGION" not in text
+
+
+def test_placement_stays_unpinned_because_pinning_costs_more_than_it_saves() -> None:
+    """Not an oversight. Measured, costed and decided.
+
+    Pinning a region multiplies the worker's whole lifetime by 1.75x, and the
+    worker is alive for the entire message because it waits on the model:
+    about $0.00033 a message. The latency it would remove is one to three
+    database calls sitting between two model calls while the GPU is warm —
+    about $0.00006. Four to eight times the cost for the smaller number.
+
+    See `DECISIONS.md`, 2026-08-28. Reversing this needs a reason that is not
+    money, since the whole question is worth about a dollar a month.
+    """
+
+    text = source()
+    assert "region=" not in text
+    assert "routing_region" not in text
 
 
 def test_image_copies_only_application_source_not_secrets_or_workspaces() -> None:
@@ -60,6 +76,37 @@ def test_database_latency_probe_is_cpu_only_and_does_not_call_the_model() -> Non
     assert ".append(" in probe
     assert "ModelBackend" not in probe
     assert "MODEL_ENDPOINT" not in probe
+
+
+def test_the_comparison_never_takes_a_dsn_as_an_argument() -> None:
+    """A credential passed as an argument is a credential in the call record.
+
+    The probe chooses between configured databases by name; the values stay in
+    the platform secret where they already are.
+    """
+
+    tree = ast.parse(source())
+    probe = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "measure_database_latency"
+    )
+    parameters = [argument.arg for argument in probe.args.args]
+
+    assert parameters == ["operation", "warm_runs", "database"]
+    assert 'database not in {"primary", "alternate"}' in source()
+
+
+def test_the_two_databases_are_measured_in_one_invocation() -> None:
+    """Placement is unpinned, so two calls can land in two regions.
+
+    Measured separately, the difference between the results would include the
+    difference between the workers — which is the thing being controlled for.
+    """
+
+    text = source()
+    assert '"primary": sample(profile("primary"), read_once)' in text
+    assert '"alternate": sample(profile("alternate"), read_once)' in text
 
 
 def test_webhook_explicitly_stays_outside_modal_proxy_auth() -> None:

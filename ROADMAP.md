@@ -33,10 +33,17 @@ order. Everything earlier is closed and listed under **Closed stages**.
   model deployment, reached with `MODEL_AUTH_STYLE=modal_proxy`. The original
   `assistant-llm` stays deployed as rollback only; retiring it is a destructive
   human gate.
-- Standing constraint on the next `assistant-llm-v2` deploy, and never a reason
-  to create one: apply the NCCL loopback rendezvous fix before snapshot creation
-  and verify the logs in that deploy's acceptance. The current warnings are
-  harmless. `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
+- Two things are owed to the next `assistant-llm-v2` deploy, and neither is a
+  reason to create one:
+  - `SCALEDOWN_WINDOW` is now **2 s**, Modal's floor, chosen because a 30 s
+    window cost about $0.0092 of idle A10 per message — more than half the GPU
+    spend. The accepted price is that an interactive approval pays one restored
+    cold start (10.4 s) instead of finding the container warm. **The running app
+    still has 30 s**; the constant applies when it is next deployed, or sooner
+    through `deploy/modal/autoscale.py`, which changes it over the network.
+  - Apply the NCCL loopback rendezvous fix before snapshot creation and verify
+    the logs in that deploy's acceptance; the current warnings are harmless.
+    `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
 
 ## Closed stages
 
@@ -126,24 +133,22 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      first migration were removed after explicit approval; only the active
      `public` checkpoint tables remain.
      `reports/2026-08-28_v2_control_plane_neon_live.md`.
-   - **Database latency is a closing gate, not later optimization.** One complete
-     application-level read or write is timed from entry to result, including
-     connection acquisition, transactions and every internal SQL round-trip.
-     Splitting one logical operation into several database calls does not split
-     the budget. Cold must be **<=500 ms** and warm must be **<=100 ms**; missing
-     either limit keeps the control-plane stage open. Acceptance must run from
-     the deployed CPU path, not from the developer machine, and records the
-     physical container region. The production-shared CPU probe is written,
-     offline-verified and present in the corrected `assistant-control`
-     deployment; it uses Modal's default unpinned placement to avoid a region
-     price multiplier. Its CPU-only `prepare` invocation created the isolated
-     representative Neon fixture successfully. The first warm read from
-     `eu-south-2` failed at 640.399-961.732 ms (warm max 961.732 ms). Neon
-     reported only 0.1-6.7 ms of database execution, exposing sequential network
-     round-trips and runtime migration checks as the cause. A one-round-trip
-     read, one-round-trip append and migration-free runtime open are written and
-     offline-verified but not deployed; cold read and write measurements remain
-     open.
+   - **Database latency: gate withdrawn, current delays accepted.** The read
+     path was collapsed from four or five sequential round-trips plus a
+     per-open migration check to a single round-trip, taking the warm maximum
+     from 961.7 ms to 109.4 ms — one round-trip exactly, with four of five
+     samples inside 0.4 ms. That correction is kept. An A/B against a second
+     Neon project then measured both databases from one container, controlling
+     for unpinned placement: **2.1-3.4 ms** co-located, **98.7-196.9 ms** across
+     the Atlantic. The database is placed correctly and the worker is not, so
+     migrating the database to Europe would have turned a passing result into a
+     failing one. Costing both options settled it: the latency wastes about
+     $0.00006 of warm GPU per message, pinning the region would add about
+     $0.00033, and the whole question is worth a dollar a month against roughly
+     $46 of GPU. **The human withdrew the 100 ms / 500 ms limits**, keeps
+     placement unpinned and accepts current delays; the probe and its `compare`
+     operation stay as instruments, not acceptance. Reasoning and what it rules
+     out: `DECISIONS.md`, 2026-08-28.
      `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
    - Accept the deployed platform adapter. The Telegram secret
      token and allowed-user list are checked in the application, because

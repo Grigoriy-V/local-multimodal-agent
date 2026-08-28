@@ -84,6 +84,11 @@ class AgentSettings(BaseSettings):
     # together with `sslmode=require`. It is a credential and belongs in the
     # environment or a platform secret, never in the repository.
     database_url: str = ""
+    # A second database, used only to measure one against the other. It exists
+    # because the deployed store's latency turned out to be dominated by the
+    # distance between the worker and the database, and that claim is worth a
+    # measurement rather than a map. Empty means there is nothing to compare to.
+    alt_database_url: str = ""
     # Keeps this application's tables together in a database that may hold
     # other things, and gives a test a namespace of its own.
     database_schema: str = "public"

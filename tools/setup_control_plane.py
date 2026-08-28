@@ -34,8 +34,17 @@ async def setup_control_plane(settings: AgentSettings | None = None) -> None:
 def main() -> None:
     """Run psycopg on an event loop it supports on every deployment host."""
 
+    settings = AgentSettings()
+    if "--alternate" in sys.argv[1:]:
+        # The comparison database gets the same schema through the same
+        # migration. A second setup path would be a second thing to keep true.
+        if not settings.alt_database_url:
+            raise ValueError("AGENT_ALT_DATABASE_URL is not configured")
+        settings = settings.model_copy(
+            update={"database_url": settings.alt_database_url}
+        )
     loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
-    asyncio.run(setup_control_plane(), loop_factory=loop_factory)
+    asyncio.run(setup_control_plane(settings), loop_factory=loop_factory)
 
 
 if __name__ == "__main__":

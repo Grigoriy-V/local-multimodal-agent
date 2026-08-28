@@ -95,12 +95,23 @@ async def process_telegram_update(update_id: int) -> bool:
     timeout=120,
     include_source=False,
 )
-def measure_database_latency(operation: str, warm_runs: int = 5) -> dict[str, object]:
+def measure_database_latency(
+    operation: str, warm_runs: int = 5, database: str = "primary"
+) -> dict[str, object]:
     """Measure one complete production read or write without touching the model.
 
     ``prepare`` creates a representative isolated read fixture. A later
     ``read`` or ``write`` invocation must happen only after Neon is known to be
     idle if its first sample is to count as database-cold acceptance.
+
+    ``database`` selects between the deployed database and a second one
+    configured as ``AGENT_ALT_DATABASE_URL``. ``compare`` measures the warm read
+    against both **inside one invocation**, which is the only way to get an
+    honest answer: placement is unpinned, so two separate calls can run in two
+    regions and the difference between them would not be the difference between
+    the databases. A DSN is never passed as an argument — it would then appear
+    in the platform's own call records — so the choice is a name and the values
+    stay in the secret.
     """
 
     import os
@@ -113,14 +124,23 @@ def measure_database_latency(operation: str, warm_runs: int = 5) -> dict[str, ob
     from app.memory import ConversationStore, open_store
     from app.models import ContentPart, Message
 
-    if operation not in {"prepare", "read", "write"}:
-        raise ValueError("operation must be prepare, read or write")
+    if operation not in {"prepare", "read", "write", "compare"}:
+        raise ValueError("operation must be prepare, read, write or compare")
     if not 1 <= warm_runs <= 20:
         raise ValueError("warm_runs must be between 1 and 20")
+    if database not in {"primary", "alternate"}:
+        raise ValueError("database must be primary or alternate")
 
-    settings = AgentSettings()
-    if not settings.database_url:
-        raise RuntimeError("AGENT_DATABASE_URL is not configured")
+    configured = AgentSettings()
+
+    def profile(name: str) -> AgentSettings:
+        url = configured.database_url if name == "primary" else configured.alt_database_url
+        if not url:
+            key = "AGENT_DATABASE_URL" if name == "primary" else "AGENT_ALT_DATABASE_URL"
+            raise RuntimeError(f"{key} is not configured")
+        return configured.model_copy(update={"database_url": url})
+
+    settings = profile(database)
 
     owner = "database-latency-benchmark-v1"
     fixture = "database-latency-read-fixture-v1"
@@ -177,6 +197,40 @@ def measure_database_latency(operation: str, warm_runs: int = 5) -> dict[str, ob
         )
         return {"messages": count}
 
+    def sample(chosen: AgentSettings, run_once) -> dict[str, object]:
+        started = time.perf_counter()
+        store = open_store(chosen)
+        try:
+            shape = run_once(store)
+            cold_ms = (time.perf_counter() - started) * 1000
+            warm_ms = []
+            for _ in range(warm_runs):
+                warm_started = time.perf_counter()
+                shape = run_once(store)
+                warm_ms.append((time.perf_counter() - warm_started) * 1000)
+        finally:
+            for thread_id in created_threads:
+                store.delete_thread(thread_id)
+            created_threads.clear()
+            store.close()
+        return {
+            "cold_ms": round(cold_ms, 3),
+            "warm_ms": [round(value, 3) for value in warm_ms],
+            "warm_max_ms": round(max(warm_ms), 3),
+            "warm_min_ms": round(min(warm_ms), 3),
+            "shape": shape,
+        }
+
+    if operation == "compare":
+        # One container, one region, back to back. The only thing that differs
+        # between the two results is where the database is.
+        return {
+            "operation": operation,
+            "region": os.environ.get("MODAL_REGION", "unknown"),
+            "primary": sample(profile("primary"), read_once),
+            "alternate": sample(profile("alternate"), read_once),
+        }
+
     run_once = read_once if operation == "read" else write_once
     started = time.perf_counter()
     store = open_store(settings)
@@ -190,6 +244,7 @@ def measure_database_latency(operation: str, warm_runs: int = 5) -> dict[str, ob
             warm_ms.append((time.perf_counter() - warm_started) * 1000)
         return {
             "operation": operation,
+            "database": database,
             "cold_ms": round(cold_ms, 3),
             "warm_ms": [round(value, 3) for value in warm_ms],
             "warm_max_ms": round(max(warm_ms), 3),

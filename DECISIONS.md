@@ -328,3 +328,58 @@ later measured change.
 unbounded GPU replicas, a positive warm-container floor, declaring success from
 one cold invocation, changing several performance variables in one run, and
 deleting the baseline as part of replacement deployment.
+
+## 2026-08-28: Database latency is not a gate, and the region stays unpinned
+
+**Decision.** The control plane's `<=100 ms` warm and `<=500 ms` cold database
+limits are withdrawn as a closing gate. Modal placement stays unpinned, the
+database stays in Neon `us-east-2`, and the measured cross-region latency of
+roughly 110 ms per round trip is accepted as current behaviour. The probe,
+the `compare` operation and the second database configuration are kept as
+instruments, not as acceptance criteria.
+
+**Why.** The gate was written before there was a number, and every number that
+arrived afterwards argued against it.
+
+The first correction was real and is kept: one application-level read used to
+cost four to five sequential round trips plus a migration check on every store
+opening. Collapsing it to a single round trip took the warm maximum from
+961.7 ms to one round trip exactly — four of five samples within 0.4 ms of
+109.4 ms. Beyond that the code has nothing left to give, because the database
+itself spends 0.6 ms on the query.
+
+An A/B then measured both databases from one container to control for
+placement, which is unpinned and had already landed on two different
+continents. Co-located: **2.1-3.4 ms**. Across the Atlantic: **98.7-196.9 ms**.
+So the database is placed correctly and the worker is not — and migrating the
+database to Europe, which the earlier evidence appeared to argue for, would
+have turned a passing result into a failing one.
+
+What settled it was costing both options instead of assuming:
+
+- **Latency costs money only where something waits with the meter running.**
+  That is the one to three database calls that fall between two model calls
+  while the GPU is warm and idle. At 110 ms each that is 0.1-0.3 s of warm GPU,
+  about **$0.00006** per message.
+- **Pinning costs 1.75x on the worker's whole lifetime**, and the worker is
+  alive for the entire message because it waits on the model — 20-25 s. That is
+  about **$0.00033** per message.
+
+Pinning is therefore four to eight times more expensive than the latency it
+removes. At a hundred messages a day the whole argument is worth about a dollar
+a month, against roughly $46 of GPU for the same messages. Neither figure is
+worth a decision, so the decision is made on product grounds instead: current
+delays are acceptable to the human, and nothing about them is load-bearing.
+
+The same arithmetic points at what does matter. A 30-second idle window costs
+about **$0.0092** per message — more than half the GPU bill — and the router
+spends a second full-context request on every message. Both are already queued
+under measurement and economics, and both are worth roughly thirty times more
+than this entire question.
+
+**Rules out.** Pinning `region=` on the control functions to buy latency;
+migrating the production database on the strength of a measurement whose worker
+placement was not controlled; treating a latency limit invented before
+measurement as acceptance; and pinning the GPU app, where a 1.75x multiplier
+would be real money and 110 ms would disappear into a multi-second inference
+anyway.

@@ -104,10 +104,18 @@ GPU_MEMORY_UTILIZATION = 0.80
 # without deploying — see `autoscale.py` — but a deploy resets it to this value,
 # so this constant is the intended default and not merely a starting point.
 #
-# The first restored cold start measured 25 seconds. For this private service,
-# prefer prompt scale-to-zero over paying for an idle A10 while a user reads or
-# steps away. Revisit the tradeoff from observed traffic and cost.
-SCALEDOWN_WINDOW = 30
+# Set to Modal's floor deliberately, and it is the largest single lever on this
+# project's bill: a 30-second window costs about $0.0092 of idle A10 per
+# message, which was more than half the GPU spend for a service that is idle by
+# design between messages. A restored wake measured 10.4 seconds, so the price
+# of the floor is that an interactive approval — where a person reads a plan and
+# presses a button — pays one restored cold start instead of finding the
+# container still warm. The human chose the bill over the pause, knowing that.
+#
+# Adaptive scaledown, which would hold the window open only while someone is
+# actually replying, is queued under measurement and economics. Until then this
+# is a fixed number and a fixed trade.
+SCALEDOWN_WINDOW = 2
 
 # Scale-to-zero is the product requirement, so the floor is stated rather than
 # inherited from a platform default that could change. The ceiling caps cost:

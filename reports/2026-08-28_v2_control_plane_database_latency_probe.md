@@ -147,3 +147,94 @@ Offline verification after the correction: targeted persistence/control tests
 conversion notice). A broader Ruff invocation also inspected unrelated files
 and found a pre-existing unused `field` import in `app/agent/task_graph.py`; it
 was not changed as part of this database correction.
+
+## Second warm result: the code stopped being the bottleneck
+
+The corrected image was deployed in **19.086 s** with zero tasks started, and
+one authorized warm `read` was then invoked in region `eu-south-2`. The
+representative shape was returned as expected.
+
+| | before | after |
+|---|---|---|
+| warm samples (ms) | 749.0, 640.4, 648.7, 641.8, 961.7 | 109.8, 109.5, 109.4, 109.4, **218.0** |
+| warm max (ms) | 961.7 | 218.0 |
+| cold (ms) | 2421.7 | 1009.0 |
+
+Four of the five warm samples land within **0.4 ms of each other at 109.4 ms**.
+That is not a measurement of this application any more. Neon is in AWS
+**us-east-2 (Ohio)** and the worker ran in **eu-south-2 (Spain)**; server
+execution for the whole workload is about 5 ms, so 109 ms is one trans-Atlantic
+round trip and essentially nothing else. The read is now a single round trip, as
+the correction intended — an **8.8x** improvement on the warm maximum.
+
+**The gate still fails, and no code change can pass it.** The limit is 100 ms
+and the floor imposed by geography is 109 ms. Nine milliseconds of that gap is
+distance, not software.
+
+Two questions remain open, and only the first is about this repository:
+
+1. **The fifth sample at 218.0 ms is almost exactly two round trips.** Something
+   occasionally costs a second one — a pooler-dropped connection, a reconnect,
+   or a stray statement. Acceptance uses the maximum, so this alone fails the
+   gate even at a distance where the median would pass. It needs identifying
+   before placement is blamed for it.
+2. **Placement.** With both ends on one continent the same read is roughly
+   5-30 ms and the budget is comfortable. The current split is the only
+   arrangement that cannot pass. The human deferred this decision until the
+   engineering was settled; it now is.
+
+The cold sample of 1009.0 ms is not accepted as database-cold: Neon's idleness
+before the call was not confirmed. At 109 ms per round trip a TLS handshake and
+authentication alone account for several hundred milliseconds of it.
+
+## The A/B, and why it reversed the conclusion
+
+A second Neon project was created in **eu-central-1 (Frankfurt)** and given the
+same schema through the same migration. The probe gained a `compare` operation
+that measures both databases **inside one invocation**, because placement is
+unpinned: measured in two calls, the difference between the results would have
+included the difference between the workers, which is the variable being
+controlled for. A DSN is never an argument — it would land in the platform's
+call records — so the choice is a name and the values stay in the secret.
+
+The container landed in **us-east-2** this time, not `eu-south-2`.
+
+| | database | warm samples (ms) | warm max |
+|---|---|---|---|
+| primary | Neon **us-east-2** | 2.764, 2.677, 2.243, 2.120, 3.442 | **3.442** |
+| alternate | Neon **eu-central-1** | 98.796, 98.699, 99.038, 98.877, 196.902 | 196.902 |
+
+Cold: **111.8 ms** primary, **707.6 ms** alternate. Both read the expected shape.
+
+**Co-located, the gate passes with room to spare.** 3.4 ms against a 100 ms
+limit is not a pass by inches; it is thirty times under. The same database that
+answered in 109 ms from Spain answers in 2.5 ms from Ohio.
+
+**So the database is not in the wrong place — the worker is in an unpredictable
+one.** Two invocations of the same deployed function landed on two continents.
+That variance, not the database's address, is what the first measurement was
+actually recording.
+
+**Moving the database to Europe would have been the wrong move, and this run is
+what prevented it.** Had the primary been migrated to Frankfurt on the strength
+of the `eu-south-2` reading, this container would have measured 98.7-196.9 ms
+instead of 2.1-3.4 ms — a gate failure produced by the fix. The experiment cost
+one free Neon project and a few seconds of CPU.
+
+### What actually closes the gate
+
+Pin the control functions to the region the database is in. The functions
+currently use Modal's default unpinned placement, chosen to avoid a region price
+multiplier; that trade was made before there was a number, and the number is
+**40x on every database round trip**. The multiplier for the US region the
+database already sits in should be checked before assuming it costs anything.
+
+### The outlier is one extra round trip, now confirmed
+
+The fifth sample was anomalous in both databases at once: 196.902 ms against a
+98.8 ms baseline, and 3.442 ms against a 2.4 ms one. Doubling on the slow path
+and a fixed ~1 ms on the fast path is the signature of exactly one additional
+round trip, not of variance. It reproduces on the fifth sample of five across
+three separate runs, so it is periodic rather than random — a pooler recycling
+the connection is the first thing to look at. Co-located it costs a millisecond
+and cannot fail the gate; it should still be identified before acceptance.

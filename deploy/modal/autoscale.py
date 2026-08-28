@@ -23,11 +23,12 @@ from model_app import APP_NAME, SCALEDOWN_WINDOW
 
 SERVER_NAME = "Server"
 
-# A window shorter than this cannot cover the pause a person takes to read a
-# plan and press a button. Measured the hard way: with 10 s, one approval became
-# two cold starts, because the container scaled to zero while the plan was being
-# read. Not a refusal — a short window is right for a throughput measurement, and
-# an adaptive window is planned — but it is never right by accident.
+# What an interactive approval would need: a person reads a plan and presses a
+# button, and with 10 s one approval became two cold starts. The deployed
+# default is now deliberately *below* this — idle GPU was more than half the
+# bill — so this is not a rule being broken but a trade being priced. The note
+# below prints only when someone asks for something shorter than the deployed
+# default, which is the case where it is worth saying out loud.
 INTERACTIVE_FLOOR = 20
 
 
@@ -53,11 +54,13 @@ def main() -> int:
         print(f"refusing {arguments.window}s: Modal accepts 2-1200")
         return 1
 
-    if arguments.window < INTERACTIVE_FLOOR:
+    if arguments.window < min(INTERACTIVE_FLOOR, SCALEDOWN_WINDOW):
         print(
-            f"warning: {arguments.window}s is below the {INTERACTIVE_FLOOR}s a waiting "
-            "approval needs. An interactive turn that stops for a button will pay a "
-            "second cold start. Fine for a measurement, wrong for use."
+            f"note: {arguments.window}s is below both the deployed default of "
+            f"{SCALEDOWN_WINDOW}s and the {INTERACTIVE_FLOOR}s a waiting approval "
+            "would need. An interactive turn that stops for a button pays a cold "
+            "start either way; going lower only trims the tail after the last "
+            "request."
         )
 
     # The autoscaler belongs to the class instance, not to a method. Two earlier
