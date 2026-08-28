@@ -62,8 +62,9 @@ reconsidered; this roadmap wins any conflict.
   step 2 is implemented; the local database is at schema version 1 and both
   conversations and files are scoped by user. Step 3a is closed. Step 3b is
   implemented and its first restored cold start measured at **25.0 s**, roughly
-  an 8x reduction against the baseline's 189-201 s, with a bearer-token proxy
-  credential confirmed working on the `.modal.run` endpoint. One restored wake
+  an 8x reduction against the baseline's 189-201 s, with the documented
+  `Modal-Key` / `Modal-Secret` proxy headers confirmed on the `.modal.run`
+  endpoint. One restored wake
   is not acceptance-grade evidence by itself — Modal may build several
   worker-type-specific snapshots. The next image fixed the missing
   `vllm[audio]` dependency; its first invocation rebuilt the invalidated
@@ -75,8 +76,12 @@ reconsidered; this roadmap wins any conflict.
   is correctness evidence rather than restored-cold-start evidence. A final
   human-approved control with a 60-second ceiling then reused that snapshot
   successfully: **10.4 s request-to-serving**, `resume: healthy after 0.0s`, no
-  new snapshot build, and scale-to-zero confirmed. Evidence:
+  new snapshot build, and scale-to-zero confirmed. The repeating NCCL TCPStore
+  warnings are now diagnosed as a restored heartbeat monitor polling a stale
+  pre-snapshot worker address; they are noisy but did not affect inference.
+  Evidence:
   `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
+  `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`,
   building on `reports/2026-08-28_v2_step3b_snapshot_boot.md` and
   `reports/2026-08-28_v2_step3b_first_boot_failure.md`. The baseline
   `assistant-llm` still serves `MODEL_ENDPOINT`. Step 3c is not authorized.
@@ -143,9 +148,9 @@ Ordered plan:
       deployed App does not use memory snapshots.
       Evidence: `reports/2026-08-28_v2_step3a_model_endpoint.md`.
 
-   b. **Optimized replacement model deployment.** Implementation authorized and
-      done; deployment is not. A new App identity is built and validated
-      offline rather than overwriting `assistant-llm`:
+   b. **Optimized replacement model deployment: deployed and technically
+      accepted; product wiring remains.** A new App identity was built and
+      validated without overwriting `assistant-llm`:
 
       1. **Done.** `deploy/modal/model_app.py` defines `assistant-llm-v2`, so a
          deploy of that file can no longer replace the measured baseline. Both
@@ -178,15 +183,15 @@ Ordered plan:
          token is **not carried over** and must be retested here before
          `MODEL_ENDPOINT` moves. Creation of each paid GPU worker remains a
          separate human gate;
-      5. **Attempted and failed once.** The first paid invocation never served
-         a request: sleep mode's cumem allocator invalidates vLLM's memory
-         profiling, so it sized a 13.77 GiB KV cache and died committing it on
-         a 22.06 GiB card. An explicit `--gpu-memory-utilization=0.83` is the
-         untested fix. Modal restarted the failed container, so a failed boot
-         costs more than one boot; stop the App rather than letting it retry.
-         Evidence: `reports/2026-08-28_v2_step3b_first_boot_failure.md`. CPU+GPU
-         snapshot creation now succeeds and one genuine restore measured 25.0
-         s. Two later invocations after the audio image change each rebuilt a
+      5. **Recovered from the first failed boot.** Sleep mode's cumem allocator
+         invalidated vLLM's memory profiling, so the first invocation sized a
+         13.77 GiB KV cache and died committing it on a 22.06 GiB card. The
+         deployed replacement now uses the measured-safe explicit GPU-memory
+         utilization, and CPU+GPU snapshot creation succeeds. Evidence for the
+         failure and correction begins in
+         `reports/2026-08-28_v2_step3b_first_boot_failure.md`. One genuine
+         restore measured 25.0 s. Two later invocations after the audio image
+         change each rebuilt a
          GPU snapshot rather than reusing the preceding one. During the latest
          strict run the first container was marked failed; Modal continued the
          pending server task on another container, which built a snapshot and
@@ -202,11 +207,12 @@ Ordered plan:
          removal of the two inherited WSL environment variables are later,
          one-variable A/B tests;
       8. switch `MODEL_ENDPOINT` only after the replacement passes the same
-         backend and Telegram acceptance checks — which now includes proving
-         how `OpenAICompatibleBackend` authenticates against a `.modal.run`
-         proxy-auth endpoint, since the bearer-token equivalence was only ever
-         shown for `.modal.direct`. Retiring the baseline App is a later
-         destructive human gate, not part of deployment.
+         backend and Telegram acceptance checks. The current application sends
+         `MODEL_API_KEY` as a bearer token, while v2 has only been accepted with
+         `Modal-Key` / `Modal-Secret`; either bearer compatibility must be
+         demonstrated on v2 or the backend must gain the two-header auth style
+         before v2 becomes the normal endpoint. Retiring the baseline App is a
+         later destructive human gate, not part of deployment.
 
       Target: a reproducible scale-to-zero endpoint whose restored cold start
       is short enough for a private interactive assistant. No target number is
@@ -248,14 +254,25 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Diagnose the NCCL TCPStore `Broken pipe` heartbeat warnings from current
-   Modal/vLLM/PyTorch documentation and the retained logs. They begin around GPU
-   snapshot restore and repeat every second until shutdown, including on the
-   successful 10.4-second restore. Do not start another worker merely to
-   reproduce them; a future paid invocation remains a separate human gate.
-2. Accept step 2 against the accepted endpoint: one conversational turn and one
-   work request through Telegram. The baseline endpoint can prove integration,
-   but the optimized replacement should become the normal product endpoint.
+1. Accept the current NCCL TCPStore warnings for now. Both the loopback fix and
+   `TORCH_NCCL_ENABLE_MONITORING=0` must be active before vLLM constructs the
+   process group captured by Modal; applying either therefore requires a new
+   Function revision and GPU snapshot. The human explicitly chose not to
+   rebuild a snapshot only to remove harmless log noise. No configuration or
+   deployed state was changed. At the next independently necessary v2 deploy,
+   apply the loopback rendezvous fix before snapshot creation and verify the
+   logs as part of that deploy's normal acceptance; do not create a deployment
+   only for this warning. If the monitoring flag is reconsidered during a
+   future rebuild, record that it removes PyTorch's protection against a stuck
+   NCCL watchdog and reassess it before any multi-GPU or parallel deployment.
+   Evidence: `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
+2. Accept step 2 against a real model: one conversational turn and one work
+   request through Telegram. The configured local profile currently targets
+   the baseline endpoint and can run the first conversational test immediately.
+   To use the optimized replacement instead, first close its one remaining auth
+   seam: prove bearer compatibility or add the already proven two-header proxy
+   auth style. The optimized replacement should then become the normal product
+   endpoint.
 3. Start step 3c control-plane work after Telegram acceptance.
 4. Continue to step 4 document ingestion; it remains planned and has not been
    removed or folded into deployment work.
