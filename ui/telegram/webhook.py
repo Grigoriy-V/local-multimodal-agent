@@ -7,6 +7,7 @@ validates, durably queues and requests a worker; it never runs the agent loop.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 from collections.abc import Awaitable, Callable, Mapping
@@ -15,7 +16,7 @@ from typing import Any, Protocol
 
 from app.config import TelegramSettings
 from ui.telegram.inbox import UpdateInbox
-from ui.telegram.wire import read_update
+from ui.telegram.wire import needs_model, read_update
 
 
 MAX_UPDATE_BYTES = 1024 * 1024
@@ -41,11 +42,13 @@ class TelegramWebhook:
         inbox: UpdateInbox,
         spawn: Callable[[int], Awaitable[None]],
         *,
+        warm: Callable[[], Awaitable[object]] | None = None,
         max_update_bytes: int = MAX_UPDATE_BYTES,
     ) -> None:
         self.settings = settings
         self.inbox = inbox
         self.spawn = spawn
+        self.warm = warm
         self.max_update_bytes = max_update_bytes
 
     async def accept(self, headers: Mapping[str, str], body: bytes) -> WebhookResponse:
@@ -74,6 +77,28 @@ class TelegramWebhook:
             # Acknowledge without persisting or spawning. Returning an error
             # would make Telegram retry an update that will never be admitted.
             return WebhookResponse(200, "ignored unauthorized account")
+
+        # After admission, never before: a stranger's message must not be able
+        # to spend GPU. Alongside the write rather than in front of it, because
+        # waking the model is not something the durable hand-off has to wait for
+        # — awaiting it first added about a second to every message, which is
+        # what the deployed execution times showed.
+        if self.warm is None or not needs_model(incoming):
+            return await self._admit(update)
+        _, response = await asyncio.gather(self._wake(), self._admit(update))
+        return response
+
+    async def _wake(self) -> None:
+        """Ask the model to start. Never raises: a slow turn, not a lost one."""
+
+        assert self.warm is not None
+        try:
+            await self.warm()
+        except Exception:  # noqa: BLE001 - an optimization cannot lose a message
+            pass
+
+    async def _admit(self, update: dict[str, Any]) -> WebhookResponse:
+        """Persist the update, then ask for a worker. Order is the durability."""
 
         queued = await self.inbox.enqueue(update["update_id"], update)
         if not queued.should_spawn:

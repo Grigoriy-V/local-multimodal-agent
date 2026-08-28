@@ -21,8 +21,10 @@ same call to a spawned worker and answer Telegram immediately.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +42,7 @@ from ui.telegram.api import (
     TelegramError,
     approval_keyboard,
 )
-from ui.telegram.wire import Incoming, read_update
+from ui.telegram.wire import Incoming, needs_model, read_update
 
 # A fixed namespace so a chat maps to the same canonical identity on every run
 # and on every machine. Changing it orphans every existing conversation.
@@ -102,6 +104,45 @@ def start_thread(store: ConversationStore, user_id: str) -> str:
     thread_id = str(uuid.uuid4())
     store.ensure_thread(thread_id, user_id)
     return thread_id
+
+
+# Telegram clears the indicator after about five seconds, so a turn that lasts
+# longer has to renew it. Four leaves room for the round trip.
+TYPING_INTERVAL = 4.0
+
+
+@asynccontextmanager
+async def typing(
+    client: TelegramClient, chat_id: int, active: bool = True
+) -> AsyncIterator[None]:
+    """Keep Telegram's "typing…" on screen for as long as the block runs.
+
+    A cold turn spends most of its time waiting for a GPU to wake, where there
+    is nothing to stream and nothing to report — the only honest thing to show
+    is that the assistant is still there. This is that, and it is the platform's
+    own indicator rather than a message that would have to be cleaned up.
+
+    The renewing task is always cancelled and awaited, because a task left
+    running in a container that is about to be frozen is a warning in the logs
+    at best.
+    """
+
+    if not active:
+        yield
+        return
+
+    async def keep() -> None:
+        while True:
+            await client.send_chat_action(chat_id)
+            await asyncio.sleep(TYPING_INTERVAL)
+
+    task = asyncio.create_task(keep())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 def spoken(message: Message) -> str:
@@ -259,10 +300,15 @@ class TelegramAdapter:
         user_id = canonical_user_id(incoming.telegram_user_id)
         harness = self.harness(user_id)
         try:
-            if incoming.callback_data is not None:
-                await self._on_callback(harness, user_id, incoming)
-            else:
-                await self._on_message(harness, user_id, incoming)
+            # `needs_model` decides this as well as whether the webhook wakes the
+            # GPU, and it should: the updates worth showing progress for are
+            # exactly the ones that take long enough to need it. A command
+            # answers from storage and is done before an indicator would appear.
+            async with typing(self.client, incoming.chat_id, needs_model(incoming)):
+                if incoming.callback_data is not None:
+                    await self._on_callback(harness, user_id, incoming)
+                else:
+                    await self._on_message(harness, user_id, incoming)
         except TelegramError:
             raise
         except Exception as error:  # noqa: BLE001 - a failed turn must not kill the bot

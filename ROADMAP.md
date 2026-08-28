@@ -1,6 +1,6 @@
 # Roadmap
 
-**Updated:** 2026-08-28
+**Updated:** 2026-08-29
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
@@ -187,20 +187,38 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      scheduling is not being cold, and a minute of a quarter-core costs $0.00026,
      so a hundred wakes a day stays under a dollar a month. The worker stays at
      15 s.
-   - Unmeasured, and next before anything else here: the update worker's own
-     cold start, the `spawn → worker entered` gap. It can be timed without the
-     GPU by spawning a non-existent update id, which is still a worker start and
-     needs permission. Buying the webhook's remaining ~3.5 s with
-     `min_containers=1` costs about $11.4 a month at `cpu=0.25`/512 MiB, or
-     about $5.7 at 0.125/256 MiB now that the agent stack is out of it — priced,
-     not chosen, and worth deciding only after the worker's share is known.
-     `docs/control_plane_cold_start_notes.md`.
-   - **Not approved.** Waking the GPU from the webhook, in parallel with the
-     worker's cold start instead of after it, would overlap roughly 5.5 s of
-     snapshot restore with work that happens anyway. It spends no extra GPU on a
-     message that was going to reach the model, but it does start a worker on
-     every admitted update, including ones that never call the model. Recorded
-     as an option; the human has not agreed to it.
+   - **Worker cold start measured; it is the largest CPU number in the chain.**
+     From the platform's own startup column, no run needed: **3.23 s** of
+     scheduling (3.05-3.36) plus **1.71 s** of first-execution work — cold
+     execution averages 3.99 s against 2.28 s warm — for **4.93 s** over a warm
+     worker. Scheduling matches the webhook's ~3.5 s, so it is the platform
+     floor again and not this code. The 1.71 s is real initialization, unlike
+     the webhook's, which is the one place a memory snapshot could still pay;
+     capturing it would need the worker's imports at module scope and therefore
+     its own image, and it is worth about 1.2 s. Not taken yet: the window below
+     makes a cold worker rare, and optimizing a rare path is the mistake this
+     already made once. Idle window raised to 60 s to match the webhook, so a
+     conversation stays warm as one thing — about $3 a month at a hundred wakes
+     a day. `docs/control_plane_cold_start_notes.md`.
+   - Priced, not chosen: `min_containers=1` removes a cold start outright —
+     about $5.7-11.4 a month on the webhook depending on its size, about $45 on
+     the worker, which is GPU money for CPU. Decide only against measured
+     first-message latency after the wider windows.
+   - **Approved, written and deployed** (25.429 s), unmeasured. The webhook
+     starts the model
+     waking instead of leaving it until the worker gets there. Against the
+     measured chain that takes a cold first message from about 14.4 s to about
+     9.2 s: the worker reaches the model at 8.94 s and the model is ready at
+     9.20 s, so its whole 4.93 s cold start disappears into the wake, with 0.26 s
+     of slack. `ModelBackend.warm` sends the cheapest request and abandons the
+     response, because a scale-to-zero container starts on a request arriving,
+     not on its answer being read; it never raises, and a failed wake is a
+     slower turn rather than a lost message. `wire.py` owns
+     `MODEL_FREE_COMMANDS`, so `/help` and `/check` spend nothing, and the list
+     is the exceptions rather than the rule — a new command wakes by default,
+     which is the cheap direction to be wrong in. Called only after the secret
+     and allow-list checks, so a stranger cannot spend GPU, and before the
+     durable write, because that write is time the wake could already be using.
    - Chromium in the control image. Browser evidence worked while the agent ran
      on Windows and found Edge; `debian_slim` has none, so a task whose plan
      asks for a screenshot now fails validation. `/usr/bin/chromium` is already
@@ -227,6 +245,30 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    separate work — the audio decodes, so it is a mis-hearing; isolating codec
    from bitrate and language needs one clean comparison of the same sentence as
    Opus and WAV.
+
+   **Streaming the answer.** Telegram's own indicator now runs for any turn that
+   reaches the model, which covers the cold case where there are no tokens to
+   show at all. Real streaming is the next step and it is genuinely available:
+   `sendMessageDraft` (Bot API 10.0, 2026-05-08) streams a partial message with
+   the client's own typing animation, `sendRichMessageDraft` (2026-06-11) does
+   it for formatted text, and `can_stop` / `keep_on_stop` (2026-08-24) put a
+   stop control in the user's hands. That removes the reason this was previously
+   dismissed: an `editMessageText` loop is capped near one edit a second per
+   chat, which at 15-17 tok/s is two or three redraws on a short answer.
+
+   The cost is not the display, it is the source. `ModelBackend.stream` exists
+   and nothing calls it, because it yields `AsyncIterator[str]` and so drops
+   `tool_calls` and `usage`, which the graph needs to choose its next node.
+   Streaming therefore means a variant that yields text while accumulating a
+   full `Completion` — tool-call fragments reassembled from deltas, usage asked
+   for with `stream_options` — and then carrying chunks through `call_model`,
+   through `Agent.steps` (which yields whole messages today), to the adapter.
+   Four contracts, and worth doing for long answers and the work path rather
+   than for short chat replies.
+
+   It does not shorten time to first token on its own: the router's model call
+   still runs first and shows nothing, so the single-call change is worth more
+   here and comes before it.
 
    `/check` already answers the technical half of this without a model: it tries
    each capability where the agent actually runs. What it cannot judge is
@@ -265,6 +307,40 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    - Only then optimization: prefix caching confirmed rather than assumed,
      speculative decoding, and the router call that costs a second full-context
      request on every message.
+
+5. **Technical debt: one conversation is not serialized.** Found live, when a
+   screenshot and a question sent seconds apart were answered by two containers
+   at once and the reply to the second arrived first. The inbox leases an
+   `update_id` and nothing else, so two updates from one chat run in parallel
+   against one thread. Three layers, worth keeping apart because only the first
+   is forced:
+
+   - **Mutual exclusion.** Two turns must not run on one thread. Today each
+     loads context without the other's message, both append, both may fold, and
+     both write the same LangGraph checkpoint. `current_thread` is a
+     check-then-act, so two workers meeting a user who has no thread yet create
+     two and split the conversation permanently.
+   - **Order.** The reply arriving first was not jitter: a photo turn downloads
+     a file and prefills an image, so it loses to a text question every time.
+     Ordering follows from mutual exclusion only if the owner drains its
+     conversation by ascending `update_id`.
+   - **Coalescing.** A screenshot then a question is one intent in two
+     messages. Perfect ordering still answers a bare photo and then the
+     question, which is correct and not what was asked. A short window that
+     merges updates from one chat into a single turn is the behaviour wanted,
+     and it is the reason to build the two above as an owner that drains rather
+     than a lock.
+
+   Modal can do the first natively — a parametrized class gives each parameter
+   set its own container pool, so a chat could pin to a container. Rejected as
+   the primary mechanism: ordering within a conversation is a product property,
+   and one that holds only on Modal would make the local profile a different
+   product. The lease belongs in the database both profiles share. Doing it
+   needs a migration on a populated database, which is a human gate.
+
+   Stopgap available without a migration: `max_containers=1` on the worker
+   serializes everything, at the price of one person's long task blocking
+   everyone.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the

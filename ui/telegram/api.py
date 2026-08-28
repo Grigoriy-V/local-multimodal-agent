@@ -220,6 +220,19 @@ class TelegramClient:
             if "not modified" not in str(error).lower():
                 raise
 
+    async def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
+        """Show Telegram's own "typing…" for a few seconds.
+
+        Never raises. This exists so a person can tell the difference between
+        thinking and dead, and failing to say that must not fail the turn it was
+        describing.
+        """
+
+        try:
+            await self._call("sendChatAction", {"chat_id": chat_id, "action": action})
+        except TelegramError:
+            pass
+
     async def answer_callback(self, callback_id: str, text: str = "") -> None:
         await self._call(
             "answerCallbackQuery", {"callback_query_id": callback_id, "text": text}

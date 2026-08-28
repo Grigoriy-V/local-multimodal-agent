@@ -7,6 +7,7 @@ shared `ScriptedBackend`. Nothing here reaches outside the process.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,7 @@ from ui.telegram.adapter import (
     start_thread,
     task_result_text,
 )
-from ui.telegram.wire import read_update
+from ui.telegram.wire import MODEL_FREE_COMMANDS, read_update
 from ui.telegram.api import (
     MAX_MESSAGE_CHARS,
     Formatted,
@@ -703,3 +704,74 @@ def test_a_long_answer_is_split_rather_than_refused() -> None:
 
 def test_a_short_answer_is_left_alone() -> None:
     assert split_message("just this") == ["just this"]
+
+
+@pytest.mark.parametrize("command", sorted(MODEL_FREE_COMMANDS))
+async def test_every_command_declared_model_free_really_is(
+    command: str, telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """The webhook trusts this list to decide whether to spend a GPU wake.
+
+    That list lives in `wire.py`, next to the front door, and the commands live
+    here — so without this the two drift apart silently and the bill is what
+    notices. `ScriptedBackend()` has nothing scripted, so any model call raises.
+    """
+
+    backend = ScriptedBackend()
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update(command))
+
+    assert backend.requests == []
+    assert telegram.sent, f"{command} answered nothing"
+
+
+# --- progress ----------------------------------------------------------------
+
+
+async def test_a_turn_that_reaches_the_model_says_it_is_working(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Most of a cold turn is spent waiting for a GPU, where the only honest
+    thing to show is that the assistant is still there."""
+
+    backend = ScriptedBackend(route(), says("Hello."), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("hello"))
+
+    actions = [payload for method, payload in telegram.calls if method == "sendChatAction"]
+    assert actions and actions[0]["action"] == "typing"
+
+
+async def test_a_command_does_not_pretend_to_be_working(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """It answers from storage and is finished before an indicator would show."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/help"))
+
+    assert [method for method, _ in telegram.calls if method == "sendChatAction"] == []
+
+
+async def test_the_indicator_stops_when_the_turn_fails(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """A renewing task outliving its turn is a leak in a container about to be
+    frozen, and the failing path is where that is easiest to forget."""
+
+    backend = ScriptedBackend(route(), RuntimeError("model exploded"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("hello"))
+
+    running = [
+        task
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task() and not task.done()
+    ]
+
+    assert running == []
+    assert any("failed" in message for message in telegram.sent)

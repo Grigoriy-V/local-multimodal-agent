@@ -216,6 +216,35 @@ class OpenAICompatibleBackend(ModelBackend):
             transport=transport,
         )
 
+    async def warm(self) -> bool:
+        """Ask the endpoint to start, without waiting for it to finish starting.
+
+        A scale-to-zero model container begins waking the moment a request
+        reaches it, so the wake is bought by *sending* one, not by reading the
+        answer. This sends the cheapest request the OpenAI-compatible surface
+        has and abandons the response: connecting and writing are awaited
+        because that is what triggers the wake, reading is given almost no time
+        because the wake is what was wanted.
+
+        Never raises. Warming is an optimization, and a failed optimization must
+        not fail the request that asked for it. The boolean is for logging and
+        for tests, not for control flow.
+        """
+
+        try:
+            await self._client.get(
+                "/models",
+                timeout=httpx.Timeout(connect=5.0, write=5.0, pool=5.0, read=0.1),
+            )
+        except httpx.TimeoutException:
+            # Expected, and the point: the request was written, so the container
+            # is already starting. Waiting for the body would mean waiting out
+            # the whole cold start here.
+            return True
+        except httpx.HTTPError:
+            return False
+        return True
+
     def _body(
         self,
         messages: Sequence[Message],

@@ -108,6 +108,20 @@ class ModelBackend(ABC):
     ) -> AsyncIterator[str]:
         """Yield text chunks as they arrive."""
 
+    async def warm(self) -> bool:
+        """Start the model serving, without waiting for it to be ready.
+
+        Optional because it only means anything for a backend that can be
+        asleep. A deployment that scales to zero costs several seconds on the
+        first request, and those seconds are worth spending in parallel with
+        whatever else has to happen before the model is called.
+
+        Implementations must not raise: a failed warm-up is a slower turn, never
+        a failed one.
+        """
+
+        return False
+
     async def context_limit(self) -> int | None:
         """The largest request this model accepts, in tokens, or `None` if unknown.
 

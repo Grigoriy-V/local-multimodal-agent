@@ -86,7 +86,17 @@ def _settings() -> tuple[object, object]:
     # GPU's: a cold start costs about three seconds of someone's attention,
     # while holding this container costs $0.00026 for the whole window. The
     # expensive resource is the person waiting, not the CPU.
-    scaledown_window=15,
+    # 60 s, matching the webhook, so a conversation stays warm as one thing
+    # rather than in halves. Measured from the platform's own startup column:
+    # a cold worker costs 3.23 s of scheduling plus 1.71 s of first-execution
+    # work — imports, graph construction, first connection — for 4.93 s over a
+    # warm one, which is the largest CPU number in the chain.
+    #
+    # This container is dearer to hold than the webhook: a full core with 2 GiB
+    # is $0.0000175 a second, so a minute costs $0.00105 against the webhook's
+    # $0.00026. At a hundred wakes a day that is about $3 a month, against the
+    # roughly $46 of GPU it sits in front of.
+    scaledown_window=60,
     timeout=600,
     include_source=False,
 )
@@ -323,6 +333,33 @@ def measure_database_latency(
         store.close()
 
 
+_waker: object | None = None
+
+
+async def _warm() -> bool:
+    """Start the model waking while the update worker is still being scheduled.
+
+    The webhook decides *whether* to call this — it knows whether the update
+    needs a model at all — and this decides *how*, which is the platform's
+    business and not the transport's.
+
+    The backend is kept for the life of the container so that a second message
+    reuses the connection instead of paying another TLS handshake to wake a
+    model that is already awake. If the client is ever unusable — a different
+    event loop, a closed pool — `warm` returns False and the turn is the one we
+    had before this existed, which is why nothing here re-raises.
+    """
+
+    global _waker
+
+    from app.config import ModelSettings
+    from app.models.openai_compatible import OpenAICompatibleBackend
+
+    if _waker is None:
+        _waker = OpenAICompatibleBackend(ModelSettings())
+    return await _waker.warm()
+
+
 async def _spawn(update_id: int) -> None:
     # ``spawn`` returns immediately and the durable inbox owns the retry state.
     # The async form matters here rather than being a style preference: the
@@ -382,7 +419,7 @@ async def telegram_webhook(request: Request):
 
     telegram, agent = _settings()
     inbox = PostgresUpdateInbox(agent.database_url, agent.database_schema)
-    accepted = await TelegramWebhook(telegram, inbox, _spawn).accept(
+    accepted = await TelegramWebhook(telegram, inbox, _spawn, warm=_warm).accept(
         request.headers,
         await request.body(),
     )

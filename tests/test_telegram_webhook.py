@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import pytest
 from app.config import TelegramSettings
 from ui.telegram.inbox import EnqueueResult, InboxJob
 from ui.telegram.webhook import TelegramUpdateWorker, TelegramWebhook
+from ui.telegram.wire import MODEL_FREE_COMMANDS
 
 
 def update(update_id: int = 7, user_id: int = 42) -> dict[str, Any]:
@@ -241,3 +243,144 @@ def test_the_wire_format_module_imports_nothing_from_the_application() -> None:
     }
 
     assert imported <= {"__future__", "dataclasses", "typing"}
+
+
+# --- waking the model before the worker exists --------------------------------
+
+SECRET = {"x-telegram-bot-api-secret-token": "webhook-secret"}
+
+
+class Warming:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls = 0
+        self.error = error
+
+    async def __call__(self) -> bool:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return True
+
+
+def warming_webhook(warm: Warming) -> tuple[TelegramWebhook, FakeInbox, list[int]]:
+    inbox, spawned = FakeInbox(), []
+
+    async def spawn(update_id: int) -> None:
+        spawned.append(update_id)
+
+    return TelegramWebhook(settings(), inbox, spawn, warm=warm), inbox, spawned
+
+
+async def test_an_ordinary_message_starts_the_model_waking() -> None:
+    """The model wakes in about 5.5 s and the worker takes about 4.9 s to be
+    scheduled and initialized. Started together they cost 5.5 s; started one
+    after the other they cost both."""
+
+    warm = Warming()
+    webhook, _, spawned = warming_webhook(warm)
+
+    response = await webhook.accept(SECRET, body(update()))
+
+    assert response.status == 200
+    assert warm.calls == 1
+    assert spawned == [7]
+
+
+async def test_a_model_free_command_does_not_spend_a_gpu_wake() -> None:
+    for command in sorted(MODEL_FREE_COMMANDS):
+        warm = Warming()
+        webhook, _, spawned = warming_webhook(warm)
+        raw = update()
+        raw["message"]["text"] = command
+
+        response = await webhook.accept(SECRET, body(raw))
+
+        assert response.status == 200
+        assert warm.calls == 0, f"{command} spent a GPU wake"
+        # Still processed. Not waking is an optimization, not a refusal.
+        assert spawned == [7]
+
+
+async def test_an_approval_button_wakes_because_resuming_calls_the_model() -> None:
+    warm = Warming()
+    webhook, _, _ = warming_webhook(warm)
+    raw = {
+        "update_id": 11,
+        "callback_query": {
+            "id": "c1",
+            "data": "approve",
+            "from": {"id": 42},
+            "message": {"chat": {"id": 99}},
+        },
+    }
+
+    assert (await webhook.accept(SECRET, body(raw))).status == 200
+    assert warm.calls == 1
+
+
+async def test_neither_a_stranger_nor_a_bad_secret_can_spend_a_gpu_wake() -> None:
+    """Why the admission checks come first rather than merely somewhere."""
+
+    warm = Warming()
+    webhook, _, spawned = warming_webhook(warm)
+
+    unauthorized = await webhook.accept(SECRET, body(update(user_id=9999)))
+    bad_secret = await webhook.accept({"x-telegram-bot-api-secret-token": "no"}, body(update()))
+
+    assert (unauthorized.status, bad_secret.status) == (200, 401)
+    assert warm.calls == 0
+    assert spawned == []
+
+
+async def test_a_failed_wake_still_delivers_the_message() -> None:
+    """A slower turn is acceptable; a lost one is not."""
+
+    warm = Warming(RuntimeError("the model endpoint is unreachable"))
+    webhook, inbox, spawned = warming_webhook(warm)
+
+    response = await webhook.accept(SECRET, body(update()))
+
+    assert response.status == 200
+    assert warm.calls == 1
+    assert spawned == [7]
+    assert 7 in inbox.payloads
+
+
+async def test_waking_does_not_delay_the_durable_hand_off() -> None:
+    """Awaiting the wake first cost about a second on every deployed message.
+
+    The wake and the write are independent — one asks a GPU to start, the other
+    records the update — so they run together. This asserts the overlap rather
+    than the wall clock: the write starts before the wake has finished.
+    """
+
+    order: list[str] = []
+    started = asyncio.Event()
+
+    async def warm() -> bool:
+        order.append("wake started")
+        started.set()
+        await asyncio.sleep(0.05)
+        order.append("wake finished")
+        return True
+
+    inbox = FakeInbox()
+    original = inbox.enqueue
+
+    async def enqueue(update_id: int, payload: dict[str, Any]) -> EnqueueResult:
+        await started.wait()
+        order.append("write")
+        return await original(update_id, payload)
+
+    inbox.enqueue = enqueue  # type: ignore[method-assign]
+
+    async def spawn(update_id: int) -> None:
+        order.append("spawn")
+
+    response = await TelegramWebhook(settings(), inbox, spawn, warm=warm).accept(
+        SECRET, body(update())
+    )
+
+    assert response.status == 200
+    assert order.index("write") < order.index("wake finished")
+    assert order[-1] == "wake finished" or "spawn" in order
