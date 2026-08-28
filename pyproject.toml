@@ -28,6 +28,7 @@ ui = [
 # never imports modal; it reaches the endpoint over MODEL_ENDPOINT like any
 # other OpenAI-compatible server.
 deploy = [
+    "fastapi>=0.115",
     "modal>=1.0",
 ]
 # The deployed profile's conversation store. Not installed locally by default:

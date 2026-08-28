@@ -104,13 +104,23 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      are covered offline. The platform HTTP/spawn adapter, live database
      migrations, ephemeral sandbox and deployment remain open.
      `reports/2026-08-28_v2_control_plane_offline_foundation.md`.
-   - Live setup and contract acceptance for the conversation store,
-     checkpointer and update inbox on the same database.
-   - The platform HTTP/spawn adapter around the written webhook core, with the
-     agent loop in a separate worker. The Telegram secret token and an
-     allowed-user list are checked in the application, because platform proxy
-     auth cannot be used for a Telegram webhook. Registering the webhook retires
-     the polling transport rather than joining it: Telegram refuses
+   - **CPU platform adapter written, never deployed or spawned.**
+     `assistant-control` has separate scale-to-zero webhook and update-worker
+     functions plus one explicit migration command. Its locked image excludes
+     local secrets and workspaces. Offline registration and the full regression
+     suite passed; live database work is blocked on credentials and Modal has no
+     control secret yet. `reports/2026-08-28_v2_control_plane_cpu_adapter.md`.
+   - **Neon live setup and contract acceptance passed.** The pooled endpoint
+     passed the conversation contract and the real inbox/checkpointer smoke.
+     Live evidence exposed and fixed Windows event-loop handling, pooled
+     `search_path` leakage and accidental `.env` loading by the offline suite.
+     Four unused checkpoint tables from the failed first migration were removed
+     after explicit approval; only the active `public` checkpoint tables remain.
+     `reports/2026-08-28_v2_control_plane_neon_live.md`.
+   - Build/deploy and accept the written platform adapter. The Telegram secret
+     token and allowed-user list are checked in the application, because
+     platform proxy auth cannot be used for a Telegram webhook. Registering the
+     webhook retires polling rather than joining it: Telegram refuses
      `getUpdates` while a webhook is set.
    - File tools over an ephemeral sandbox rather than a local path.
 

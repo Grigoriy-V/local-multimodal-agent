@@ -795,6 +795,7 @@ app = [
     { name = "pydantic-settings" },
 ]
 deploy = [
+    { name = "fastapi" },
     { name = "modal" },
 ]
 dev = [
@@ -821,7 +822,10 @@ app = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic-settings", specifier = ">=2.6" },
 ]
-deploy = [{ name = "modal", specifier = ">=1.0" }]
+deploy = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "modal", specifier = ">=1.0" },
+]
 dev = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },

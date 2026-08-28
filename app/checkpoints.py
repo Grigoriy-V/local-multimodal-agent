@@ -50,6 +50,10 @@ class CheckpointHandle:
                 self.database_url, serde=serde
             )
             self._saver = await self._context.__aenter__()
+            # Upstream uses unqualified table names. A pooled server connection
+            # may have been used by another client, so normalize the session at
+            # this boundary before any checkpoint query runs.
+            await self._saver.conn.execute("SET search_path TO public")
             return self._saver
 
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,4 +85,5 @@ async def setup_postgres_checkpoints(
 
     serde = JsonPlusSerializer(allowed_msgpack_modules=allowed_types or [])
     async with AsyncPostgresSaver.from_conn_string(database_url, serde=serde) as saver:
+        await saver.conn.execute("SET search_path TO public")
         await saver.setup()

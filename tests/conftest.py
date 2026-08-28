@@ -18,6 +18,12 @@ import os
 
 import pytest
 
+# This has to happen while conftest is imported, before pytest collects a test
+# module that imports Chainlit. A fixture is too late: live-test parametrization
+# reads the process environment during collection and would retain a DSN that
+# Chainlit copied from .env even after the fixture removed it.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+
 # Every prefix `app/config.py` reads settings from.
 SETTINGS_PREFIXES = ("MODEL_", "AGENT_", "TELEGRAM_")
 

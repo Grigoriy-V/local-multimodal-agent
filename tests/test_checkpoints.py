@@ -26,7 +26,14 @@ async def test_local_handle_creates_and_reuses_sqlite_saver(tmp_path: Path) -> N
 def fake_postgres_module(monkeypatch: pytest.MonkeyPatch) -> tuple[type, list[object]]:
     events: list[object] = []
 
+    class Connection:
+        async def execute(self, statement: str) -> None:
+            events.append(("execute", statement))
+
     class Saver:
+        def __init__(self) -> None:
+            self.conn = Connection()
+
         async def setup(self) -> None:
             events.append("setup")
 
@@ -65,7 +72,11 @@ async def test_deployed_handle_opens_postgres_lazily_without_migrating(
     await handle.close()
 
     assert events[0][0] == "postgresql://example/db"  # type: ignore[index]
-    assert events[1:] == ["enter", "exit"]
+    assert events[1:] == [
+        "enter",
+        ("execute", "SET search_path TO public"),
+        "exit",
+    ]
     assert not (tmp_path / "unused.sqlite3").exists()
 
 
@@ -76,5 +87,9 @@ async def test_postgres_setup_is_a_separate_explicit_operation(
 
     await setup_postgres_checkpoints("postgresql://example/db")
 
-    assert events[1:] == ["enter", "setup", "exit"]
-
+    assert events[1:] == [
+        "enter",
+        ("execute", "SET search_path TO public"),
+        "setup",
+        "exit",
+    ]

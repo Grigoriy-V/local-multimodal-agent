@@ -109,7 +109,7 @@ def match_query(query: str) -> str:
     return " | ".join(TOKEN.findall(query))
 
 
-def migrate(connection: psycopg.Connection) -> int:
+def migrate(connection: psycopg.Connection, schema: str) -> int:
     """Bring the database up to `SCHEMA_VERSION`, returning the version found.
 
     Version 0 is an empty database. Unlike the SQLite store there is no earlier
@@ -118,6 +118,9 @@ def migrate(connection: psycopg.Connection) -> int:
     """
 
     with connection.cursor() as cursor:
+        # Transaction-local state cannot leak through a transaction pooler to
+        # the next client that receives this server connection.
+        cursor.execute(f'SET LOCAL search_path TO "{schema}"')
         cursor.execute(SCHEMA)
         cursor.execute("SELECT version FROM schema_version LIMIT 1")
         row = cursor.fetchone()
@@ -146,7 +149,7 @@ class PostgresStore(ConversationStore):
         self.dsn = dsn
         self.schema = schema
         self._connection: psycopg.Connection | None = None
-        migrate(self._open())
+        migrate(self._open(), self.schema)
 
     # --- connection ----------------------------------------------------------
 
@@ -154,7 +157,6 @@ class PostgresStore(ConversationStore):
         connection = psycopg.connect(self.dsn, row_factory=dict_row)
         with connection.cursor() as cursor:
             cursor.execute(f'CREATE SCHEMA IF NOT EXISTS "{self.schema}"')
-            cursor.execute(f'SET search_path TO "{self.schema}"')
         connection.commit()
         self._connection = connection
         return connection
@@ -177,6 +179,7 @@ class PostgresStore(ConversationStore):
             connection = self._open()
         try:
             with connection.cursor() as cursor:
+                cursor.execute(f'SET LOCAL search_path TO "{self.schema}"')
                 yield cursor
         except psycopg.OperationalError:
             self._connection = None
