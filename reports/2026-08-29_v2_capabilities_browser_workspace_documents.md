@@ -60,6 +60,32 @@ with the file's pre-existing Chainlit import-order exception ignored. `git diff
 --check` passed. Nothing was deployed and no worker or model endpoint was
 started, so this is implementation evidence rather than product acceptance.
 
+### Replacement accepted live
+
+The human then deployed the replacement and exercised it in a clean Telegram
+conversation. The trace, with all personal document content omitted, was:
+
+1. `list_files` found the requested PDF in the person's workspace;
+2. `view_pages` was called twice to inspect its two pages;
+3. no photo appeared as a side effect of either observation call;
+4. `send_file` was called twice, after which exactly the two chosen page images
+   appeared in the chat;
+5. on the following message, the agent explained what it had seen.
+
+This accepts the product contract: the agent chose how to inspect the document,
+observation remained internal, presentation was an explicit later action, and
+the assistant could continue reasoning from the visual evidence. The trace did
+not include a `read_document` call, so its explanation was grounded in the page
+images available in conversation history rather than extracted document text.
+
+Two narrower evidence gaps remain. The agent's reply to the explicit provenance
+question was not supplied, so truthful self-reporting of that provenance is not
+accepted by this test. The deployment success metadata and the expanded deployed
+`/check` result (**7/7**, including `presentation.file`) were also not captured;
+live behaviour proves the new code was running, but not its exact build identity
+or the complete preflight suite. No private filename or document content is
+recorded here.
+
 ## Two decisions the human approved, 2026-08-29
 
 **A volume, not a sandbox, for persistence.** The sub-item read "file tools over

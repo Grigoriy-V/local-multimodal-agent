@@ -7,10 +7,10 @@
 **Current approved step:** queue 1, capabilities. No worker start is authorized;
 each deploy, sandbox or container run is asked for separately.
 
-**Corrected 2026-08-29 after a live test.** `assistant-control` v14 is deployed,
-but its automatic delivery of media returned by any tool is rejected product
-behaviour. The replacement is implemented and tested offline in the working
-tree, but is not deployed or accepted live. Read
+**Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
+automatic delivery of media returned by any tool was rejected product behaviour.
+Its replacement is now implemented, tested offline and accepted in a real
+Telegram chat. Read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
 "Correction after the last live test", before changing anything.
 
@@ -122,17 +122,15 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      a directory on a Modal volume; a document is saved there and read with
      `read_document`, or looked at with `view_pages`.
      `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`.
-   - **Agent-controlled presentation is implemented offline, not deployed.** Reading,
-     viewing and inspecting are observation tools: their results go to the agent
-     and never reach the person automatically. The agent decides which tools to
-     use and whether, what and when to present. Sending a chosen workspace file
-     or media item is the separate `send_file` capability; the interface only
-     carries that explicit outbound action. `view_pages` saves rendered pages so
-     the agent can inspect them and later select one. The v14 auto-forward and
-     the later prompt workaround are both replaced. Offline: 548 passed, 1
-     skipped. Acceptance still needs a clean real chat in which the agent
-     inspects the document, explicitly sends what it chose and explains what it
-     sees; unrelated tool media must remain internal.
+   - **Done: agent-controlled presentation.** Reading, viewing and inspecting are
+     observation tools whose results stay internal. Sending a chosen workspace
+     item is the separate `send_file` action. Offline: 548 passed, 1 skipped.
+     In a clean real Telegram chat the agent found a PDF, inspected both pages
+     with `view_pages`, explicitly sent both selected page images with
+     `send_file`, and then explained what it saw. The observation images did not
+     appear before the explicit sends. Personal document content is not recorded.
+     The deployment's exact build identity and the expanded `/check` 7/7 result
+     were not captured; those remain evidence gaps for the whole queue item.
    - **Browser image layering is deployed but its cache benefit is unconfirmed.**
      Chromium is installed below the copied source. v14 paid the slow build once;
      the next deploy is the first measurement of whether that layer is reused.
@@ -145,28 +143,22 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    - **The sandbox, for untrusted content only.** Not started. It is what
      rendering an arbitrary URL waits on.
 
-2. **Live product evidence.** Nothing above has been seen by a user: that the
-   assistant answers a capability question correctly, that `/can` agrees, and
-   that the plan and result read well in a real chat. Alongside it, evidence
-   that the harness is agentic rather than demo-shaped — multi-step work that
-   survives a restart, asks when it should, and claims no result it did not
-   verify. Needs one warm window.
+2. **Baseline chat product and live evidence.** Confirm in the real interface
+   that the assistant answers a capability question correctly, `/can` agrees,
+   and ordinary plans and results are readable. This closes the basic chatbot
+   experience; serious work on the harness and agent loop belongs to item 4.
 
-   - The agentness evidence is a scenario suite. It asserts on what the harness
-     emits and never on the model's wording; it uses our criteria, not the
-     plan's; and it runs as one warm window on request, because every run wakes
-     a GPU.
    - Telegram voice recognition quality: the audio decodes, so it is a
      mis-hearing. One clean comparison of the same sentence as Opus and WAV.
    - Streaming the answer, through Telegram's message drafts
      (`sendMessageDraft`, Bot API 10.0). The display is the cheap half; the
      source is not, because `ModelBackend.stream` drops `tool_calls` and
-     `usage`. Worth more after the single-call change below.
+     `usage`. Worth more after the single-call change in item 5.
 
-3. **Measurement, metrics, economics, optimization, in that order.** Today's
-   15-17 tok/s conflates network, prefill and decode; there is no prefill
-   measurement on the A10, and prefix caching has never been read out of a
-   startup log.
+3. **Baseline measurement, metrics and logs.** Make both product behaviour and
+   its cost observable before changing the agent loop. Today's 15-17 tok/s
+   conflates network, prefill and decode; there is no prefill measurement on the
+   A10, and prefix caching has never been read out of a startup log.
 
    - **Application telemetry first.** The worker emits nothing, so a turn's
      shape is invisible and what exists is Modal's dashboard, which the local
@@ -181,15 +173,21 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    - Cost per turn and per user, counting the harness's two model calls
      honestly. Modal bills by App in hourly buckets, so per-turn cost is derived
      and must be labelled as derived.
-   - Adaptive scaledown instead of one fixed number, over the network through
-     `autoscale.py`.
-   - Then optimization: prefix caching confirmed rather than assumed,
-     speculative decoding, and the single-call change that removes the router's
-     second full-context request per message.
 
-4. **Technical debt: one conversation is not serialized.** Found live — a
-   screenshot and a question sent seconds apart ran in two containers and were
-   answered out of order. The inbox leases an `update_id` and nothing else.
+4. **Agent harness and loop: from a functional assistant to a strong autonomous
+   agent.** This is the real agent-development phase, after baseline tools, the
+   baseline chat product, and basic metrics and logs exist. Improve the complete
+   loop rather than accumulating demo workflows: task understanding, planning,
+   tool choice, use of tool history and provenance, clarification, validation,
+   repair, truthful completion, restart continuity and efficient context use.
+   Evaluate behaviour with scenario suites that assert on harness events and
+   outcomes rather than exact model wording. Live suites run as one warm window
+   only with explicit permission, because every run wakes a GPU.
+
+   The first known correctness prerequisite is conversation serialization.
+   Found live: a screenshot and a question sent seconds apart ran in two
+   containers and were answered out of order. The inbox leases an `update_id`
+   and nothing else.
 
    - **Mutual exclusion.** Two turns must not run on one thread. Today each
      loads context without the other's message, both append, and both write the
@@ -202,6 +200,12 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    not depend on the platform. That needs a migration on a populated database,
    which is a human gate. Stopgap without a migration: `max_containers=1` on the
    worker.
+
+5. **Optimization after the agent is observable.** Improve efficiency against
+   the measurements above without delaying the harness phase: adaptive
+   scaledown through `autoscale.py`, prefix caching confirmed rather than
+   assumed, speculative decoding, and the single-call change that removes the
+   router's second full-context request per message.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the
