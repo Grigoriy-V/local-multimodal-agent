@@ -236,3 +236,44 @@ async def test_the_model_is_sent_the_derived_brief_every_turn(
     assert "Your tools are exactly" in sent
     assert "inspect_page" in sent
     assert "remember_fact" in sent
+
+
+def test_the_person_is_told_which_documents_can_be_read(
+    registry: CapabilityRegistry,
+) -> None:
+    """`/can` has to name this, because nothing else does.
+
+    A document does not arrive as something the model can see, so an assistant
+    that lists only images and audio reads as one that refuses PDFs — which is
+    what it did until the tool existed.
+    """
+
+    from app.capabilities import capability_report
+
+    tools = registry.toolbox(registry.grant())
+    report = capability_report(tools)
+
+    assert "Read: csv, docx, md, pdf, txt" in report
+    assert "read_document" in report
+    assert "view_pages" in report
+
+
+def test_the_brief_never_says_a_document_cannot_be_seen(
+    registry: CapabilityRegistry,
+) -> None:
+    """It said exactly that, and the assistant repeated it to a person.
+
+    Asked to show the PDF it had just summarized, the assistant answered that it
+    is a text model with no way to display anything — while holding a tool that
+    renders the page and an interface that delivers pictures. The sentence that
+    caused it was in the generated brief, which is the one place that is supposed
+    to be incapable of being wrong about this.
+    """
+
+    from app.capabilities import capability_brief
+
+    brief = capability_brief(registry.toolbox(registry.grant()))
+
+    assert "never shown to you" not in brief
+    assert "view_pages" in brief
+    assert "asks you to look at or show it" in brief

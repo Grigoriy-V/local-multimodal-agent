@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.attachments import MAX_FILE_SIZE_BYTES, MAX_FILES, MEDIA_KINDS
+from app.documents import DOCUMENT_MEDIA_TYPES
 from app.tools import Toolbox
 
 
@@ -44,6 +45,12 @@ def accepted(kind: str) -> tuple[str, ...]:
     """The media types the admission policy accepts for one kind of input."""
 
     return tuple(media for media, admitted in MEDIA_KINDS.items() if admitted == kind)
+
+
+def documents() -> str:
+    """The document formats that can be read, named the way a person names them."""
+
+    return ", ".join(sorted(DOCUMENT_MEDIA_TYPES.values()))
 
 
 def needs_approval(tools: Toolbox) -> tuple[str, ...]:
@@ -97,6 +104,24 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
         "else is refused before you see it.",
         f"- {_delivery_sentence(delivery)}",
     ]
+    if "read_document" in tools.names:
+        # Said separately from the media list because it arrives differently: a
+        # document is a file in the workspace rather than something already in
+        # front of you. What this must not say is that you cannot see it — an
+        # earlier version did, and the assistant duly told a person it was a text
+        # model that could not look at the PDF it had just read.
+        looking = (
+            " A PDF page can also be looked at as an image with view_pages — when it "
+            "has no text layer, when the layout is the question, and when the person "
+            "asks you to look at or show it."
+            if "view_pages" in tools.names
+            else ""
+        )
+        lines.append(
+            f"- The person can also send documents ({documents()}). They are saved in "
+            "your workspace under the name the turn gives you, and you read them with "
+            f"read_document rather than receiving their text directly.{looking}"
+        )
     asking = needs_approval(tools)
     if asking:
         lines.append(
@@ -128,6 +153,7 @@ def capability_report(
         "",
         f"See: {images}",
         f"Hear: {audio}",
+        f"Read: {documents() if 'read_document' in tools.names else 'no documents'}",
         f"Receive: up to {MAX_FILES} files per message, {megabytes} MB each",
         f"Send: {sends}",
         f"Tools: {', '.join(tools.names) or 'none'}",

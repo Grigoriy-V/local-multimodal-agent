@@ -9,6 +9,10 @@ dependencies = []
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    # Only to build a PDF that has a text layer. pypdf reads one and can write
+    # only blank pages, so without this the page-boundary test skips — and a
+    # test that skips is a test that does not exist.
+    "reportlab>=4.2",
 ]
 app = [
     "httpx>=0.28",
@@ -20,6 +24,20 @@ agent = [
     "langgraph>=1.2",
     "langgraph-checkpoint-sqlite>=2.0",
     "websockets>=15.0",
+]
+# Reading what a person sends. Both are pure Python and small, and both are
+# parsers pointed at untrusted input, which is why they are the only two: every
+# extra format is another parser with the same exposure.
+documents = [
+    "pypdf>=5.1",
+    "python-docx>=1.1",
+    # The same PDFium that renders PDFs inside Chrome, as a library. A page
+    # becomes a picture without a browser process and without the viewer's own
+    # toolbar in the frame, and the page is chosen by number rather than by
+    # emulating a scroll.
+    "pypdfium2>=4.30",
+    # pypdfium2 renders into a raw bitmap; this is what turns one into a PNG.
+    "pillow>=11.0",
 ]
 ui = [
     "chainlit>=2.0",

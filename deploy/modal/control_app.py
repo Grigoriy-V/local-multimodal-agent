@@ -14,28 +14,75 @@ from fastapi import Request
 
 APP_NAME = "assistant-control"
 SECRET_NAME = "assistant-control"
+WORKSPACE_ROOT = "/workspaces"
 
 app = modal.App(APP_NAME)
 control_secret = modal.Secret.from_name(SECRET_NAME)
 
-# Build only from the lock file and copy only application source. In particular,
+# Build only from the lock file, and copy only application source. In particular,
 # never copy the repository's .env, data, reports or human workspaces into an
 # image layer.
-control_image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .uv_sync(
-        ".",
-        groups=["app", "agent", "postgres", "deploy"],
-        frozen=True,
-        extra_options="--no-install-project",
-    )
-    .add_local_dir("app", "/root/project/app", copy=True)
-    .add_local_dir("ui", "/root/project/ui", copy=True)
-    .add_local_file(
-        "deploy/modal/control_app.py", "/root/project/control_app.py", copy=True
-    )
-    .env({"PYTHONPATH": "/root/project"})
+#
+# The order below is load-bearing. Everything that changes rarely is built first
+# and the source is copied last, because a copied directory invalidates every
+# layer after it and the source changes on every single deploy. Chromium sat
+# above the copy once: it pulls the whole X11 stack even for headless use, and
+# every deploy reinstalled all of it — minutes, each time, for a one-line edit.
+_dependencies = modal.Image.debian_slim(python_version="3.12").uv_sync(
+    ".",
+    groups=["app", "agent", "postgres", "deploy", "documents"],
+    frozen=True,
+    extra_options="--no-install-project",
 )
+
+# The browser, added before the source rather than after it, so it is installed
+# once and then restored from cache until the lock file itself changes.
+#
+# The fonts are not cosmetic. Without them a screenshot of Cyrillic text is a row
+# of boxes, and the assistant would be handing the model a picture of nothing.
+_with_browser = _dependencies.apt_install(
+    "chromium", "fonts-liberation", "fonts-dejavu-core"
+)
+
+
+def _with_source(image: modal.Image) -> modal.Image:
+    """Put this repository's application code into an image, and nothing else.
+
+    One function for both images so a file can never be present in one and
+    missing from the other — the failure that would show up as a capability
+    working in the webhook and not in the worker.
+    """
+
+    return (
+        image.add_local_dir("app", "/root/project/app", copy=True)
+        .add_local_dir("ui", "/root/project/ui", copy=True)
+        .add_local_file(
+            "deploy/modal/control_app.py", "/root/project/control_app.py", copy=True
+        )
+        .env({"PYTHONPATH": "/root/project"})
+    )
+
+
+control_image = _with_source(_dependencies)
+
+# The agent's image is the same thing with a browser under it. The webhook — the
+# one function whose cold start a person waits on — never renders anything, so it
+# stays on the smaller one.
+agent_image = _with_source(_with_browser).env({"AGENT_WORKSPACE": WORKSPACE_ROOT})
+
+# Where the workspace stops dying with the container. A container's filesystem
+# is gone the moment it scales down, so a file the assistant wrote in one
+# message did not exist in the next — the capability was advertised and only
+# ever half true.
+#
+# A volume, not a sandbox. The two questions this item raised — does a file
+# survive, and where is untrusted content allowed to run — are separate, and
+# only the second needs a sandbox. This one starts nothing and costs storage.
+#
+# Sharing one volume is not sharing one workspace: `user_workspace` puts each
+# person in their own directory inside it, which is the same boundary the local
+# profile has.
+workspaces = modal.Volume.from_name("assistant-workspaces", create_if_missing=True)
 
 # Load the webhook's modules in the container's global scope. `Image.imports` is
 # what makes that safe: the block runs only inside the container, so importing
@@ -76,8 +123,9 @@ def _settings() -> tuple[object, object]:
 
 
 @app.function(
-    image=control_image,
+    image=agent_image,
     secrets=[control_secret],
+    volumes={WORKSPACE_ROOT: workspaces},
     cpu=1.0,
     memory=2048,
     min_containers=0,
@@ -112,16 +160,25 @@ async def process_telegram_update(update_id: int) -> bool:
     client = TelegramClient(telegram)
     adapter = TelegramAdapter(client, telegram, agent)
     inbox = PostgresUpdateInbox(agent.database_url, agent.database_schema)
+    # Around the turn, not around the process. A container is reused for as long
+    # as its idle window holds, so a container that has been alive since before
+    # another one wrote a file would keep serving the version it first saw, and
+    # the next message would be answered against a stale workspace. Committing
+    # afterwards is what makes this turn's files exist for the next one, whichever
+    # container answers it.
+    await workspaces.reload.aio()
     try:
         return await TelegramUpdateWorker(inbox, adapter).run(update_id)
     finally:
+        await workspaces.commit.aio()
         await adapter.aclose()
         await client.aclose()
 
 
 @app.function(
-    image=control_image,
+    image=agent_image,
     secrets=[control_secret],
+    volumes={WORKSPACE_ROOT: workspaces},
     cpu=0.25,
     memory=512,
     min_containers=0,

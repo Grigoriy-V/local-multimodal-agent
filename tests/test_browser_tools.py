@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from app.agent.runtime import Agent
+from app.tools.browser import container_flags
 from app.memory import SqliteStore
 from app.models import ContentPart, ToolCall
 from app.tools import (
@@ -114,3 +116,37 @@ async def test_real_browser_inspects_a_general_local_page(tmp_path: Path) -> Non
     assert '"buttons": 1' in (result[0].text or "")
     assert result[1].data is not None and len(result[1].data) > 1_000
     assert list((tmp_path / ".agent" / "browser").glob("page-*.png"))
+
+
+def test_a_desktop_browser_keeps_its_own_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--no-sandbox` is what a container needs, not what a laptop should get.
+
+    It is the only real isolation the browser has. Handing it away everywhere so
+    that one environment works would make the deployed concession the default.
+    """
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "geteuid", lambda: 1000, raising=False)
+
+    assert container_flags() == []
+
+
+def test_a_container_browser_gets_the_flags_it_cannot_start_without(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chromium as root refuses its sandbox, and 64 MB of /dev/shm crashes it.
+
+    Both are facts about the machine, so they are read from the machine rather
+    than from a setting that has to be remembered when a profile changes.
+    """
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "geteuid", lambda: 0, raising=False)
+
+    assert container_flags() == ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+
+
+def test_windows_is_never_treated_as_a_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "name", "nt")
+
+    assert container_flags() == []

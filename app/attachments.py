@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.documents import media_type_for
 from app.models import ContentPart
 
 MAX_FILES = 5
@@ -100,6 +101,90 @@ def load_attachment_bytes(uploads: Sequence[AttachmentBytes]) -> tuple[ContentPa
         ContentPart(kind=kind, data=upload.data, media_type=upload.media_type)
         for kind, upload in zip(kinds, uploads, strict=True)
     )
+
+
+def safe_filename(name: str) -> str:
+    """A saved name that cannot climb out of the directory it is saved in.
+
+    The name comes from whoever sent the file, so it is treated as hostile:
+    directory separators, `..` and control characters are stripped rather than
+    substituted, and anything left unusable becomes a neutral name. Substituting
+    would be enough to stop traversal and not enough to stop two different files
+    from landing on one path.
+    """
+
+    cleaned = "".join(
+        character
+        for character in name.replace("\\", "/").rsplit("/", 1)[-1]
+        if character.isprintable() and character not in '<>:"|?*'
+    ).strip(" .")
+    return cleaned[:120] or "document"
+
+
+def _free_path(directory: Path, name: str) -> Path:
+    """A path that does not overwrite what is already there.
+
+    Two files called `report.pdf` are two documents, and an assistant that
+    silently replaced the first one would answer the second question against a
+    file the person thinks is still there.
+    """
+
+    candidate = directory / name
+    if not candidate.exists():
+        return candidate
+    stem, _, suffix = name.rpartition(".")
+    stem, suffix = (stem, f".{suffix}") if stem else (name, "")
+    for index in range(2, 1000):
+        candidate = directory / f"{stem}-{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise AttachmentError(f"{name}: too many files by that name are already saved")
+
+
+def admit_uploads(
+    uploads: Sequence[AttachmentBytes], workspace: Path
+) -> tuple[ContentPart, ...]:
+    """Admit one message's uploads: media becomes input, a document becomes a file.
+
+    A picture is shown to the model directly because that is what a model does
+    with a picture. A document is not: a long one would spend the whole context
+    before the model had decided which part of it mattered. So it is saved into
+    the person's workspace and named in the turn, and the model reads it with
+    `read_document` — the same route it would use for a file that was already
+    there.
+    """
+
+    _check_count(len(uploads))
+    sizes = [_check_size(upload.name, len(upload.data)) for upload in uploads]
+    _check_total(sizes)
+
+    parts: list[ContentPart] = []
+    saved: list[str] = []
+    for upload in uploads:
+        document_type = media_type_for(upload.name, upload.media_type)
+        if document_type is None:
+            kind = _check_kind(upload.name, upload.media_type)
+            parts.append(
+                ContentPart(kind=kind, data=upload.data, media_type=upload.media_type)
+            )
+            continue
+        workspace.mkdir(parents=True, exist_ok=True)
+        target = _free_path(workspace, safe_filename(upload.name))
+        target.write_bytes(upload.data)
+        saved.append(target.name)
+    if saved:
+        listed = ", ".join(saved)
+        parts.append(
+            ContentPart(
+                kind="text",
+                text=(
+                    f"[The person attached {listed}. Saved in your workspace under "
+                    "exactly that name. Read it with read_document before answering "
+                    "anything about it.]"
+                ),
+            )
+        )
+    return tuple(parts)
 
 
 def load_attachments(sources: Sequence[AttachmentSource]) -> tuple[ContentPart, ...]:

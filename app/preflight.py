@@ -24,6 +24,7 @@ quietly spends money is one nobody runs.
 
 from __future__ import annotations
 
+import io
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -185,12 +186,81 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
             for shot in (root / ".agent" / "browser").glob(f"{page.stem}-*.png"):
                 shot.unlink(missing_ok=True)
 
+    async def documents() -> str:
+        """A real parser on a real file, because that is where this breaks.
+
+        The library is an optional dependency group, so the failure this catches
+        is an image built without it — invisible offline, and indistinguishable
+        from "the document was empty" to whoever sent one.
+        """
+
+        from app.documents import PDF, read_sections
+        from pypdf import PdfWriter
+
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        buffer = io.BytesIO()
+        writer.write(buffer)
+        try:
+            read_sections(buffer.getvalue(), PDF)
+        except Exception as error:
+            # A blank page has no text layer, which this is supposed to say. Any
+            # other failure means the parser is not there or does not work.
+            if "no text layer" not in str(error):
+                raise
+        name = f"preflight-{uuid.uuid4().hex[:8]}.md"
+        (root / name).write_text("# Heading\nbody text\n", encoding="utf-8")
+        try:
+            text = call("read_document", path=name)
+            if "Heading" not in text:
+                raise RuntimeError("a document was written and did not read back")
+        finally:
+            (root / name).unlink(missing_ok=True)
+        return "a PDF parser answered and a document read back with its headings"
+
+    async def pages() -> str:
+        """Render a page and check that a picture, not a promise, comes back.
+
+        This is the path a scan takes, and it uses a second native library. An
+        image built without it fails here rather than in front of someone who
+        just sent a scanned contract.
+        """
+
+        from app.documents import render_pages
+
+        from pypdf import PdfWriter
+
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        buffer = io.BytesIO()
+        writer.write(buffer)
+        name = f"preflight-{uuid.uuid4().hex[:8]}.pdf"
+        (root / name).write_bytes(buffer.getvalue())
+        try:
+            result = await tools.run_async(
+                ToolCall("preflight-pages", "view_pages", {"path": name})
+            )
+            text = " ".join(part.text or "" for part in result.content)
+            if text.startswith("error:"):
+                raise ToolError(text)
+            images = [part for part in result.content if part.kind == "image"]
+            if not images or not (images[0].data or b"").startswith(b"\x89PNG"):
+                raise RuntimeError("a page was requested and no image came back")
+            render_pages(buffer.getvalue(), 1, 1)
+        finally:
+            (root / name).unlink(missing_ok=True)
+        return "a PDF page was rendered to an image the model can look at"
+
     available = set(tools.names)
     probes: list[Probe] = []
     if {"write_file", "read_file", "list_files"} <= available:
         probes.append(Probe("filesystem", "free", files))
     if "inspect_page" in available:
         probes.append(Probe("browser.inspect", "free", browser))
+    if "read_document" in available:
+        probes.append(Probe("documents.read", "free", documents))
+    if "view_pages" in available:
+        probes.append(Probe("documents.view", "free", pages))
     return probes
 
 

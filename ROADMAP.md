@@ -4,8 +4,14 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. Queue 1 is next and is not approved. No worker
-start is authorized.
+**Current approved step:** queue 1, capabilities. No worker start is authorized;
+each deploy, sandbox or container run is asked for separately.
+
+**Handed over 2026-08-29.** `assistant-control` v14 is deployed and matches the
+repository. Three things in it have never been used in a real chat and are not
+accepted. Read
+`reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
+"State at handover", before changing anything.
 
 This is the only source for current product direction, state, order and approved
 work. The human approves one step before implementation.
@@ -109,16 +115,31 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    container. Before the two items below, because evidence and measurement taken
    without these describe a different product.
 
-   - **Chromium in the control image.** `/check` reports `FAIL browser.inspect`
-     in the container today.
-   - **File tools over an ephemeral sandbox.** The workspace dies with the
-     container, so files do not survive between two messages.
-   - **Document ingestion.** PDF, Markdown, text and office documents, with page
-     and section boundaries preserved. Attachments accept images and audio only.
-   - **Web: search, render, scrape — three tools, not one.** Search through
-     Firecrawl comes first. Rendering a page is ours and runs in the tool
-     sandbox. Scrape is laid in as a tool and is not a default.
+   - **Done: a browser, a workspace that survives, and documents.** Deployed
+     2026-08-29, `/check` 6/6 in the container, and a real PDF read correctly in
+     a real chat. Chromium runs where the agent runs; each person's workspace is
+     a directory on a Modal volume; a document is saved there and read with
+     `read_document`, or looked at with `view_pages`.
+     `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`.
+   - **Deployed in v14, never used in a real chat.** Three changes, none of them
+     accepted until someone tries them:
+     1. The capability brief, the system prompt and the `view_pages` description
+        no longer claim a document cannot be seen. On v13 the assistant told a
+        person it was a text model that could not display anything.
+     2. A tool's media reaches the chat; its text still does not. This is what
+        makes "show me the page" work, and it also makes an `inspect_page`
+        screenshot visible for the first time.
+     3. The browser is installed below the copied source, so it stops being
+        reinstalled on every deploy. v14 paid the slow build once; whether the
+        next deploy is fast is unconfirmed.
+   - **Web: search, render, scrape — three tools, not one.** Not started. Search
+     through Firecrawl first; the key is `WEB_FIRECRAWL_API_KEY`, decided
+     2026-08-29, and the human has it. Rendering is ours and runs where
+     untrusted content may run, which is the sandbox below. Scrape is laid in as
+     a tool and is not a default.
      `reports/2026-08-29_v2_web_capability_options.md`.
+   - **The sandbox, for untrusted content only.** Not started. It is what
+     rendering an arbitrary URL waits on.
 
 2. **Live product evidence.** Nothing above has been seen by a user: that the
    assistant answers a capability question correctly, that `/can` agrees, and

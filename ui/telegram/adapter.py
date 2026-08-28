@@ -31,7 +31,7 @@ from typing import Any
 from app.agent.harness import GeneralHarness
 from app.agent.runtime import create_agent
 from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
-from app.attachments import AttachmentBytes, AttachmentError, load_attachment_bytes
+from app.attachments import AttachmentBytes, AttachmentError, admit_uploads
 from app.capabilities import Delivery
 from app.config import AgentSettings, TelegramSettings
 from app.memory import ConversationStore
@@ -267,7 +267,14 @@ class TelegramAdapter:
 
     # --- inbound -------------------------------------------------------------
 
-    async def to_message(self, incoming: Incoming) -> Message:
+    async def to_message(self, incoming: Incoming, workspace: Path) -> Message:
+        """Turn one update into a turn's input, saving what should not be pasted.
+
+        The workspace is passed in rather than read here: which directory a
+        person's files live in is the application's decision, and an adapter
+        that worked it out for itself would be a second answer to it.
+        """
+
         parts: list[ContentPart] = []
         if incoming.text:
             parts.append(ContentPart(kind="text", text=incoming.text))
@@ -279,7 +286,7 @@ class TelegramAdapter:
             )
             for file_id, name, media_type in incoming.files
         ]
-        parts.extend(load_attachment_bytes(uploads))
+        parts.extend(admit_uploads(uploads, workspace))
         if not parts:
             raise AttachmentError("the message has no text or usable attachments")
         return Message(role="user", content=parts)
@@ -354,7 +361,7 @@ class TelegramAdapter:
             return
 
         try:
-            message = await self.to_message(incoming)
+            message = await self.to_message(incoming, harness.agent.capability_grant.root)
         except AttachmentError as error:
             await self.client.send_message(incoming.chat_id, f"Upload refused: {error}.")
             return
@@ -378,6 +385,11 @@ class TelegramAdapter:
     async def _deliver(self, chat_id: int, produced: Message) -> None:
         body = spoken(produced)
         if produced.role == "tool":
+            # A tool's text is working material and stays out of the chat. Its
+            # media does not: a rendered page or a screenshot is the thing the
+            # person asked to see, and it existed here while the assistant was
+            # telling them it had no way to show anything.
+            await self._send_media(chat_id, produced)
             return
         if body:
             await self.client.send_message(chat_id, body)

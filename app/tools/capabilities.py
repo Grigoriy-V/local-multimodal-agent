@@ -8,12 +8,19 @@ from pathlib import Path
 
 from app.tools.base import Tool, Toolbox
 from app.tools.browser import browser_tools
+from app.tools.documents import document_tools
 from app.tools.filesystem import filesystem_tools
 
 FILESYSTEM_READ = "filesystem.read"
 FILESYSTEM_WRITE = "filesystem.write"
 BROWSER_INSPECT = "browser.inspect"
-DEFAULT_CAPABILITIES = (FILESYSTEM_READ, FILESYSTEM_WRITE, BROWSER_INSPECT)
+DOCUMENTS_READ = "documents.read"
+DEFAULT_CAPABILITIES = (
+    FILESYSTEM_READ,
+    FILESYSTEM_WRITE,
+    BROWSER_INSPECT,
+    DOCUMENTS_READ,
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,7 @@ class CapabilityRegistry:
                 Capability(FILESYSTEM_READ, _filesystem_read),
                 Capability(FILESYSTEM_WRITE, _filesystem_write),
                 Capability(BROWSER_INSPECT, browser_tools),
+                Capability(DOCUMENTS_READ, document_tools),
             )
         )
         self._capabilities = {capability.name: capability for capability in configured}

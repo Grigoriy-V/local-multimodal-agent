@@ -461,10 +461,63 @@ async def test_a_photo_becomes_model_input(
     assert "A picture." in telegram.sent
 
 
-async def test_an_unsupported_upload_is_refused_before_the_model(
+async def test_a_document_is_saved_and_named_rather_than_pasted_into_the_turn(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    telegram.files["doc1"] = b"%PDF-1.7"
+    """The bytes never reach the model; the name and the tool do.
+
+    A long document pasted into a turn spends the context before the model has
+    decided which part of it mattered, so it is saved and read on demand.
+    """
+
+    telegram.files["doc1"] = b"%PDF-1.7 pretend"
+    backend = ScriptedBackend(route(), says("Read it."), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(
+        {
+            "message": {
+                "chat": {"id": CHAT},
+                "from": {"id": ALLOWED},
+                "caption": "what does it say",
+                "document": {
+                    "file_id": "doc1",
+                    "file_name": "notes.pdf",
+                    "mime_type": "application/pdf",
+                },
+            }
+        }
+    )
+
+    saved = list(tmp_path.rglob("notes.pdf"))
+    assert len(saved) == 1
+    assert saved[0].read_bytes() == b"%PDF-1.7 pretend"
+    sent_text = [
+        part.text or ""
+        for request in backend.requests
+        for message in request
+        for part in message.content
+    ]
+    assert any("notes.pdf" in text for text in sent_text)
+    assert any("read_document" in text for text in sent_text)
+    assert b"%PDF" not in b"".join(
+        part.data or b""
+        for request in backend.requests
+        for message in request
+        for part in message.content
+    )
+
+
+async def test_an_unsupported_upload_is_still_refused_before_the_model(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Accepting documents is not accepting everything.
+
+    A format nothing here can read must fail at the door rather than land in the
+    workspace, or the workspace becomes a place unopened files accumulate.
+    """
+
+    telegram.files["doc1"] = b"MZ-executable"
     backend = ScriptedBackend()
     adapter = build(telegram, settings, tmp_path, backend)
 
@@ -475,8 +528,8 @@ async def test_an_unsupported_upload_is_refused_before_the_model(
                 "from": {"id": ALLOWED},
                 "document": {
                     "file_id": "doc1",
-                    "file_name": "notes.pdf",
-                    "mime_type": "application/pdf",
+                    "file_name": "tool.exe",
+                    "mime_type": "application/x-msdownload",
                 },
             }
         }
@@ -484,6 +537,7 @@ async def test_an_unsupported_upload_is_refused_before_the_model(
 
     assert backend.requests == []
     assert any("Upload refused" in sent for sent in telegram.sent)
+    assert not list(tmp_path.rglob("tool.exe"))
 
 
 # --- the act branch ----------------------------------------------------------
@@ -775,3 +829,29 @@ async def test_the_indicator_stops_when_the_turn_fails(
 
     assert running == []
     assert any("failed" in message for message in telegram.sent)
+
+
+async def test_a_page_a_tool_rendered_reaches_the_person(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Asked to show the PDF, the assistant said it had no way to display it.
+
+    It had one. The image was in the tool result, went to the model and stopped
+    at the adapter. A tool's text is working material and still stays out of the
+    chat; what it drew does not.
+    """
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    produced = Message(
+        role="tool",
+        content=[
+            ContentPart(kind="text", text="notes.pdf: page 1 of 3"),
+            ContentPart(kind="image", data=b"rendered-page", media_type="image/png"),
+        ],
+        tool_call_id="call-1",
+    )
+
+    await adapter._deliver(CHAT, produced)
+
+    assert telegram.photos == ["image-2.png"]
+    assert not any("page 1 of 3" in sent for sent in telegram.sent)

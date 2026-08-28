@@ -41,6 +41,8 @@ def test_full_grant_exposes_general_browser_and_filesystem_tools(workspace: Path
         "write_file",
         "edit_file",
         "inspect_page",
+        "read_document",
+        "view_pages",
     )
 
 

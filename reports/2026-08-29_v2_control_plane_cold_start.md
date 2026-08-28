@@ -109,10 +109,34 @@ ordinary back-and-forth paid a 10.4 s restored wake almost every turn.
 `min_containers=1` was priced and not chosen: ~$5.7-11.4 a month on the webhook
 depending on its size, ~$45 on the worker.
 
+## Confirmed after the deploy
+
+Three live messages, 2026-08-28 ~18:47-18:50 UTC, read from both apps' logs.
+
+Webhook: 6.16 s / 1.55 s cold, then 1.20 s / 1.07 s and 1.24 s / 1.11 s. Every
+one is the asleep regime — with a 12 s GPU window, an ordinary pause between two
+messages puts the model back to sleep, so the ~0.9 s wake is paid nearly every
+turn and the 200 ms regime is the rare one. The concurrency fix is still worth
+it: it removed the wake from the critical path, so 1.28-1.53 s became 1.07-1.11 s
+here and 0.2 s when the model happens to be up.
+
+Model, per turn on a warm GPU: `GET /v1/models` (the wake), then a router call
+at 567-613 ms, then an answer call at 3.03-5.62 s. Two of the three turns show
+that sequence intact. No 4xx or 5xx anywhere in three hours.
+
+The ~9.2 s cold first message is still not confirmed. Nothing joins a Telegram
+update to a model call, so the chain can only be inferred from two logs with no
+shared identifier.
+
 ## Open
 
 - No application telemetry. Every number above came from Modal's dashboard or
   from inference over two coarse columns, and none of it exists in the local
-  profile. Recorded as the first sub-item of roadmap queue 4.
-- The warm-path fix is deployed but the confirming warm sample was taken before
-  the last deploy; the numbers above for it come from the run preceding it.
+  profile. Recorded as the first sub-item of roadmap queue 3.
+- The worker is silent. Over three hours the control app logged nothing but the
+  webhook's own HTTP lines; `process_telegram_update` emits no line at all, so a
+  turn that fails leaves no trace.
+- NCCL noise costs observability, not just tidiness: 2,520 of 2,704 lines in the
+  model app's three-hour log are broken-pipe stanzas, so the default 100-entry
+  fetch covers 38 seconds. The fix owed to the next `assistant-llm-v2` deploy is
+  worth more than it looked.

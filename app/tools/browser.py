@@ -50,6 +50,24 @@ def find_chromium_browser() -> Path | None:
     return next((path.resolve() for path in candidates if path.is_file()), None)
 
 
+def container_flags() -> list[str]:
+    """The launch flags a browser needs to start at all inside a container.
+
+    Chromium refuses to run its own sandbox as root, and a container's default
+    `/dev/shm` is 64 MB, which is where a renderer crashes rather than fails
+    honestly. Both are container facts, so they are decided by looking at the
+    machine rather than by a setting someone has to remember to turn on.
+
+    They are dropped on a normal desktop deliberately. `--no-sandbox` is the
+    concession that buys the container a browser at all; giving it up where it
+    is not needed would be trading away the only isolation the browser has.
+    """
+
+    if os.name == "nt" or getattr(os, "geteuid", None) is None or os.geteuid() != 0:
+        return []
+    return ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
@@ -196,6 +214,7 @@ async def inspect_local_page(
                 "--disable-extensions",
                 "--disable-sync",
                 "--metrics-recording-only",
+                *container_flags(),
                 "about:blank",
             ],
             stdout=subprocess.DEVNULL,
