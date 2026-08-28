@@ -1,10 +1,11 @@
 """Measure what a person actually waits for when the model endpoint is asleep.
 
-Why this exists rather than a `curl` one-liner: Modal's edge answers `303` after
-roughly 150 s while the container is still coming up, so a single request is
-answered long before the endpoint is ready and times nothing useful. The number
-that matters is wall-clock from the first request until an answer arrives, which
-means retrying until the endpoint actually serves.
+Why this exists rather than a `curl` one-liner: Modal's edge can redirect a
+request while the container is still coming up. `urllib` follows that redirect,
+and the wake probe remains one logical request until the endpoint serves. A
+transport timeout is deliberately terminal: the abandoned server-side request
+may still be queued, so retrying it would create another paid task without
+cancelling the first one.
 
 It also verifies the modalities and the credential form in the same warm window,
 because every extra cold start is a paid GPU boot.
@@ -38,7 +39,6 @@ FIXTURES = ROOT / "tests" / "fixtures"
 # Long enough to cover a full cold boot with margin; the observed vLLM start is
 # about 170 s and the container adds scheduling and snapshot restore on top.
 WAKE_BUDGET = 600.0
-RETRY_INTERVAL = 3.0
 REQUEST_TIMEOUT = 60.0
 
 
@@ -72,7 +72,13 @@ def auth_headers(token: str, style: str) -> dict[str, str]:
     return {"Modal-Key": key, "Modal-Secret": secret}
 
 
-def request(url: str, headers: dict[str, str], payload: dict | None = None):
+def request(
+    url: str,
+    headers: dict[str, str],
+    payload: dict | None = None,
+    *,
+    timeout: float = REQUEST_TIMEOUT,
+):
     """Return (status, body). A transport failure is a status of 0."""
 
     data = json.dumps(payload).encode() if payload is not None else None
@@ -80,7 +86,7 @@ def request(url: str, headers: dict[str, str], payload: dict | None = None):
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -89,31 +95,34 @@ def request(url: str, headers: dict[str, str], payload: dict | None = None):
 
 
 def wake(url: str, headers: dict[str, str]) -> tuple[float, list[str]]:
-    """Retry until the endpoint serves, returning elapsed seconds and what it did.
+    """Wait on one request until the endpoint serves.
 
-    An unauthorized request is not retried: Modal refuses it at the edge without
-    waking the GPU, so retrying would only repeat a 401 for the whole budget.
+    A timed-out HTTP client does not prove that Modal cancelled the queued task.
+    Sending another request can therefore create multiple pending tasks for one
+    measurement. Any non-success is terminal and must be diagnosed before a new
+    separately authorized wake.
     """
 
     started = time.monotonic()
-    seen: list[str] = []
-    deadline = started + WAKE_BUDGET
+    status, body = request(
+        f"{url}/v1/models",
+        headers,
+        timeout=WAKE_BUDGET,
+    )
+    elapsed = time.monotonic() - started
+    note = f"{elapsed:6.1f}s  {status}"
+    print(f"  {note}", flush=True)
 
-    while time.monotonic() < deadline:
-        status, body = request(f"{url}/v1/models", headers)
-        elapsed = time.monotonic() - started
-        note = f"{elapsed:6.1f}s  {status}"
-        if not seen or seen[-1].split()[-1] != str(status):
-            seen.append(note)
-            print(f"  {note}", flush=True)
+    if status == 200:
+        return elapsed, [note]
+    if status in (401, 403):
+        raise SystemExit(f"refused at the edge with {status}; the GPU was not woken")
 
-        if status == 200:
-            return elapsed, seen
-        if status in (401, 403):
-            raise SystemExit(f"refused at the edge with {status}; the GPU was not woken")
-        time.sleep(RETRY_INTERVAL)
-
-    raise SystemExit(f"no answer within {WAKE_BUDGET:.0f}s; last statuses: {seen}")
+    detail = body[:200].decode(errors="replace")
+    raise SystemExit(
+        f"wake request ended after {elapsed:.1f}s with status {status}: {detail}; "
+        "not retrying because the server-side task may still be queued"
+    )
 
 
 def data_uri(path: Path, mime: str) -> str:

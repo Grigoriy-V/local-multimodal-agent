@@ -64,9 +64,11 @@ reconsidered; this roadmap wins any conflict.
   an 8x reduction against the baseline's 189-201 s, with a bearer-token proxy
   credential confirmed working on the `.modal.run` endpoint. One restored wake
   is not acceptance-grade evidence by itself — Modal may build several
-  worker-type-specific snapshots — and the same run found audio broken
-  (`vllm[audio]` was missing from the image; fixed and redeployed, not yet
-  reverified). Evidence: `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
+  worker-type-specific snapshots. The next image fixed the missing
+  `vllm[audio]` dependency; its first invocation rebuilt the invalidated
+  snapshot and served text, image and audio over HTTP 200, but the local command
+  wrapper lost the final strict semantic result. A separate restored wake is
+  still required. Evidence: `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
   building on `reports/2026-08-28_v2_step3b_snapshot_boot.md` and
   `reports/2026-08-28_v2_step3b_first_boot_failure.md`. The baseline
   `assistant-llm` still serves `MODEL_ENDPOINT`. Step 3c is not authorized.
@@ -232,9 +234,12 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Authorize the second restored-wake measurement, with `--auth headers` this
-   time. Text, image and audio must all pass before this counts as
-   acceptance-grade evidence for step 3b's cold-start claim.
+1. Authorize an independent restored-wake measurement against the newly built
+   audio-capable snapshot. The measurement client now submits one long-lived
+   wake request instead of creating another pending Modal task after every
+   60-second client timeout. Retain its exit code and text, image and audio
+   results before this counts as acceptance-grade evidence for step 3b's
+   cold-start claim.
 2. Accept step 2 against the accepted endpoint: one conversational turn and one
    work request through Telegram. The baseline endpoint can prove integration,
    but the optimized replacement should become the normal product endpoint.

@@ -86,3 +86,49 @@ console codec. It did not update the App. Repeating the same deploy with
 - active tasks after deploy: 0
 - active containers after deploy: 0
 - GPU work and model calls: none
+
+## First invocation after the audio redeploy
+
+The first invocation of the new image was authorized and sent with
+`--auth headers`. It did **not** provide the planned second independent restored
+cold-start measurement: adding `vllm[audio]` changed the image and invalidated
+the prior snapshot, so Modal first rebuilt the GPU snapshot.
+
+The server log gives the actual sequence:
+
+- the first request was enqueued at 07:54:43;
+- vLLM reached health after **162.2 s**;
+- weights loaded in 6.17 s and occupied 8.28 GiB;
+- the engine exposed **11.06 GiB** of KV cache (86,664 tokens);
+- the updated GPU snapshot was created at 07:58:13;
+- the function then restored from that snapshot and reported
+  `resume: healthy after 0.0s`;
+- the queued `/v1/models` request completed after **3m34s** total, of which the
+  final restore/serve phase was about **23.8 s**;
+- text, image and audio completion requests all returned HTTP 200 in 0.71 s,
+  1.50 s and 4.53 s respectively;
+- the container shut down after the 30-second scale-down window and
+  `modal container list --json` returned no containers.
+
+The strict client reached the audio request, which proves that the preceding
+text and image semantic checks passed. The local command wrapper timed out
+while Modal was still rebuilding the snapshot and lost the detached client's
+final stdout/exit code. Therefore the audio dependency gap is fixed at the HTTP
+execution level, but the exact transcript assertion (`travel`) is not retained
+as acceptance evidence from this run.
+
+After restore, the single-GPU vLLM process repeatedly logged a NCCL TCPStore
+`Broken pipe` heartbeat warning until shutdown. It did not prevent any of the
+three 200 responses, but it remains a runtime warning to watch on the next
+independent restored wake.
+
+The next paid invocation should now use the newly created snapshot. It is still
+required to retain the strict client's exit code and all three semantic results;
+only that run can serve as the second restored-wake acceptance measurement.
+
+The measurement client no longer creates a new `/v1/models` task every minute.
+The 60-second client timeout had abandoned each local wait without cancelling
+its still-pending Modal task, and the retry loop then submitted another one.
+`wake()` now waits on one request for the full measurement budget and treats any
+transport failure as terminal. Offline tests assert both the single request and
+the no-retry failure path.
