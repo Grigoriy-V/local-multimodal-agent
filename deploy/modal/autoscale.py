@@ -23,6 +23,13 @@ from model_app import APP_NAME, SCALEDOWN_WINDOW
 
 SERVER_NAME = "Server"
 
+# A window shorter than this cannot cover the pause a person takes to read a
+# plan and press a button. Measured the hard way: with 10 s, one approval became
+# two cold starts, because the container scaled to zero while the plan was being
+# read. Not a refusal — a short window is right for a throughput measurement, and
+# an adaptive window is planned — but it is never right by accident.
+INTERACTIVE_FLOOR = 20
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -45,6 +52,13 @@ def main() -> int:
     if not 2 <= arguments.window <= 1200:
         print(f"refusing {arguments.window}s: Modal accepts 2-1200")
         return 1
+
+    if arguments.window < INTERACTIVE_FLOOR:
+        print(
+            f"warning: {arguments.window}s is below the {INTERACTIVE_FLOOR}s a waiting "
+            "approval needs. An interactive turn that stops for a button will pay a "
+            "second cold start. Fine for a measurement, wrong for use."
+        )
 
     # The autoscaler belongs to the class instance, not to a method. Two earlier
     # spellings are rejected by the 1.5 client and are recorded here so they are

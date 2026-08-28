@@ -15,6 +15,7 @@ from app.agent.task_graph import (
     TestReport,
 )
 from app.agent.task_worker import text_message
+from app.capabilities import tool_inventory
 from app.models import BackendError, ContentPart, Message, ModelBackend
 from app.tools import CapabilityRegistry
 
@@ -173,7 +174,9 @@ class ModelTaskValidator:
 
         toolbox, tool_capabilities = self._toolbox(context)
         messages = [
-            text_message("system", VALIDATOR_SYSTEM_PROMPT),
+            text_message(
+                "system", f"{VALIDATOR_SYSTEM_PROMPT}\n{tool_inventory(toolbox)}"
+            ),
             text_message("user", validation_prompt(context, implementation)),
         ]
         required = set(context.plan.validation_capabilities)

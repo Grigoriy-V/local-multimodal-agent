@@ -6,14 +6,20 @@ needed here is six methods, while a bot framework would bring its own event
 loop, handler registry and lifecycle to a project where LangGraph already owns
 orchestration.
 
-Text is sent unformatted. Telegram's Markdown modes reject unbalanced
+Model text is never marked up. Telegram's Markdown modes reject unbalanced
 punctuation, and model output is exactly where unbalanced punctuation comes
-from, so an assistant that formats its answers would intermittently fail to
-send them.
+from, so an assistant that formatted its own answers would intermittently fail
+to send them. `Formatted` is the one exception and stays safe for two reasons:
+the headings are written here, everything from the model is escaped, and a
+message too long to send whole falls back to plain text rather than risking a
+tag cut in half by the splitter.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
+from html import escape
 from typing import Any, Self
 
 import httpx
@@ -56,6 +62,42 @@ def split_message(text: str, limit: int = MAX_MESSAGE_CHARS) -> list[str]:
     if remaining:
         pieces.append(remaining)
     return pieces
+
+
+@dataclass(frozen=True)
+class Formatted:
+    """A message with headings, and the plain text it degrades to.
+
+    Both renderings are carried because the choice is made at send time: only a
+    message that fits in one piece can be sent as HTML.
+    """
+
+    html: str
+    plain: str
+
+    @classmethod
+    def build(cls, blocks: Iterable[tuple[str, str]]) -> Formatted:
+        """Compose from (heading, body) pairs; either side may be empty.
+
+        Headings are this project's own words and bodies are anything, model
+        output included, so only the body is ever escaped — and it is escaped
+        every time.
+        """
+
+        marked: list[str] = []
+        plain: list[str] = []
+        for heading, body in blocks:
+            if not heading and not body:
+                continue
+            marked.append(
+                "\n".join(
+                    piece
+                    for piece in (f"<b>{escape(heading)}</b>" if heading else "", escape(body))
+                    if piece
+                )
+            )
+            plain.append("\n".join(piece for piece in (heading, body) if piece))
+        return cls("\n\n".join(marked), "\n\n".join(plain))
 
 
 def approval_keyboard(approve: str, decline: str) -> dict[str, Any]:
@@ -121,25 +163,46 @@ class TelegramClient:
         return list(result or [])
 
     async def send_message(
-        self, chat_id: int, text: str, reply_markup: dict[str, Any] | None = None
+        self,
+        chat_id: int,
+        text: str | Formatted,
+        reply_markup: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Send text, splitting it when Telegram would refuse the length.
 
         Returns the last message sent, which is the one a caller may later edit.
         """
 
+        pieces, parse_mode = self._render(text)
         sent = None
-        pieces = split_message(text) or [""]
         for index, piece in enumerate(pieces):
             if not piece:
                 continue
             payload: dict[str, Any] = {"chat_id": chat_id, "text": piece}
+            if parse_mode is not None:
+                payload["parse_mode"] = parse_mode
             # Buttons belong to the final piece; a keyboard attached to the first
             # would sit above the rest of the answer.
             if reply_markup is not None and index == len(pieces) - 1:
                 payload["reply_markup"] = reply_markup
             sent = await self._call("sendMessage", payload)
         return sent
+
+    @staticmethod
+    def _render(text: str | Formatted) -> tuple[list[str], str | None]:
+        """Choose between the formatted rendering and the plain one.
+
+        Formatting survives only while the message fits whole. `split_message`
+        cuts on length, so a second piece could begin inside a `<b>` — and
+        Telegram then refuses the message rather than showing it unstyled.
+        """
+
+        if isinstance(text, Formatted):
+            marked = split_message(text.html)
+            if len(marked) == 1:
+                return marked, "HTML"
+            return split_message(text.plain) or [""], None
+        return split_message(text) or [""], None
 
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> None:
         """Replace a message's text, ignoring Telegram's "nothing changed" refusal."""

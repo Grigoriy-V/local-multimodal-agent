@@ -37,8 +37,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "the user to open the page or invoke a separate preview workflow when this tool applies. "
     "Call remember_fact when the user tells you something worth keeping for later "
     "conversations, and "
-    "search_memory when an earlier fact would help. The user approves every write or edit "
-    "before it happens; if a call comes back declined, say so and do not try it again. "
+    "search_memory when an earlier fact would help. "
+    "Never deny an ability the capability list gives you and never claim one it does not; "
+    "if you are unsure whether you can do something, describe what your tools do rather "
+    "than guessing about yourself. "
     "Answer briefly."
 )
 

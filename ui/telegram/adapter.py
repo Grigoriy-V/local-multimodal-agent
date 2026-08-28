@@ -31,10 +31,16 @@ from app.agent.harness import GeneralHarness
 from app.agent.runtime import create_agent
 from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
 from app.attachments import AttachmentBytes, AttachmentError, load_attachment_bytes
+from app.capabilities import Delivery
 from app.config import AgentSettings, TelegramSettings
 from app.memory import ConversationStore
 from app.models import ContentPart, Message
-from ui.telegram.api import TelegramClient, TelegramError, approval_keyboard
+from ui.telegram.api import (
+    Formatted,
+    TelegramClient,
+    TelegramError,
+    approval_keyboard,
+)
 
 # A fixed namespace so a chat maps to the same canonical identity on every run
 # and on every machine. Changing it orphans every existing conversation.
@@ -48,11 +54,17 @@ HELP = (
     "Send a message and I will answer, or ask for work and I will plan it, "
     "ask before touching the workspace, and report what happened.\n\n"
     "/new — start a fresh conversation\n"
-    "/stop — stop the task running in this chat"
+    "/stop — stop the task running in this chat\n"
+    "/can — what I can actually see, hear, send and change"
 )
 
 PHOTO_MEDIA_TYPE = "image/jpeg"
 VOICE_MEDIA_TYPE = "audio/ogg"
+
+# What `_send_media` can actually put in this chat, declared where that method
+# is, so the two cannot drift apart. Images go as photos and sound as a file,
+# but both arrive, and the model is told so instead of guessing.
+DELIVERY = Delivery(media=("image", "audio"))
 
 # Telegram names an upload by its filename, so an outgoing part needs a
 # plausible extension. Only the types the assistant can produce are listed.
@@ -174,17 +186,57 @@ def read_update(update: dict[str, Any]) -> Incoming | None:
     )
 
 
-def task_plan_text(view: TaskView, workspace: Path) -> str:
+def task_plan_text(view: TaskView, workspace: Path) -> str | Formatted:
+    """The plan a person has to read before approving it.
+
+    Shaped rather than dumped: this message is the one moment where someone
+    decides whether the agent may touch their files, and a wall of text is how
+    that decision gets made without being made.
+    """
+
     if view.plan is None:
         return "Task planning did not produce a plan."
     steps = "\n".join(f"{index}. {step}" for index, step in enumerate(view.plan.steps, 1))
-    criteria = "\n".join(f"- {item}" for item in view.plan.acceptance_criteria)
+    criteria = "\n".join(f"• {item}" for item in view.plan.acceptance_criteria)
     permissions = ", ".join((view.interrupt or {}).get("permissions", []))
-    return (
-        f"Plan\n\n{view.plan.summary}\n\n{steps}\n\n"
-        f"Acceptance criteria\n{criteria}\n\n"
-        f"Scope: {workspace}\n"
-        f"Capabilities: {permissions}\n\nRun this plan?"
+    return Formatted.build(
+        [
+            ("Plan", view.plan.summary),
+            ("Steps", steps),
+            ("Acceptance criteria", criteria),
+            ("Scope", f"{workspace}\n{permissions}"),
+            ("", "Run this plan?"),
+        ]
+    )
+
+
+def task_result_text(view: TaskView, fallback: str) -> str | Formatted:
+    """The finished task, in the order a person reads it.
+
+    The outcome first, because that is the question being answered; then what
+    was checked against real evidence, which is the part that separates a claim
+    from a result.
+    """
+
+    if view.outcome is None:
+        return fallback
+    summary = view.implementation.summary if view.implementation else view.outcome.summary
+    checks = "\n".join(
+        f"{'✓' if check.passed else '✗'} {check.name}\n   {check.detail}"
+        for check in (view.report.checks if view.report else ())
+    )
+    artifacts = "\n".join(f"• {artifact}" for artifact in view.outcome.artifacts)
+    counted = (
+        f"{view.outcome.status} · {view.outcome.iterations} iteration(s) · "
+        f"{view.outcome.tool_calls} tool call(s)"
+    )
+    return Formatted.build(
+        [
+            ("Result", summary),
+            ("Checks", checks),
+            ("Files", artifacts),
+            ("", counted),
+        ]
     )
 
 
@@ -218,7 +270,9 @@ class TelegramAdapter:
         self._harnesses: dict[str, GeneralHarness] = {}
 
     def _default_harness(self, user_id: str) -> GeneralHarness:
-        agent = create_agent(agent_settings=self.agent_settings, user_id=user_id)
+        agent = create_agent(
+            agent_settings=self.agent_settings, user_id=user_id, delivery=DELIVERY
+        )
         return GeneralHarness(
             agent,
             TaskRuntime(
@@ -305,6 +359,15 @@ class TelegramAdapter:
             start_thread(store, user_id)
             await self.client.send_message(incoming.chat_id, "Started a new conversation.")
             return
+        if command == "/can":
+            # Answered from the wiring, not by the model. When the assistant
+            # claims it cannot send a picture, this is what that is checked
+            # against — and it costs nothing, because no GPU is involved.
+            await self.client.send_message(
+                incoming.chat_id,
+                harness.agent.capabilities(current_thread(store, user_id)),
+            )
+            return
         if command == "/stop":
             result = await harness.cancel_task(current_thread(store, user_id))
             await self.client.send_message(
@@ -342,8 +405,12 @@ class TelegramAdapter:
         if body:
             await self.client.send_message(chat_id, body)
         await self._send_media(chat_id, produced)
-        for call in produced.tool_calls:
-            await self.client.send_message(chat_id, f"· {call.name}")
+        if produced.tool_calls:
+            # One line per call, but one message: a batch of calls used to arrive
+            # as a burst of near-empty notifications.
+            await self.client.send_message(
+                chat_id, "\n".join(f"· {call.name}" for call in produced.tool_calls)
+            )
 
     async def _send_media(self, chat_id: int, produced: Message) -> None:
         """Put the message's own media in the chat.
@@ -420,7 +487,12 @@ class TelegramAdapter:
         self, harness: GeneralHarness, chat_id: int, thread_id: str, view: TaskView
     ) -> None:
         result = harness.finish_task(thread_id, view)
-        await self.client.send_message(chat_id, spoken(result) or "The task produced no result.")
+        # The store keeps the harness's canonical text; the chat gets the same
+        # facts in a shape someone can read. Presentation is the adapter's job.
+        await self.client.send_message(
+            chat_id,
+            task_result_text(view, spoken(result) or "The task produced no result."),
+        )
         await self._send_media(chat_id, result)
         for artifact in (view.outcome.artifacts if view.outcome else ()):
             try:

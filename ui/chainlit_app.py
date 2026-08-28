@@ -49,6 +49,7 @@ import chainlit as cl
 from app.agent.harness import GeneralHarness
 from app.agent.runtime import Agent, create_agent
 from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
+from app.capabilities import Delivery
 from app.config import AgentSettings
 from app.memory import SqliteStore
 from app.models import ContentPart, Message
@@ -57,6 +58,7 @@ from ui.chainlit_history import LOCAL_USER_IDENTIFIER, MemoryStoreDataLayer
 IMAGE = "image"
 AUDIO = "audio"
 CONFIRM_TIMEOUT = 600
+DELIVERY = Delivery(media=(IMAGE, AUDIO))
 
 
 @cl.header_auth_callback
@@ -191,7 +193,9 @@ async def confirm(question: list[dict[str, Any]]) -> dict[str, bool]:
 
 
 def create_runtime() -> Agent:
-    return create_agent(agent_settings=AgentSettings())
+    # `attachments` above renders both kinds inline, which is what the model is
+    # told it may produce.
+    return create_agent(agent_settings=AgentSettings(), delivery=DELIVERY)
 
 
 def create_harness() -> GeneralHarness:

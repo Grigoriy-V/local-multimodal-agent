@@ -16,10 +16,17 @@ import pytest
 
 from app.agent.harness import GeneralHarness
 from app.agent.runtime import Agent
-from app.agent.task_runtime import TaskRuntime
+from app.agent.task_graph import (
+    CheckResult,
+    ImplementationResult,
+    TaskOutcome,
+)
+# Aliased: pytest tries to collect any imported name starting with "Test".
+from app.agent.task_graph import TestReport as Report
+from app.agent.task_runtime import TaskRuntime, TaskView
 from app.config import AgentSettings, TelegramSettings
 from app.memory import SqliteStore
-from app.models import Completion, ContentPart, Message
+from app.models import Completion, ContentPart, Message, ToolCall
 from tests.fakes import ScriptedBackend, says
 from ui.telegram.adapter import (
     REFUSAL,
@@ -28,8 +35,14 @@ from ui.telegram.adapter import (
     current_thread,
     read_update,
     start_thread,
+    task_result_text,
 )
-from ui.telegram.api import MAX_MESSAGE_CHARS, TelegramClient, split_message
+from ui.telegram.api import (
+    MAX_MESSAGE_CHARS,
+    Formatted,
+    TelegramClient,
+    split_message,
+)
 
 ALLOWED = 4242
 STRANGER = 9999
@@ -557,6 +570,125 @@ async def test_a_failing_turn_answers_instead_of_killing_the_bot(
     await adapter.handle_update(text_update("hello"))
 
     assert any("failed" in sent for sent in telegram.sent)
+
+
+# --- what the person reads ---------------------------------------------------
+
+
+async def test_can_is_answered_from_the_wiring_and_never_by_the_model(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """The check has to be worth trusting, so no model and no GPU touch it."""
+
+    backend = ScriptedBackend()
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("/can"))
+
+    assert backend.requests == []
+    answer = telegram.sent[0]
+    assert "inspect_page" in answer
+    assert "image/png" in answer
+    assert "Ask first: write_file, edit_file" in answer
+
+
+async def test_a_batch_of_tool_calls_arrives_as_one_message(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    produced = Message(
+        role="assistant",
+        content=[],
+        tool_calls=(
+            ToolCall(id="a", name="read_file", arguments={}),
+            ToolCall(id="b", name="list_files", arguments={}),
+        ),
+    )
+
+    await adapter._deliver(CHAT, produced)
+
+    assert telegram.sent == ["· read_file\n· list_files"]
+
+
+async def test_a_formatted_message_marks_its_own_headings_and_escapes_the_rest(
+    telegram: FakeTelegram, settings: TelegramSettings
+) -> None:
+    client = TelegramClient(settings, transport=telegram.transport())
+    try:
+        await client.send_message(
+            CHAT, Formatted.build([("Result", "wrote <b>a & b</b>")])
+        )
+    finally:
+        await client.aclose()
+
+    _, payload = telegram.calls[-1]
+    assert payload["parse_mode"] == "HTML"
+    assert payload["text"] == "<b>Result</b>\nwrote &lt;b&gt;a &amp; b&lt;/b&gt;"
+
+
+async def test_a_formatted_message_too_long_to_send_whole_arrives_plain(
+    telegram: FakeTelegram, settings: TelegramSettings
+) -> None:
+    """A cut tag makes Telegram refuse the message; unstyled text is the price."""
+
+    client = TelegramClient(settings, transport=telegram.transport())
+    long_body = "\n".join(f"line {index}" for index in range(1200))
+    try:
+        await client.send_message(CHAT, Formatted.build([("Result", long_body)]))
+    finally:
+        await client.aclose()
+
+    assert len(telegram.sent) > 1
+    assert all("parse_mode" not in payload for _, payload in telegram.calls)
+    assert "<b>" not in "".join(telegram.sent)
+    assert telegram.sent[0].startswith("Result\nline 0")
+
+
+def test_the_finished_task_leads_with_the_result_then_its_evidence() -> None:
+    view = TaskView(
+        subdirectory=".",
+        grant=None,
+        plan=None,
+        implementation=ImplementationResult("wrote square.html", tool_calls=3),
+        outcome=TaskOutcome(
+            status="completed",
+            summary="all criteria passed",
+            iterations=1,
+            tool_calls=7,
+            elapsed_seconds=1.0,
+            artifacts=("square.html",),
+        ),
+        report=Report(
+            checks=(
+                CheckResult(name="the file exists", passed=True, detail="listed"),
+                CheckResult(name="it is green", passed=False, detail="not observed"),
+            )
+        ),
+    )
+
+    shown = task_result_text(view, "unused")
+
+    assert isinstance(shown, Formatted)
+    assert shown.plain.startswith("Result\nwrote square.html")
+    assert "✓ the file exists" in shown.plain
+    assert "✗ it is green" in shown.plain
+    assert "square.html" in shown.plain
+    assert "completed · 1 iteration(s) · 7 tool call(s)" in shown.plain
+
+
+def test_a_task_that_produced_no_outcome_still_says_something() -> None:
+    view = TaskView(
+        subdirectory=".",
+        grant=None,
+        plan=None,
+        implementation=None,
+        outcome=None,
+        report=None,
+    )
+
+    assert task_result_text(view, "the task produced no result") == (
+        "the task produced no result"
+    )
 
 
 def test_a_long_answer_is_split_rather_than_refused() -> None:

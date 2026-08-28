@@ -99,6 +99,28 @@ async def test_write_file_creates_inside_the_granted_directory(tmp_path: Path) -
     assert body(backend.requests[1][-1]).startswith("created game.html")
 
 
+async def test_the_implementer_is_told_which_tools_it_actually_has(
+    tmp_path: Path,
+) -> None:
+    """It once told a user a tool was "not available in this environment".
+
+    It had filesystem tools and no browser, which is true and not the user's
+    business: validation runs afterwards with its own tools and produced the
+    screenshot the same message said was impossible. So the prompt closes the
+    list it does have, and forbids speaking for the delivery.
+    """
+
+    backend = ScriptedBackend(says("Created game.html."))
+    worker = ModelTaskWorker(backend, tmp_path)
+
+    await worker.implement(context())
+
+    system = body(backend.requests[0][0])
+    assert "Your tools are exactly: list_files, read_file, write_file, edit_file" in system
+    assert "browser" not in system.split("Your tools are exactly")[1]
+    assert "separate validation stage" in system
+
+
 async def test_retry_reads_current_file_and_repairs_with_edit_file(tmp_path: Path) -> None:
     run = tmp_path / "run"
     run.mkdir()

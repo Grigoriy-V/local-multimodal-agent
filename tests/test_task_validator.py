@@ -92,6 +92,29 @@ async def test_filesystem_evidence_is_collected_then_evaluated(tmp_path: Path) -
     assert "Changed result.txt" not in evaluator_prompt
 
 
+async def test_the_validator_is_told_which_tools_it_actually_has(tmp_path: Path) -> None:
+    """A validator that invents a tool name spends its budget on nothing."""
+
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "result.txt").write_text("blue", encoding="utf-8")
+    criterion = "result.txt contains blue"
+    backend = ScriptedBackend(
+        calls("read_file", path="result.txt"),
+        says("Evidence collected."),
+        says(evaluation(criterion, detail="read_file returned blue")),
+    )
+
+    await ModelTaskValidator(backend, tmp_path)(
+        context(criterion, "filesystem.read"),
+        ImplementationResult("Changed result.txt"),
+    )
+
+    system = prompt_text(backend.requests[0][:1])
+    assert "Your tools are exactly: list_files, read_file" in system
+    assert "write_file" not in system, "validation is read-only and must say so"
+
+
 async def test_model_can_choose_browser_evidence_and_return_its_screenshot(
     tmp_path: Path,
 ) -> None:

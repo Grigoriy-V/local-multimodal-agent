@@ -4,8 +4,8 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none — the 60-second restored-wake control passed;
-no worker start is authorized
+**Current approved step:** next-step candidate 4, "a tool worth using daily".
+Its offline half is done; no worker start is authorized
 
 This is the only source for current product direction, development state,
 order and approved work. The human approves one step before implementation.
@@ -305,26 +305,33 @@ this roadmap when a concrete assistant use case needs them.
    `inspect_page` and its screenshot arrived in the chat as a picture. Evidence:
    `reports/2026-08-28_v2_telegram_voice_and_media_budget.md`.
 3. Start step 3c control-plane work.
-4. Turn the working path into a tool worth using daily, alongside step 4
-   document ingestion, which remains planned and has not been folded into
-   deployment work. The live runs showed the difference between "the pipeline
-   works" and "the product is good":
-   - The assistant misreports its own capabilities. Asked for a screenshot it
-     answered that its output "supports only text", and repeated it when told
-     otherwise; the same task text claimed `browser.inspect` was unavailable
-     while `inspect_page` had just run and its evidence was counted in the
-     acceptance criteria. The system prompt never tells the model that media
-     can be delivered, and it invents tool names. Prompt work, no deploy.
-   - A capability check the assistant can answer honestly: what it can see,
-     hear, send, read and change, derived from the registered tools and the
-     adapter's delivery paths rather than written by hand and left to rot.
-   - Telegram presentation. Today a turn is a stack of plain messages; plan,
-     progress, result and evidence deserve a readable shape, and `scaledown`
-     must cover the pause a human takes to read a plan — a 10-second window
-     turned one approval into two cold starts.
-   - Evidence that it is genuinely agentic rather than demo-shaped: multi-step
-     work that survives a restart, asks when it should and does not claim a
-     result it did not verify.
+4. **In progress — offline half done, live evidence pending.** Turn the working
+   path into a tool worth using daily, alongside step 4 document ingestion,
+   which remains planned and has not been folded into deployment work. The live
+   runs showed the difference between "the pipeline works" and "the product is
+   good":
+   - **Done, offline.** The assistant no longer describes itself from prose.
+     `app/capabilities.py` generates what it can do from the toolbox the graph
+     is compiled with, the attachment admission policy, and a `Delivery` each
+     adapter declares beside its own rendering code; the same sentence closes
+     the tool list for the task implementer and validator, which is where the
+     invented `browser.inspect` came from. The hand-written guidance keeps its
+     tool names but can no longer outlive them.
+   - **Done, offline.** `/can` in Telegram prints what the agent can see, hear,
+     receive, send, run and change, from the same derivation, with no model call
+     and therefore no GPU. It is what a model claim is measured against.
+   - **Done, offline.** Telegram presentation: headings for the plan a person
+     approves and for the finished task, which now leads with the result, then
+     the checks, then the files. Model text is escaped and never marked up, and
+     a message too long to send whole degrades to plain text. `autoscale.py`
+     warns below 20 s, the pause an approval needs — a 10-second window turned
+     one approval into two cold starts.
+   - **Not done.** Live product evidence for all of the above, and evidence that
+     it is genuinely agentic rather than demo-shaped: multi-step work that
+     survives a restart, asks when it should and does not claim a result it did
+     not verify. Needs one warm window; a human gate.
+   - Evidence so far:
+     `reports/2026-08-28_v2_capability_honesty_and_telegram_shape.md`.
 5. Measurement, metrics, economics and optimization, in that order. Nothing here
    is tuning by feel: today's throughput numbers (15-17 tok/s) are
    `completion_tokens / wall time` over 48-token answers measured from a Windows

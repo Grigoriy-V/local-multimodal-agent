@@ -21,6 +21,12 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from app.agent.graph import build_agent, latest_text
+from app.capabilities import (
+    CHAT_DELIVERY,
+    Delivery,
+    capability_brief,
+    capability_report,
+)
 from app.config import AgentSettings, ModelSettings
 from app.context import Context, ContextPolicy, build_prelude
 from app.context.window import DEFAULT_SYSTEM_PROMPT
@@ -28,7 +34,7 @@ from app.memory import LOCAL_USER_ID, ConversationStore, Thread
 from app.memory.store import SqliteStore
 from app.models import ContentPart, Message, ModelBackend, Usage
 from app.models.openai_compatible import OpenAICompatibleBackend
-from app.tools import CapabilityGrant, CapabilityRegistry, memory_tools
+from app.tools import CapabilityGrant, CapabilityRegistry, Toolbox, memory_tools
 
 # The checkpoint holds this project's own dataclasses, so LangGraph is told
 # which types it is allowed to reconstruct. Nothing else may come back out.
@@ -91,6 +97,7 @@ class Agent:
         capability_registry: CapabilityRegistry | None = None,
         capability_grant: CapabilityGrant | None = None,
         user_id: str = LOCAL_USER_ID,
+        delivery: Delivery = CHAT_DELIVERY,
     ) -> None:
         self.backend = backend
         self.store = store
@@ -98,6 +105,7 @@ class Agent:
         self.workspace = Path(workspace).resolve()
         self.policy = policy or ContextPolicy()
         self.system_prompt = system_prompt
+        self.delivery = delivery
         self.checkpoints = checkpoints
         self.context_fraction = context_fraction
         self.capability_registry = capability_registry or CapabilityRegistry(self.workspace)
@@ -146,21 +154,39 @@ class Agent:
             await self._saver.setup()
         return self._saver
 
+    def toolbox(self, thread_id: str) -> Toolbox:
+        """The tools this thread's graph is compiled with.
+
+        Exposed because the assistant's own account of what it can do has to be
+        read from here rather than described, and because a person asking the
+        same question deserves the same source.
+        """
+
+        return self.capability_registry.toolbox(
+            self.capability_grant,
+            memory_tools(self.store, self.user_id, thread_id, self.policy.retrieved_facts),
+        )
+
+    def capabilities(self, thread_id: str) -> str:
+        """What this agent can see, hear, send, read and change, for a person."""
+
+        return capability_report(
+            self.toolbox(thread_id), self.delivery, self.capability_grant.root
+        )
+
     async def _graph(self, thread_id: str) -> CompiledStateGraph:
         if thread_id not in self._graphs:
-            toolbox = self.capability_registry.toolbox(
-                self.capability_grant,
-                memory_tools(
-                    self.store, self.user_id, thread_id, self.policy.retrieved_facts
-                ),
-            )
+            toolbox = self.toolbox(thread_id)
+            # The model is told what it actually has, every turn. Left to its own
+            # account it denies abilities it has and invents tools it does not.
+            prompt = f"{self.system_prompt}\n\n{capability_brief(toolbox, self.delivery)}"
             self._graphs[thread_id] = build_agent(
                 self.backend,
                 toolbox,
                 self.store,
                 self.user_id,
                 replace(self.policy, max_input_tokens=await self.budget()),
-                self.system_prompt,
+                prompt,
                 await self._checkpointer(),
             )
         return self._graphs[thread_id]
@@ -295,8 +321,14 @@ def create_agent(
     model_settings: ModelSettings | None = None,
     agent_settings: AgentSettings | None = None,
     user_id: str = LOCAL_USER_ID,
+    delivery: Delivery = CHAT_DELIVERY,
 ) -> Agent:
-    """Build the default agent from configuration."""
+    """Build the default agent from configuration.
+
+    `delivery` is the caller's statement of what its interface can put in front
+    of a person; it is what stops the model from denying that it can send a
+    picture, so an interface that renders less has to say so here.
+    """
 
     agent_settings = agent_settings or AgentSettings()
     policy = ContextPolicy(
@@ -318,4 +350,5 @@ def create_agent(
         checkpoints=agent_settings.checkpoints,
         context_fraction=agent_settings.context_fraction,
         user_id=user_id,
+        delivery=delivery,
     )

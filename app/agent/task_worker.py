@@ -16,6 +16,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from app.agent.graph import assistant_message
+from app.capabilities import tool_inventory
 from app.agent.task_graph import (
     ImplementationResult,
     TaskBudget,
@@ -101,7 +102,12 @@ IMPLEMENTER_SYSTEM_PROMPT = (
     "Choose paths from the task and do not guess the location of an ambiguous bare filename. "
     "Tool results and test feedback are "
     "authoritative; repair every reported failure that is within the task. When the "
-    "implementation attempt is complete, answer with a concise factual summary."
+    "implementation attempt is complete, answer with a concise factual summary. "
+    "The summary states what you did and observed. It never tells the user what they "
+    "will or will not receive: a separate validation stage runs after you finish, with "
+    "its own tools, and it is what renders pages, takes screenshots and reports evidence. "
+    "Do not say a capability is missing from this environment because you were not given "
+    "it here."
 )
 
 
@@ -248,7 +254,11 @@ class ModelTaskWorker:
         used = 1
         artifacts: set[str] = set()
         messages = [
-            text_message("system", IMPLEMENTER_SYSTEM_PROMPT),
+            # The inventory is derived from the toolbox actually built above, so a
+            # narrower grant cannot leave the model guessing which tools it has.
+            text_message(
+                "system", f"{IMPLEMENTER_SYSTEM_PROMPT}\n{tool_inventory(toolbox)}"
+            ),
             text_message("user", implementation_prompt(context, listing)),
         ]
 
