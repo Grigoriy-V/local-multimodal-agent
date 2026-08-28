@@ -108,15 +108,28 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      `assistant-control` has separate scale-to-zero webhook and update-worker
      functions plus one explicit migration command. Its locked image excludes
      local secrets and workspaces. Offline registration and the full regression
-     suite passed; live database work is blocked on credentials and Modal has no
-     control secret yet. `reports/2026-08-28_v2_control_plane_cpu_adapter.md`.
-   - **Neon live setup and contract acceptance passed.** The pooled endpoint
-     passed the conversation contract and the real inbox/checkpointer smoke.
-     Live evidence exposed and fixed Windows event-loop handling, pooled
-     `search_path` leakage and accidental `.env` loading by the offline suite.
-     Four unused checkpoint tables from the failed first migration were removed
-     after explicit approval; only the active `public` checkpoint tables remain.
+     suite passed. The allow-listed Modal control Secret now exists; no image,
+     deployment or worker exists yet.
+     `reports/2026-08-28_v2_control_plane_cpu_adapter.md`.
+   - **Neon live correctness acceptance passed; performance remains open.** The
+     pooled endpoint passed the conversation contract and the real
+     inbox/checkpointer smoke. Live evidence exposed and fixed Windows
+     event-loop handling, pooled `search_path` leakage and accidental `.env`
+     loading by the offline suite. Four unused checkpoint tables from the failed
+     first migration were removed after explicit approval; only the active
+     `public` checkpoint tables remain.
      `reports/2026-08-28_v2_control_plane_neon_live.md`.
+   - **Database latency is a closing gate, not later optimization.** One complete
+     application-level read or write is timed from entry to result, including
+     connection acquisition, transactions and every internal SQL round-trip.
+     Splitting one logical operation into several database calls does not split
+     the budget. Cold must be **<=500 ms** and warm must be **<=100 ms**; missing
+     either limit keeps the control-plane stage open. Acceptance must run from
+     the deployed CPU path, not from the developer machine, and records the
+     physical container region. The production-shared CPU probe is written and
+     offline-verified, uses Modal's default unpinned placement to avoid a region
+     price multiplier, and has not been deployed or invoked.
+     `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
    - Build/deploy and accept the written platform adapter. The Telegram secret
      token and allowed-user list are checked in the application, because
      platform proxy auth cannot be used for a Telegram webhook. Registering the

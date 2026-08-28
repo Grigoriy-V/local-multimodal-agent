@@ -83,6 +83,126 @@ async def process_telegram_update(update_id: int) -> bool:
         await client.aclose()
 
 
+@app.function(
+    image=control_image,
+    secrets=[control_secret],
+    cpu=0.25,
+    memory=512,
+    min_containers=0,
+    max_containers=1,
+    scaledown_window=2,
+    timeout=120,
+    include_source=False,
+)
+def measure_database_latency(operation: str, warm_runs: int = 5) -> dict[str, object]:
+    """Measure one complete production read or write without touching the model.
+
+    ``prepare`` creates a representative isolated read fixture. A later
+    ``read`` or ``write`` invocation must happen only after Neon is known to be
+    idle if its first sample is to count as database-cold acceptance.
+    """
+
+    import os
+    import time
+    import uuid
+
+    from app.config import AgentSettings
+    from app.context import load_turn_context
+    from app.context.window import DEFAULT_SYSTEM_PROMPT
+    from app.memory import ConversationStore, open_store
+    from app.models import ContentPart, Message
+
+    if operation not in {"prepare", "read", "write"}:
+        raise ValueError("operation must be prepare, read or write")
+    if not 1 <= warm_runs <= 20:
+        raise ValueError("warm_runs must be between 1 and 20")
+
+    settings = AgentSettings()
+    if not settings.database_url:
+        raise RuntimeError("AGENT_DATABASE_URL is not configured")
+
+    owner = "database-latency-benchmark-v1"
+    fixture = "database-latency-read-fixture-v1"
+
+    def message(role: str, value: str) -> Message:
+        return Message(role=role, content=[ContentPart(kind="text", text=value)])
+
+    if operation == "prepare":
+        store = open_store(settings)
+        try:
+            existing_owner = store.thread_owner(fixture)
+            if existing_owner not in {None, owner}:
+                raise RuntimeError("latency fixture id belongs to another owner")
+            if store.message_count(fixture) == 0:
+                turns = []
+                for index in range(4):
+                    turns.extend(
+                        [
+                            message("user", f"latencyfixture question {index}"),
+                            message("assistant", f"latencyfixture answer {index}"),
+                        ]
+                    )
+                store.append(fixture, turns, owner)
+                store.set_summary(fixture, "Representative earlier conversation.", 0)
+            saved = set(store.facts(owner))
+            for index in range(5):
+                fact = f"latencyfixture durable fact {index}"
+                if fact not in saved:
+                    store.remember(fact, owner, fixture)
+            return {"operation": operation, "fixture": "ready"}
+        finally:
+            store.close()
+
+    query = "latencyfixture current question"
+
+    def read_once(store: ConversationStore) -> dict[str, int]:
+        context = load_turn_context(
+            store, fixture, owner, query, 5, DEFAULT_SYSTEM_PROMPT
+        )
+        shape = {"history": len(context.history), "prelude": len(context.prelude)}
+        if shape != {"history": 8, "prelude": 3}:
+            raise RuntimeError("representative read fixture is absent or incomplete")
+        return shape
+
+    created_threads: list[str] = []
+
+    def write_once(store: ConversationStore) -> dict[str, int]:
+        thread_id = f"database-latency-write-{uuid.uuid4().hex}"
+        created_threads.append(thread_id)
+        count = store.append(
+            thread_id,
+            [message("user", "benchmark question"), message("assistant", "benchmark answer")],
+            owner,
+        )
+        return {"messages": count}
+
+    run_once = read_once if operation == "read" else write_once
+    started = time.perf_counter()
+    store = open_store(settings)
+    try:
+        shape = run_once(store)
+        cold_ms = (time.perf_counter() - started) * 1000
+        warm_ms = []
+        for _ in range(warm_runs):
+            warm_started = time.perf_counter()
+            shape = run_once(store)
+            warm_ms.append((time.perf_counter() - warm_started) * 1000)
+        return {
+            "operation": operation,
+            "cold_ms": round(cold_ms, 3),
+            "warm_ms": [round(value, 3) for value in warm_ms],
+            "warm_max_ms": round(max(warm_ms), 3),
+            "cold_pass": cold_ms <= 500,
+            "warm_pass": max(warm_ms) <= 100,
+            "shape": shape,
+            "region": os.environ.get("MODAL_REGION", "unknown"),
+        }
+    finally:
+        for thread_id in created_threads:
+            store.delete_thread(thread_id)
+        store.close()
+
+
 async def _spawn(update_id: int) -> None:
     # ``spawn`` returns immediately and the durable inbox owns the retry state.
     process_telegram_update.spawn(update_id)

@@ -7,7 +7,8 @@ endpoint. No Telegram, Modal Function, sandbox, model or GPU worker was invoked.
 ## Result
 
 The conversation store, LangGraph checkpointer and leased Telegram inbox now
-run against the same Neon database and have passed live acceptance.
+run against the same Neon database and have passed live correctness acceptance.
+This does not close the database stage: performance acceptance remains open.
 
 - The parameterized `ConversationStore` contract passed against real
   PostgreSQL: **25 passed in 88.96 s** on the final run.
@@ -51,6 +52,12 @@ created and dropped contract-only schemas, and inserted/deleted one inbox smoke
 row. Neon compute usage was short and was not measured as a billable amount.
 GPU/VRAM use was **0**. No project worker, Modal container, Telegram request,
 model request, image build or deploy occurred.
+
+No result here establishes the product latency budget. Contract and smoke
+durations contain many operations from the developer machine and cannot be
+divided into per-query claims. A later deployed-path benchmark must time each
+complete logical read or write, including all connection and SQL work, at
+**<=500 ms cold** and **<=100 ms warm**. The stage remains open until both pass.
 
 After the human explicitly approved cleanup, the four unused
 `assistant.checkpoint_*` tables from the failed first migration were dropped in

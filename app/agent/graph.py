@@ -18,7 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import interrupt
 
-from app.context import Context, ContextPolicy, build_prelude, fold_older_messages
+from app.context import Context, ContextPolicy, fold_older_messages, load_turn_context
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import ConversationStore
 from app.models import (
@@ -149,13 +149,14 @@ def build_agent(
     schemas = toolbox.schemas() or None
 
     def assemble_context(state: AgentState) -> Context:
-        summary, through = store.summary(state.thread_id)
-        history = store.messages(state.thread_id, after=through - 1)
         query = latest_text(state.messages)
-        facts = store.search(query, user_id, limit=policy.retrieved_facts) if query else []
-        return Context(
-            prelude=build_prelude(summary, facts, system_prompt),
-            history=history,
+        return load_turn_context(
+            store,
+            state.thread_id,
+            user_id,
+            query,
+            policy.retrieved_facts,
+            system_prompt,
         )
 
     def load(state: AgentState) -> dict[str, Context]:

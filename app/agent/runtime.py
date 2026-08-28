@@ -26,7 +26,7 @@ from app.capabilities import (
     capability_report,
 )
 from app.config import AgentSettings, ModelSettings
-from app.context import Context, ContextPolicy, build_prelude
+from app.context import ContextPolicy, load_turn_context
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import LOCAL_USER_ID, ConversationStore, Thread, open_store
 from app.models import ContentPart, Message, ModelBackend, Usage
@@ -226,17 +226,14 @@ class Agent:
     ) -> list[Message]:
         """Assemble the same bounded conversation layers for an internal decision."""
 
-        summary, through = self.store.summary(thread_id)
-        history = self.store.messages(thread_id, after=through - 1)
         query = latest_text(list(messages))
-        facts = (
-            self.store.search(query, self.user_id, limit=self.policy.retrieved_facts)
-            if query
-            else []
-        )
-        context = Context(
-            prelude=build_prelude(summary, facts, system_prompt or self.system_prompt),
-            history=history,
+        context = load_turn_context(
+            self.store,
+            thread_id,
+            self.user_id,
+            query,
+            self.policy.retrieved_facts,
+            system_prompt or self.system_prompt,
         )
         return context.prompt(messages)
 
