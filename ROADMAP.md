@@ -191,6 +191,18 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    from bitrate and language needs one clean comparison of the same sentence as
    Opus and WAV.
 
+   `/check` already answers the technical half of this without a model: it tries
+   each capability where the agent actually runs. What it cannot judge is
+   behaviour, so the agentness evidence is a scenario suite, and three
+   constraints on it are worth fixing now rather than after it is built. It
+   asserts on what the harness emits — the route taken, an approval interrupt
+   arriving before any write, a criterion passing against real evidence, an
+   artifact with a parsed property — and never on the model's wording, because
+   assertions on generated text flake and then get switched off. Our criteria,
+   not the plan's, or the agent grades its own homework. And it runs as one
+   warm window for the whole suite, on request: every run wakes a GPU, so it
+   cannot live in continuous integration under this project's worker gate.
+
 4. **Measurement, metrics, economics, optimization, in that order.** Last,
    because a measurement is only worth taking once the capabilities that
    determine what a turn costs are in place. Nothing here is tuning by feel:

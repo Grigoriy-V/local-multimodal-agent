@@ -96,6 +96,45 @@ async def process_telegram_update(update_id: int) -> bool:
     min_containers=0,
     max_containers=1,
     scaledown_window=2,
+    timeout=180,
+    include_source=False,
+)
+async def self_test(include_model: bool = False) -> str:
+    """Try every capability here, in the environment the assistant runs in.
+
+    The point is the environment, not the code: the offline suite already covers
+    the logic, and every failure this catches — a missing browser, a store that
+    breaks on the second call, tables in the wrong schema — is invisible until
+    something runs inside a deployed container.
+
+    Free by default. `include_model` adds one completion, which wakes the GPU,
+    so it is a separate decision every time it is made.
+    """
+
+    from app.agent.runtime import create_agent
+    from app.config import AgentSettings
+    from ui.telegram.adapter import DELIVERY
+
+    telegram, _ = _settings()
+    owner = "deployed-self-test"
+    agent = create_agent(
+        agent_settings=AgentSettings(), user_id=owner, delivery=DELIVERY
+    )
+    try:
+        costs = ("free", "gpu") if include_model else ("free",)
+        return await agent.selftest(f"self-test-{owner}", costs)
+    finally:
+        await agent.aclose()
+
+
+@app.function(
+    image=control_image,
+    secrets=[control_secret],
+    cpu=0.25,
+    memory=512,
+    min_containers=0,
+    max_containers=1,
+    scaledown_window=2,
     timeout=120,
     include_source=False,
 )

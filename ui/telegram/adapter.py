@@ -55,7 +55,8 @@ HELP = (
     "ask before touching the workspace, and report what happened.\n\n"
     "/new — start a fresh conversation\n"
     "/stop — stop the task running in this chat\n"
-    "/can — what I can actually see, hear, send and change"
+    "/can — what I can actually see, hear, send and change\n"
+    "/check — try each of those and report what really works"
 )
 
 PHOTO_MEDIA_TYPE = "image/jpeg"
@@ -367,6 +368,14 @@ class TelegramAdapter:
             await self.client.send_message(
                 incoming.chat_id,
                 harness.agent.capabilities(current_thread(store, user_id)),
+            )
+            return
+        if command == "/check":
+            # `/can` is the claim; this is the claim tried. Free probes only —
+            # the model is not called, so nothing here wakes a GPU.
+            await self.client.send_message(
+                incoming.chat_id,
+                await harness.agent.selftest(current_thread(store, user_id)),
             )
             return
         if command == "/stop":

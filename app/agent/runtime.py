@@ -30,6 +30,7 @@ from app.context import ContextPolicy, load_turn_context
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import LOCAL_USER_ID, ConversationStore, Thread, open_store
 from app.models import ContentPart, Message, ModelBackend, Usage
+from app.preflight import Probe, backend_probe, report, run, store_probes, tool_probes
 from app.models.openai_compatible import OpenAICompatibleBackend
 from app.tools import CapabilityGrant, CapabilityRegistry, Toolbox, memory_tools
 
@@ -171,6 +172,30 @@ class Agent:
         return capability_report(
             self.toolbox(thread_id), self.delivery, self.capability_grant.root
         )
+
+    def probes(self, thread_id: str) -> list[Probe]:
+        """Everything this agent claims, expressed as something to try.
+
+        Built from the same store and toolbox the turns use, so a probe cannot
+        pass against a arrangement the product does not have.
+        """
+
+        return [
+            *store_probes(self.store, self.user_id),
+            *tool_probes(self.toolbox(thread_id), self.capability_grant.root),
+        ]
+
+    async def selftest(self, thread_id: str, include: Sequence[str] = ("free",)) -> str:
+        """Try each capability here and say which ones answered.
+
+        `include` is the cost gate: the model probe wakes a GPU and is left out
+        unless it is asked for by name.
+        """
+
+        probes = self.probes(thread_id)
+        if "gpu" in include:
+            probes.append(backend_probe(self.backend))
+        return report(await run(probes, include))  # type: ignore[arg-type]
 
     async def _graph(self, thread_id: str) -> CompiledStateGraph:
         if thread_id not in self._graphs:
