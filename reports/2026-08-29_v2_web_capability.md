@@ -174,11 +174,23 @@ Windows console encoding failure printing Modal's build output, not a deploy
 failure. `PYTHONIOENCODING=utf-8` is the fix and belongs in front of any `modal`
 command run from this machine.
 
-**The browser layer's cache question is still open.** This deploy rebuilt it,
-correctly: `uv.lock` changed (it was missing `pillow`, which `pyproject.toml`
-already declared), and the lock is below the browser in the image, so everything
-above it was invalidated. The next source-only deploy is the first honest
-measurement.
+**The browser layer's cache question is still open.** The first deploy rebuilt
+it, correctly: `uv.lock` changed (it was missing `pillow`, which
+`pyproject.toml` already declared), and the lock is below the browser in the
+image, so everything above it was invalidated.
+
+A second deploy followed, after the web keys were published to the secret, and
+took **11.0 s with no build at all**. That is weaker evidence than it looks:
+`app/`, `ui/` and `control_app.py` were byte-identical to the previous deploy,
+so it shows the layers survive between deploys and says nothing yet about the
+ordering claim — that a *changed* source still reuses the browser beneath it.
+The next deploy that touches `app/` is the measurement.
+
+Configuration reached the deployment through `tools/sync_control_secret.py`:
+13 allow-listed keys, values never printed, the renderer address published from
+`DEPLOY_WEB_RENDERER_URL` under the name the container reads.
+`WEB_FALLBACK_USER_AGENT` is not set, so the deployed assistant will be refused
+by sites that ask a client to identify itself.
 
 ## Not verified
 

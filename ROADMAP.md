@@ -42,9 +42,10 @@ refused before a model request.
   through `deploy/modal/autoscale.py` and matches `SCALEDOWN_WINDOW`, so a
   deploy restores it. A third function, `render_web_page`, is deployed at
   `https://grigoriy-v--assistant-control-render-web-page.modal.run` behind proxy
-  auth, and has never been run. Until the web keys reach the `assistant-control`
-  secret through `tools/sync_control_secret.py`, the deployed assistant fetches
-  pages but cannot view one and has no search tool.
+  auth, and has never been run. The web keys are in the `assistant-control`
+  secret, published from the owner's own `.env` by
+  `tools/sync_control_secret.py`; nothing about the deployed web capability has
+  been exercised yet, because doing so starts a worker.
 - Owed to the next `assistant-llm-v2` deploy, and not a reason to create one:
   the NCCL loopback rendezvous fix before snapshot creation.
   `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
