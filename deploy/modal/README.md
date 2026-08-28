@@ -89,7 +89,7 @@ Never commit the token. `.env` is ignored; `.env.example` holds the shape only.
 | Change | Cost |
 |---|---|
 | `MODEL_MAX_TOKENS`, `AGENT_CONTEXT_FRACTION` | none — `.env`, no restart |
-| Idle window | seconds — `autoscale.py`, no deploy; the deployed default is 600 s |
+| Idle window | seconds — `autoscale.py`, no deploy; the deployed default is 30 s |
 | `MAX_MODEL_LEN`, GPU type | seconds — deploy, no image rebuild, weights stay |
 | vLLM version, weights | minutes — image rebuild or Volume refill |
 

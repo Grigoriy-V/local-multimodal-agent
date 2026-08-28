@@ -121,8 +121,8 @@ vLLM and the model:
   replace the measured baseline.
 - **Explicit autoscaling**: `min_containers=0` keeps scale-to-zero a stated
   decision rather than a platform default, `max_containers=1` caps the cost of a
-  private service, and `scaledown_window=600` stops the GPU from being dropped
-  between two messages of one conversation while a wake still costs minutes.
+  private service, and `scaledown_window=30` prioritizes scale-to-zero now that
+  the first restored cold start measured 25 seconds.
 
 ## Not applied, and why
 
@@ -167,7 +167,7 @@ Each deploy and every action that creates a worker remains a separate human
 gate.
 
 1. **Done.** The local definition: new App identity, bounded health readiness,
-   explicit 0→1 scaling and a ten-minute idle window.
+   explicit 0→1 scaling and a 30-second idle window.
 2. **Done.** Static and offline checks — the module registers with the Modal
    client, `tests/test_model_endpoint.py` covers the readiness paths and the
    scaling bounds, and the full suite and `ruff` are clean — plus the CPU

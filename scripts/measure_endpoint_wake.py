@@ -42,6 +42,10 @@ RETRY_INTERVAL = 3.0
 REQUEST_TIMEOUT = 60.0
 
 
+class VerificationError(RuntimeError):
+    """The endpoint answered, but an acceptance probe did not pass."""
+
+
 def read_token() -> str:
     """Take the proxy token from the environment, falling back to `.env`."""
 
@@ -116,7 +120,14 @@ def data_uri(path: Path, mime: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode()}"
 
 
-def completion(url: str, headers: dict[str, str], content, label: str) -> None:
+def completion(
+    url: str,
+    headers: dict[str, str],
+    content,
+    label: str,
+    *,
+    expected: tuple[str, ...],
+) -> None:
     payload = {
         "model": "gemma-4-12b-it",
         "messages": [{"role": "user", "content": content}],
@@ -127,18 +138,42 @@ def completion(url: str, headers: dict[str, str], content, label: str) -> None:
     elapsed = time.monotonic() - started
 
     if status != 200:
-        print(f"  {label:<8} FAIL {status}: {body[:200].decode(errors='replace')}")
-        return
-    answer = json.loads(body)
-    text = answer["choices"][0]["message"]["content"].replace("\n", " ")[:90]
-    usage = answer["usage"]
-    rate = usage["completion_tokens"] / elapsed if elapsed else 0
+        detail = body[:200].decode(errors="replace")
+        raise VerificationError(f"{label} returned HTTP {status}: {detail}")
+    try:
+        answer = json.loads(body)
+        choice = answer["choices"][0]
+        full_text = choice["message"]["content"]
+        completion_tokens = answer["usage"]["completion_tokens"]
+        prompt_tokens = answer["usage"]["prompt_tokens"]
+        finish_reason = choice["finish_reason"]
+        if not isinstance(full_text, str):
+            raise TypeError("completion content is not text")
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
+        raise VerificationError(f"{label} returned an invalid completion payload") from error
+
+    normalized = full_text.lower()
+    missing = [term for term in expected if term not in normalized]
+    if missing:
+        raise VerificationError(
+            f"{label} answer missed {missing!r}: {full_text[:200]!r}"
+        )
+
+    text = full_text.replace("\n", " ")[:90]
+    rate = completion_tokens / elapsed if elapsed else 0
     print(
         f"  {label:<8} 200  {elapsed:5.2f}s  "
-        f"{usage['prompt_tokens']:>4} in / {usage['completion_tokens']:>3} out  "
-        f"{rate:4.1f} tok/s  {answer['choices'][0]['finish_reason']}"
+        f"{prompt_tokens:>4} in / {completion_tokens:>3} out  "
+        f"{rate:4.1f} tok/s  {finish_reason}"
     )
     print(f"           {text}")
+
+
+def fixture(name: str) -> Path:
+    path = FIXTURES / name
+    if not path.is_file():
+        raise VerificationError(f"required fixture is missing: {path}")
+    return path
 
 
 def main() -> int:
@@ -155,12 +190,18 @@ def main() -> int:
     elapsed, _ = wake(url, headers)
     print(f"\nREQUEST TO SERVING: {elapsed:.1f}s\n")
 
-    completion(url, headers, "Name three primary colours.", "text")
-    if arguments.skip_modalities:
-        return 0
+    try:
+        completion(
+            url,
+            headers,
+            "Name three primary colours.",
+            "text",
+            expected=("red", "blue", "yellow"),
+        )
+        if arguments.skip_modalities:
+            return 0
 
-    image = FIXTURES / "red_circle.png"
-    if image.exists():
+        image = fixture("red_circle.png")
         completion(
             url,
             headers,
@@ -169,10 +210,10 @@ def main() -> int:
                 {"type": "image_url", "image_url": {"url": data_uri(image, "image/png")}},
             ],
             "image",
+            expected=("red", "circle"),
         )
 
-    audio = FIXTURES / "speech.wav"
-    if audio.exists():
+        audio = fixture("speech.wav")
         encoded = base64.b64encode(audio.read_bytes()).decode()
         completion(
             url,
@@ -182,7 +223,11 @@ def main() -> int:
                 {"type": "input_audio", "input_audio": {"data": encoded, "format": "wav"}},
             ],
             "audio",
+            expected=("travel",),
         )
+    except VerificationError as error:
+        print(f"\nVERIFICATION FAILED: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -104,12 +104,10 @@ GPU_MEMORY_UTILIZATION = 0.80
 # without deploying — see `autoscale.py` — but a deploy resets it to this value,
 # so this constant is the intended default and not merely a starting point.
 #
-# Ten minutes, up from the baseline's 30 s. The baseline's window was chosen to
-# observe scale-to-zero quickly; this one is chosen for a person. A wake costs
-# minutes today, so dropping the GPU while someone reads an answer and types the
-# next message pays that cost repeatedly inside one conversation. Revisit it
-# against observed traffic and cost, not taste.
-SCALEDOWN_WINDOW = 600
+# The first restored cold start measured 25 seconds. For this private service,
+# prefer prompt scale-to-zero over paying for an idle A10 while a user reads or
+# steps away. Revisit the tradeoff from observed traffic and cost.
+SCALEDOWN_WINDOW = 30
 
 # Scale-to-zero is the product requirement, so the floor is stated rather than
 # inherited from a platform default that could change. The ceiling caps cost:

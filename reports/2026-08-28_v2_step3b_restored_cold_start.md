@@ -1,10 +1,11 @@
-# V2 step 3b — first restored cold start, and an audio regression
+# V2 step 3b — first restored cold start, and an audio dependency gap
 
 **Date:** 2026-08-28
 **Agent:** claude
-**Outcome:** the snapshot delivers the intended speedup. One modality regressed
-and is fixed but unverified; a second restored wake is still required before any
-cold-start acceptance.
+**Outcome:** the snapshot delivers the intended speedup. One previously
+unverified modality exposed a missing dependency; its fix is implemented but
+unverified. A second restored wake is still required before cold-start
+acceptance.
 
 Builds on `reports/2026-08-28_v2_step3b_snapshot_boot.md`, which created the
 snapshot but only measured a warm-container wake, not a genuine cold one.
@@ -33,7 +34,7 @@ proxy token joined by a period works as an ordinary bearer token on this
 `.modal.run` endpoint, the same as it did on the baseline's `.modal.direct` one.
 `OpenAICompatibleBackend` needs no change to reach either shape.
 
-## The audio regression
+## The audio dependency gap
 
 Root cause, found immediately rather than guessed at: `deploy/modal/model_app.py`
 installed plain `vllm==0.26.0`. `reports/2026-08-01_gemma4_endpoint_smoke.md`
@@ -48,15 +49,17 @@ audio request during step 3a or since — its own report lists it as untested.
 The image inherited the omission; nothing regressed relative to a working
 baseline configuration, because that configuration was never exercised.
 
-**Fix applied:** `vllm[audio]==0.26.0"`, one line in `deploy/modal/model_app.py`.
-**Not yet verified.** It requires a redeploy and another paid boot to confirm,
+**Fix applied:** `vllm[audio]==0.26.0`, one line in `deploy/modal/model_app.py`.
+**Redeployed, not yet verified.** The updated image was deployed without
+starting a container. A paid boot is still required to confirm the dependency,
 and that boot doubles as the second restored-wake measurement step 3b already
 needs.
 
 ## State
 
-- `assistant-llm-v2`: deployed with the audio fix applied but not deployed or
-  invoked since. Idle window still the temporary 60 s from the previous session.
+- `assistant-llm-v2`: redeployed with `vllm[audio]==0.26.0` and
+  `scaledown_window=30`; zero active containers after deployment. The new image
+  has not yet been invoked, so audio remains unverified.
 - `assistant-llm`: deployed, zero containers, still serving `MODEL_ENDPOINT`.
   Untouched, and its own audio support remains unverified on Modal — only the
   2026-08-01 local WSL run confirmed it.
@@ -64,10 +67,22 @@ needs.
 
 ## Next
 
-1. Redeploy `assistant-llm-v2` with the audio fix. Free, no container starts.
-2. Let it scale to zero (60 s window), then run the second restored-wake
+1. Run the second restored-wake
    measurement, this time with `--auth headers` to also confirm the two-header
    form still works. Verify audio succeeds this time.
-3. Only after two consistent restored-wake numbers does step 3b have
-   acceptance-grade evidence. Restore `SCALEDOWN_WINDOW = 600` at the next
-   deploy meant to stay up.
+2. Only after two consistent restored-wake numbers does step 3b have
+   acceptance-grade evidence. Keep `SCALEDOWN_WINDOW = 30` as the product
+   default unless measured usage justifies a different cost/latency tradeoff.
+
+## Redeploy update
+
+The first CLI attempt built image `im-R6yR9n26RHc05McUqNNuWc` in 45.73 s but
+failed locally while printing a Unicode check mark through the Windows legacy
+console codec. It did not update the App. Repeating the same deploy with
+`PYTHONUTF8=1` reused the image and completed in 5.433 s.
+
+- App: `assistant-llm-v2` (`ap-RTGuR9opYgu9usWcPeJcXb`)
+- URL: `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run`
+- active tasks after deploy: 0
+- active containers after deploy: 0
+- GPU work and model calls: none

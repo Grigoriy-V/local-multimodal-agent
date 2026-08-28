@@ -144,7 +144,7 @@ repository.
 **Decision — optimize only after measurement, then preserve the baseline.** The
 first deployed profile measured a 189–201 second wake, which is too slow for the
 normal assistant experience. The next deployment therefore has a new identity
-and tests CPU+GPU snapshots, explicit 0→1 scaling and a longer idle window while
+and tests CPU+GPU snapshots, explicit 0→1 scaling and a short idle window while
 the measured endpoint remains available for comparison and rollback. No target
 number is claimed before the replacement is measured. One rejected idea is
 recorded so it is not re-proposed: routing conversational turns to a second

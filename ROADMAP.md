@@ -4,7 +4,7 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 3b implementation only — no deploy, no worker start
+**Current approved step:** none — redeploy complete; no worker start authorized
 
 This is the only source for current product direction, development state,
 order and approved work. The human approves one step before implementation.
@@ -65,7 +65,7 @@ reconsidered; this roadmap wins any conflict.
   credential confirmed working on the `.modal.run` endpoint. One restored wake
   is not acceptance-grade evidence by itself — Modal may build several
   worker-type-specific snapshots — and the same run found audio broken
-  (`vllm[audio]` was missing from the image; fixed, not yet redeployed or
+  (`vllm[audio]` was missing from the image; fixed and redeployed, not yet
   reverified). Evidence: `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
   building on `reports/2026-08-28_v2_step3b_snapshot_boot.md` and
   `reports/2026-08-28_v2_step3b_first_boot_failure.md`. The baseline
@@ -143,7 +143,7 @@ Ordered plan:
          of on an open port, print elapsed seconds, and distinguish a
          subprocess exit with its return code from an expired budget. Scaling
          is explicit: `min_containers=0`, `max_containers=1`,
-         `scaledown_window=600`. `tests/test_model_endpoint.py` covers the
+         `scaledown_window=30`. `tests/test_model_endpoint.py` covers the
          readiness paths and asserts the identity and bounds offline.
       2. retain the proven CUDA-devel image, pinned model/vLLM/transformers,
          protected OpenAI-compatible endpoint, preloaded weights Volume and
@@ -232,16 +232,14 @@ this roadmap when a concrete assistant use case needs them.
 
 ## Next step candidates
 
-1. Redeploy `assistant-llm-v2` with the `vllm[audio]` fix. Free; starts no
-   container.
-2. Authorize the second restored-wake measurement, with `--auth headers` this
+1. Authorize the second restored-wake measurement, with `--auth headers` this
    time. Text, image and audio must all pass before this counts as
    acceptance-grade evidence for step 3b's cold-start claim.
-3. Accept step 2 against the accepted endpoint: one conversational turn and one
+2. Accept step 2 against the accepted endpoint: one conversational turn and one
    work request through Telegram. The baseline endpoint can prove integration,
    but the optimized replacement should become the normal product endpoint.
-4. Start step 3c control-plane work after Telegram acceptance.
-5. Continue to step 4 document ingestion; it remains planned and has not been
+3. Start step 3c control-plane work after Telegram acceptance.
+4. Continue to step 4 document ingestion; it remains planned and has not been
    removed or folded into deployment work.
 
 ## Out of scope

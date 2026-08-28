@@ -230,8 +230,10 @@ defaults:
 
 - `min_containers=0` — scale to zero remains a product requirement;
 - `max_containers=1` — one A10 is enough for initial private use and caps cost;
-- `scaledown_window=600` — ten minutes avoids paying a three-minute wake again
-  while a user reads or thinks. Revisit it from observed traffic and cost.
+- `scaledown_window=30` — after snapshots reduced the first measured restored
+  wake to 25 seconds, the human chose faster scale-to-zero over retaining an
+  idle A10 while a user reads or steps away. Revisit it from observed traffic
+  and cost.
 
 The optimized deployment uses a new App identity. The measured baseline stays
 deployed until the replacement passes backend, multimodal and Telegram checks.
@@ -243,7 +245,7 @@ deployed until the replacement passes backend, multimodal and Telegram checks.
   the default as unverified and set it explicitly.
 - Cross-app `from_name` semantics and versioning behaviour, not covered by the
   pages read.
-- The cost/latency tradeoff of the ten-minute idle window under real traffic.
+- The cost/latency tradeoff of the 30-second idle window under real traffic.
 
 ## Regions: one is free, the other is a multiplier
 

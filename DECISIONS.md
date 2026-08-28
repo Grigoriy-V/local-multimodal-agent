@@ -306,7 +306,7 @@ any code in `app/` that depends on a request, response or session object.
 a separately named Modal App validates the production model-server shape:
 protected OpenAI-compatible vLLM, preloaded immutable weights, CPU+GPU memory
 snapshots around vLLM sleep/wake, explicit `min_containers=0` and
-`max_containers=1`, and an initially ten-minute idle window. The application
+`max_containers=1`, and a 30-second idle window. The application
 switches `MODEL_ENDPOINT` only after the replacement passes backend,
 multimodal and Telegram acceptance.
 
@@ -316,6 +316,13 @@ imports/configuration, profiling, compilation and CUDA graph capture dominate,
 so image surgery and weight relocation target the wrong stage. A new identity
 preserves honest comparison, rollback and the rule that a measured configuration
 is not silently redefined.
+
+The idle window was initially ten minutes while a wake still appeared to cost
+roughly three minutes. After a restored cold start measured 25 seconds, the
+human chose 30 seconds to prioritize scale-to-zero and avoid paying for idle GPU
+time while a private user reads or steps away. This is a product default, not a
+claim that 30 seconds is universally optimal; observed traffic may justify a
+later measured change.
 
 **Rules out.** Redeploying experimental snapshot code over the baseline,
 unbounded GPU replicas, a positive warm-container floor, declaring success from
