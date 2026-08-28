@@ -301,12 +301,30 @@ this roadmap when a concrete assistant use case needs them.
    against the store: the adapter sent text, tool-call names and on-disk
    artifacts but never a message's own media, so the task's browser screenshot
    reached the store and Chainlit and not the Telegram user. Images now go
-   through `sendPhoto`; this is verified offline and still wants one live
-   confirmation. Evidence:
+   through `sendPhoto`, confirmed live: a task created `square.html`, ran
+   `inspect_page` and its screenshot arrived in the chat as a picture. Evidence:
    `reports/2026-08-28_v2_telegram_voice_and_media_budget.md`.
 3. Start step 3c control-plane work.
-4. Continue to step 4 document ingestion; it remains planned and has not been
-   removed or folded into deployment work.
+4. Turn the working path into a tool worth using daily, alongside step 4
+   document ingestion, which remains planned and has not been folded into
+   deployment work. The live runs showed the difference between "the pipeline
+   works" and "the product is good":
+   - The assistant misreports its own capabilities. Asked for a screenshot it
+     answered that its output "supports only text", and repeated it when told
+     otherwise; the same task text claimed `browser.inspect` was unavailable
+     while `inspect_page` had just run and its evidence was counted in the
+     acceptance criteria. The system prompt never tells the model that media
+     can be delivered, and it invents tool names. Prompt work, no deploy.
+   - A capability check the assistant can answer honestly: what it can see,
+     hear, send, read and change, derived from the registered tools and the
+     adapter's delivery paths rather than written by hand and left to rot.
+   - Telegram presentation. Today a turn is a stack of plain messages; plan,
+     progress, result and evidence deserve a readable shape, and `scaledown`
+     must cover the pause a human takes to read a plan — a 10-second window
+     turned one approval into two cold starts.
+   - Evidence that it is genuinely agentic rather than demo-shaped: multi-step
+     work that survives a restart, asks when it should and does not claim a
+     result it did not verify.
 
 ## Out of scope
 
