@@ -40,8 +40,11 @@ refused before a model request.
 - `assistant-control` serves the Telegram webhook and the update worker. Idle
   windows: 60 s on both CPU functions, 12 s on the GPU. The GPU value is live
   through `deploy/modal/autoscale.py` and matches `SCALEDOWN_WINDOW`, so a
-  deploy restores it. A third function, `render_web_page`, is defined and has
-  never been deployed or run.
+  deploy restores it. A third function, `render_web_page`, is deployed at
+  `https://grigoriy-v--assistant-control-render-web-page.modal.run` behind proxy
+  auth, and has never been run. Until `WEB_RENDERER_URL`, `WEB_RENDERER_KEY` and
+  `WEB_FIRECRAWL_API_KEY` are in the `assistant-control` secret, the deployed
+  assistant fetches pages but cannot view one and has no search tool.
 - Owed to the next `assistant-llm-v2` deploy, and not a reason to create one:
   the NCCL loopback rendezvous fix before snapshot creation.
   `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.

@@ -162,17 +162,34 @@ Four Firecrawl credits of the renewing 1,000/month: two for the live search
 check, two for the credit-gated probe run. Nothing else was spent — no GPU, no
 deploy, no container.
 
+## The deploy
+
+`assistant-control` deployed 2026-08-29 in 41.6 s, CPU only; the model app was
+not touched. `render_web_page` exists at
+`https://grigoriy-v--assistant-control-render-web-page.modal.run`, marked by
+Modal's own output as requiring proxy auth. The deploy started no container.
+
+The Modal CLI first aborted with `'charmap' codec can't encode '→'` — a
+Windows console encoding failure printing Modal's build output, not a deploy
+failure. `PYTHONIOENCODING=utf-8` is the fix and belongs in front of any `modal`
+command run from this machine.
+
+**The browser layer's cache question is still open.** This deploy rebuilt it,
+correctly: `uv.lock` changed (it was missing `pillow`, which `pyproject.toml`
+already declared), and the lock is below the browser in the image, so everything
+above it was invalidated. The next source-only deploy is the first honest
+measurement.
+
 ## Not verified
 
-- **Nothing is deployed.** `render_web_page` has never run. Its cold latency,
-  whether Chromium keeps its own sandbox under a non-root user there, and
-  whether cloud metadata is reachable from it are all still open questions from
-  the options report.
-- The deployed `/check` cannot pass `web.view` until `WEB_RENDERER_URL` and
-  `WEB_RENDERER_KEY` are in the `assistant-control` secret, which is
-  chicken-and-egg: the URL exists only after the first deploy.
-- The browser image layer's cache benefit is still unmeasured; this deploy would
-  be the first observation of it.
+- **`render_web_page` has never run.** Its cold latency, whether Chromium keeps
+  its own sandbox under a non-root user there, and whether cloud metadata is
+  reachable from it remain open questions from the options report.
+- The deployed assistant right now fetches pages, has no search tool, and fails
+  `view_web_page` by design: the three `WEB_` values are not in the
+  `assistant-control` secret. Adding them is the owner's action — a partial
+  `modal secret create --force` would replace the whole secret, dropping the bot
+  token, the model key and the database URL.
 - No live Telegram turn has used any of this, so the agent's *choice* of tool —
   search versus fetch versus view — is untested against a real model.
 
