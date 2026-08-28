@@ -5,6 +5,33 @@ Roadmap queue 1. The browser, the persistent workspace and document reading are
 a real document read correctly in a real chat. Web access is not built and showed
 itself in the same session.
 
+## Correction after the last live test
+
+The workspace, document reading, page rendering and Telegram's ability to carry
+media remain valid. The outbound behaviour built on top of them does not.
+
+`assistant-control` v14 automatically forwards media from every tool result to
+the chat. A later, undeployed prompt workaround tells the model that calling a
+visual tool is itself how it sends the picture. The human rejected both on
+2026-08-29: they make the adapter choose what the person receives and turn an
+agent decision into a hidden workflow. The undeployed workaround must not be
+deployed.
+
+The approved replacement contract is:
+
+- `read_document`, `view_pages`, `inspect_page` and similar tools provide
+  evidence to the agent only;
+- the agent freely decides which observation tools to use inside its workspace;
+- sending a chosen file or media item is a separate, general agent capability;
+- an interface transports only that explicit outbound action and never exposes
+  arbitrary tool working material automatically.
+
+Acceptance is therefore not "the adapter forwarded a `view_pages` result". A
+clean real chat must show the agent inspecting the document, deciding what to
+present, explicitly sending that choice and explaining what it sees. Earlier
+statements in this report that tool-media auto-delivery was approved are
+superseded by this correction; the chronological failure evidence is retained.
+
 ## Two decisions the human approved, 2026-08-29
 
 **A volume, not a sandbox, for persistence.** The sub-item read "file tools over
@@ -134,10 +161,10 @@ model with no way to display anything. That *was* a defect, and of the exact kin
   told. Fixed in the brief, the tool description and the system prompt, all three
   of which now cover "the person asks you to look at or show it", and a test
   asserts the old sentence cannot come back.
-- The image genuinely could not reach the person: `_deliver` returned early for
-  any `tool` message, so a rendered page went to the model and stopped at the
-  adapter. Now a tool's *media* is delivered while its text still is not —
-  approved 2026-08-29. The same change makes a browser screenshot visible.
+- The image genuinely could not reach the person through an explicit outbound
+  action because none existed. v14 instead made `_deliver` forward media from
+  every `tool` message. That implementation was later rejected: observation
+  stays internal until the agent explicitly chooses to present something.
 
 Worth naming: the honesty machinery did not fail, its input did. The brief is
 generated from wiring precisely so it cannot be wrong, and it was wrong because
@@ -163,17 +190,36 @@ been exercised in a real chat, so none of it is accepted:
 1. The capability brief, the system prompt and the `view_pages` description no
    longer claim a document cannot be seen. On v13 the assistant told a person it
    was a text model that could not display anything.
-2. A tool message's media reaches the chat; its text still does not. This is
-   what makes "show me the page" possible at all, and it also makes an
-   `inspect_page` screenshot visible for the first time.
+2. A tool message's media reaches the chat while its text does not. This is the
+   v14 auto-forward behaviour later rejected in "Correction after the last live
+   test"; it is deployed history, not the target contract.
 3. Chromium is installed below the copied source, so it is no longer reinstalled
    on every deploy. v14 paid the slow build once because the cache key moved;
    deploys after it should be fast until `uv.lock` changes. **Unconfirmed** —
    the next deploy is the measurement.
 
+### v14 tried live: the second denial
+
+Asked to open the CV and send a screenshot, the assistant did not say it was a
+text model — that part of the fix held. It said it **cannot take screenshots or
+generate images**, read the file with `read_document`, described the contents
+accurately, and never called `view_pages`.
+
+The refusal was reasonable from where it stood. It emits text; it cannot attach
+a file. What nothing told it is that a picture a tool returns is delivered for
+it, so *calling the tool is sending*. Delivery happens in the adapter and is
+invisible from inside the model. `view_pages` was described as a way to look,
+never as a way to show.
+
+An undeployed workaround then changed the same three prompt surfaces to say that
+the person receives the same picture automatically. That workaround is now
+rejected and must be replaced rather than deployed. A clean acceptance check
+still starts with `/new`, because the failing thread contains earlier denials
+that the model may imitate.
+
 ### Checks that were run
 
-`pytest`: 538 passed, 1 skipped. Ruff clean on every changed file; two
+`pytest`: 539 passed, 1 skipped. Ruff clean on every changed file; two
 pre-existing findings in `ui/chainlit_app.py` and `app/agent/task_graph.py` were
 left alone. The four free preflight probes pass locally, and 6/6 passed in the
 deployed container on v13.
@@ -187,7 +233,8 @@ Not drafts. `AGENTS.md`, Records, is the rule these are recorded under.
 - A document is saved to the workspace and read with a tool, rather than
   extracted into the turn at admission.
 - `view_pages` renders PDF pages with pypdfium2, not through the browser.
-- A tool's media is delivered to the chat.
+- Superseded after the live test: automatic tool-media delivery was rejected;
+  presenting media must be an explicit agent action.
 - The Firecrawl key is `WEB_FIRECRAWL_API_KEY`, under a `WebSettings` class with
   the `WEB_` prefix that does not exist yet. The human holds the key; it is in
   neither `.env` nor the Modal secret as far as this session knows.
@@ -215,7 +262,7 @@ Not drafts. `AGENTS.md`, Records, is the rule these are recorded under.
 
 ## Checks that were run
 
-`pytest`: 538 passed, 1 skipped. Ruff clean on every changed file; two
+`pytest`: 539 passed, 1 skipped. Ruff clean on every changed file; two
 pre-existing findings in `ui/chainlit_app.py` and `app/agent/task_graph.py` were
 left alone. The four free preflight probes pass locally and 6/6 passed in the
 deployed container.
@@ -229,7 +276,8 @@ Not drafts. `AGENTS.md`, Records, is the rule these are recorded under.
 - A document is saved to the workspace and read with a tool, rather than
   extracted into the turn at admission.
 - `view_pages` renders PDF pages with pypdfium2, not through the browser.
-- A tool's media is delivered to the chat.
+- Superseded after the live test: automatic tool-media delivery was rejected;
+  presenting media must be an explicit agent action.
 - The Firecrawl key is `WEB_FIRECRAWL_API_KEY`, under a `WebSettings` class with
   the `WEB_` prefix that does not exist yet. The human holds the key; it is in
   neither `.env` nor the Modal secret as far as this session knows.

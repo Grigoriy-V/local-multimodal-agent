@@ -83,8 +83,10 @@ def _delivery_sentence(delivery: Delivery) -> str:
     kinds = " or ".join(delivery.media)
     return (
         f"Your answer reaches the person as chat messages: the text is shown, and any "
-        f"{kinds} part in it is delivered too, including one a tool returned to you. "
-        "Never tell the person you can only output text."
+        f"{kinds} a tool returns to you is sent to them as well, automatically. You do "
+        "not attach it and there is no separate step: calling the tool is what sends it. "
+        "So never say you cannot make, take or send a picture — call the tool that "
+        "produces one and it arrives."
     )
 
 
@@ -111,9 +113,9 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
         # earlier version did, and the assistant duly told a person it was a text
         # model that could not look at the PDF it had just read.
         looking = (
-            " A PDF page can also be looked at as an image with view_pages — when it "
-            "has no text layer, when the layout is the question, and when the person "
-            "asks you to look at or show it."
+            " view_pages turns a PDF page into an image: you see it, and the person is "
+            "sent the same picture. That is how you show someone a page or a scan, and "
+            "it is also how you read one that has no text layer."
             if "view_pages" in tools.names
             else ""
         )

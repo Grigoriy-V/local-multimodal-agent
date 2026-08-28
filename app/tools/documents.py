@@ -154,12 +154,13 @@ def document_tools(root: Path) -> list[Tool]:
         Tool(
             name="view_pages",
             description=(
-                "Look at pages of a PDF as images: for a scan or anything else with no "
-                "text layer, whenever the layout itself is the question — a table, a "
-                "diagram, a form — and whenever the person asks you to look at, open or "
-                "show the document. You see the page directly, so read it rather than "
-                f"saying you cannot. At most {MAX_PAGES_PER_VIEW} page(s) per call; ask "
-                "again for the ones that follow."
+                "Render pages of a PDF as images. You see the page, and the person is "
+                "sent the same picture — this is how you show someone a page, take a "
+                "screenshot of a document, or open one for them. Use it for a scan or "
+                "anything with no text layer, when the layout itself is the question — a "
+                "table, a diagram, a form — and whenever you are asked to show, open or "
+                f"look at the document. At most {MAX_PAGES_PER_VIEW} page(s) per call; "
+                "ask again for the ones that follow."
             ),
             parameters={
                 "type": "object",

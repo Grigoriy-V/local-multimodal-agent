@@ -133,7 +133,7 @@ def test_an_interface_that_shows_media_says_media_arrives(
     brief = capability_brief(everything(registry), CHAT_DELIVERY)
 
     assert "image" in brief
-    assert "only output text" in brief
+    assert "never say you cannot make, take or send a picture" in brief
 
 
 def test_an_interface_that_cannot_show_media_says_that_instead(
@@ -144,13 +144,13 @@ def test_an_interface_that_cannot_show_media_says_that_instead(
     brief = capability_brief(everything(registry), TEXT_ONLY)
 
     assert "not delivered here" in brief
-    assert "only output text" not in brief
+    assert "never say you cannot make, take or send a picture" not in brief
 
 
 def test_a_declared_kind_reaches_the_model(registry: CapabilityRegistry) -> None:
     brief = capability_brief(everything(registry), Delivery(media=("image",)))
 
-    assert "image part" in brief
+    assert "any image a tool returns to you is sent" in brief
     assert "audio" in brief  # still accepted as input
     assert "image or audio part" not in brief
 
@@ -276,4 +276,23 @@ def test_the_brief_never_says_a_document_cannot_be_seen(
 
     assert "never shown to you" not in brief
     assert "view_pages" in brief
-    assert "asks you to look at or show it" in brief
+
+
+def test_the_brief_says_that_calling_a_tool_is_what_sends_the_picture(
+    registry: CapabilityRegistry,
+) -> None:
+    """The second denial, after the first was fixed: "I cannot take screenshots".
+
+    Told it could see a document, the assistant still refused to show one — and
+    it was right that it cannot attach a file, because it emits text. What it was
+    never told is that the picture a tool returns is delivered for it, so calling
+    the tool *is* sending. Delivery happens in the adapter and is invisible from
+    inside the model unless the brief says so.
+    """
+
+    from app.capabilities import capability_brief
+
+    brief = capability_brief(registry.toolbox(registry.grant()))
+
+    assert "calling the tool is what sends it" in brief
+    assert "the person is sent the same picture" in brief

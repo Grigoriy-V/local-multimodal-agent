@@ -7,11 +7,12 @@
 **Current approved step:** queue 1, capabilities. No worker start is authorized;
 each deploy, sandbox or container run is asked for separately.
 
-**Handed over 2026-08-29.** `assistant-control` v14 is deployed and matches the
-repository. Three things in it have never been used in a real chat and are not
-accepted. Read
+**Corrected 2026-08-29 after a live test.** `assistant-control` v14 is deployed,
+but its automatic delivery of media returned by any tool is rejected product
+behaviour. A later prompt workaround remains only in the working tree and must
+not be deployed. Read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
-"State at handover", before changing anything.
+"Correction after the last live test", before changing anything.
 
 This is the only source for current product direction, state, order and approved
 work. The human approves one step before implementation.
@@ -121,17 +122,18 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      a directory on a Modal volume; a document is saved there and read with
      `read_document`, or looked at with `view_pages`.
      `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`.
-   - **Deployed in v14, never used in a real chat.** Three changes, none of them
-     accepted until someone tries them:
-     1. The capability brief, the system prompt and the `view_pages` description
-        no longer claim a document cannot be seen. On v13 the assistant told a
-        person it was a text model that could not display anything.
-     2. A tool's media reaches the chat; its text still does not. This is what
-        makes "show me the page" work, and it also makes an `inspect_page`
-        screenshot visible for the first time.
-     3. The browser is installed below the copied source, so it stops being
-        reinstalled on every deploy. v14 paid the slow build once; whether the
-        next deploy is fast is unconfirmed.
+   - **Agent-controlled presentation is approved and not implemented.** Reading,
+     viewing and inspecting are observation tools: their results go to the agent
+     and never reach the person automatically. The agent decides which tools to
+     use and whether, what and when to present. Sending a chosen workspace file
+     or media item is a separate general capability; the interface only carries
+     that explicit outbound action. The v14 auto-forward and the later prompt
+     workaround are both rejected. Acceptance needs a clean real chat in which
+     the agent inspects the document, explicitly sends what it chose and explains
+     what it sees; unrelated tool media must remain internal.
+   - **Browser image layering is deployed but its cache benefit is unconfirmed.**
+     Chromium is installed below the copied source. v14 paid the slow build once;
+     the next deploy is the first measurement of whether that layer is reused.
    - **Web: search, render, scrape — three tools, not one.** Not started. Search
      through Firecrawl first; the key is `WEB_FIRECRAWL_API_KEY`, decided
      2026-08-29, and the human has it. Rendering is ours and runs where

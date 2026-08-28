@@ -48,9 +48,15 @@ decision.
 
 ## Primary principle
 
-**Simplicity, speed, and the absence of bureaucracy or overengineering are the
-main principle of this project.** If a process adds work without a concrete
-safety, evidence, or user-value benefit, stop and propose a smaller alternative.
+**Simplicity and speed apply to the technical implementation, never to the
+product outcome.** Choose the smallest design that fully preserves the intended
+capability, the quality of the user experience and the agent's freedom to decide
+how to reach an outcome. Never simplify by removing useful behaviour, replacing
+an agent decision with a hard-coded workflow, or accepting product degradation.
+
+Avoid bureaucracy and overengineering. If a process or mechanism adds work
+without a concrete safety, evidence or user-value benefit, stop and propose a
+smaller implementation that preserves the product rather than a smaller product.
 
 ## Execution
 

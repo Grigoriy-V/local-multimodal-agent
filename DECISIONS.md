@@ -383,3 +383,29 @@ placement was not controlled; treating a latency limit invented before
 measurement as acceptance; and pinning the GPU app, where a 1.75x multiplier
 would be real money and 110 ms would disappear into a multi-second inference
 anyway.
+
+## 2026-08-29: Observing and presenting are separate agent actions
+
+**Decision.** A tool that reads, renders or inspects something returns evidence
+to the agent and does not automatically put that evidence in front of the user.
+The agent decides which capabilities to use and whether, what and when to send.
+Presenting a chosen workspace file or media item is a separate, general agent
+capability. An interface adapter only translates an explicit outbound action to
+its transport; it never turns an arbitrary tool result into product behaviour.
+
+Ordinary non-destructive work inside the granted workspace does not require a
+special user mode or per-tool approval. The workspace remains the permission
+boundary, while the model is free to read, look, compare, reason and choose its
+next tool within it.
+
+**Why.** Automatically forwarding every image returned by `view_pages` or
+`inspect_page` makes the adapter decide what the user sees. Prompting the model
+to trigger that hidden workflow does not restore agency; it only disguises the
+workflow as a tool choice. Separating perception from presentation lets the
+same harness inspect several candidates, reason about them and send only the
+result it actually chose, independently of Telegram or another interface.
+
+**Rules out.** Automatic delivery of arbitrary tool media, interface-specific
+send decisions inside an adapter, prompt rules that hard-code a tool sequence
+for a product request, and describing a capable workspace agent as unable to
+look at or present files it can actually handle.
