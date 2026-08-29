@@ -53,6 +53,49 @@ The current command owners are already in:
 
 Do not create another command registry/service unless the existing ownership cannot support native Telegram command registration cleanly.
 
+
+## Command/onboarding presentation
+
+The command experience should look like product UI rather than a raw debug list.
+
+Use three Telegram-native surfaces together, without inventing another menu system:
+
+1. **Bot description / empty-chat description** — a very short explanation of what the assistant is.
+2. **Native command menu** — command names with concise descriptions via Telegram's bot command API.
+3. **`/start` / `/help` message** — a compact rich-text card-like message rendered through the same safe Telegram formatting path as other project-authored UI.
+
+A suitable `/start` shape is:
+
+```text
+Personal Assistant
+
+Talk to me normally. You can send text, images, voice messages and supported
+documents. I can inspect files, use the web and carry out longer tasks when
+needed. I will ask before consequential actions.
+
+Commands
+/new   New conversation
+/can   Available capabilities
+/stop  Stop current task
+/help  Show this help
+```
+
+The exact wording may be improved during implementation, but keep it short.
+
+Use formatting intentionally:
+
+- one clear title;
+- one short explanatory paragraph;
+- one compact command section;
+- bold command labels or other restrained emphasis where Telegram supports it;
+- no wall of text and no internal tool names.
+
+Do not use an inline keyboard as a duplicate permanent command menu. Telegram's
+native command menu is the persistent navigation surface.
+
+The native command menu itself should carry readable descriptions, not only raw
+command names.
+
 ## `/start`
 
 `/start` should send one concise onboarding message.
@@ -232,7 +275,215 @@ Correctness and delivery are more important than preserving every formatting tok
 
 ---
 
-# 8. Streaming is part of the product baseline, but a separate sub-step
+
+# 8. Reusable inline action state
+
+Inline keyboards should support a small reusable interaction pattern beyond the
+current plan approval UI.
+
+This is **Telegram presentation/state handling**, not task-plan architecture.
+The current plan approval may disappear later; the capability to render and
+settle inline actions should remain useful for confirmations and other compact
+interactions.
+
+## Desired lifecycle
+
+Before interaction:
+
+```text
+[ Run it ]   [ Don't ]
+```
+
+After the callback is accepted and the application state transition succeeds,
+edit the **same Telegram message's reply markup** so the original choices no
+longer remain actionable.
+
+Approved:
+
+```text
+[ ✓ Approved ]
+```
+
+Rejected:
+
+```text
+[ ✕ Rejected ]
+```
+
+Do not send a second "approved" / "rejected" message merely to represent button
+state unless there is additional information that belongs in chat history.
+
+## Button color
+
+Current Telegram Bot API versions support an optional inline-button `style`:
+
+- `success` — green;
+- `danger` — red;
+- `primary` — blue.
+
+Use:
+
+```text
+Approved → success
+Rejected → danger
+```
+
+Treat the text/icon as the semantic state and color as enhancement. The state
+must remain understandable on clients/themes where color presentation differs.
+
+## Settled buttons are status, not another action
+
+The preferred result is one status button that visually remains with the
+message. If Telegram requires callback data for the button shape, use a no-op
+status callback which only acknowledges the callback (for example, "Already
+approved") and performs **no application mutation and no model wake**.
+
+A settled status callback must therefore be classified as model-free at the raw
+Telegram wire layer.
+
+Do not let pressing `✓ Approved` rerun the approval, resume the task again, or
+wake the GPU.
+
+## Message identity requirement
+
+To edit the keyboard after a callback, the adapter needs the Telegram message
+identity associated with that callback.
+
+The current reduced `Incoming` callback shape carries `chat_id`,
+`callback_id`, and `callback_data`, but not the callback message id. Extend the
+Telegram wire representation only as far as required to preserve that message
+identity.
+
+Keep `ui/telegram/wire.py` standard-library-only and cheap to import.
+
+## Generic ownership
+
+Prefer a small generic keyboard/state helper in the existing Telegram surface,
+for example conceptually:
+
+```text
+action keyboard
+    ↓ callback
+application transition
+    ↓ success
+settled keyboard
+```
+
+Likely owners remain:
+
+- `ui/telegram/api.py` — construct/send/edit inline reply markup;
+- `ui/telegram/wire.py` — reduce callback message identity and classify
+  model-free settled callbacks;
+- `ui/telegram/adapter.py` — map callback intent to application behavior and
+  settle the UI only after the application transition succeeds.
+
+Do not build a general cross-platform button framework for this baseline.
+
+## Failure rule
+
+The visible button state must reflect the real application state.
+
+Therefore:
+
+```text
+callback received
+→ attempt application action
+→ action succeeds
+→ edit keyboard to Approved / Rejected
+
+action fails
+→ do not falsely mark it settled
+→ acknowledge/report the failure
+```
+
+UI settlement is evidence of an accepted state transition, not optimistic
+decoration.
+
+
+
+# 9. Tool activity presentation
+
+Telegram must not expose internal tool names such as:
+
+```text
+· send_file
+· fetch_page
+· view_web_page
+```
+
+Those names are implementation details. They are useful in traces and diagnostics,
+not as normal product UI.
+
+## User-facing activity labels
+
+Map known tool calls to short human-readable status labels in the Telegram layer.
+
+These labels are intentionally **always in English**, regardless of the language
+of the conversation. Assistant answers remain in the user's language.
+
+Example mapping:
+
+```text
+search_web      → Searching the web…
+fetch_page      → Reading page…
+view_web_page   → Opening page…
+read_document   → Reading document…
+view_pages      → Inspecting document…
+read_file       → Reading file…
+write_file      → Writing file…
+edit_file       → Editing file…
+send_file       → Sending file…
+```
+
+Unknown tools should degrade to a generic:
+
+```text
+Working…
+```
+
+Do not ask the model to generate these labels. They are presentation for known
+tool activity, so a small Telegram-owned mapping is appropriate.
+
+## Presentation behavior
+
+Prefer one transient activity message per turn rather than one permanent message
+per tool call.
+
+Conceptually:
+
+```text
+Searching the web…
+        ↓ edit same status message
+Reading page…
+        ↓ edit same status message
+Sending file…
+        ↓
+final assistant answer
+```
+
+The goal is to show progress without filling chat history with internal activity.
+
+The exact lifecycle may depend on what Telegram allows cleanly, but follow these
+rules:
+
+- do not expose raw tool names in normal chat;
+- do not emit a burst of one message per tool call;
+- reuse/edit one status message when practical;
+- when the final answer starts streaming or is ready, the transient tool status
+  should no longer compete with the final answer;
+- tool failures may be reflected in the final assistant answer or a meaningful
+  product-facing error, not as raw exception/tool syntax.
+
+This remains a Telegram presentation concern. Do not move the mapping into the
+model prompt, tool definitions, or application-domain `Message` types.
+
+Likely owners:
+
+- `ui/telegram/adapter.py` — choose the user-facing activity label for a tool call;
+- `ui/telegram/api.py` — send/edit the transient status message.
+
+
+# 10. Streaming is part of the product baseline, but a separate sub-step
 
 ## Important distinction
 
@@ -289,7 +540,7 @@ Streaming is presentation of an existing execution, not a parallel Telegram-only
 
 ---
 
-# 9. Suggested implementation order
+# 11. Suggested implementation order
 
 ## 2A — Telegram UX baseline
 
@@ -300,8 +551,10 @@ Implement first:
 3. ordinary Markdown → safe Telegram rendering;
 4. safe fallback to plain text;
 5. readable long-message handling;
-6. preserve existing task plan/result formatting;
-7. live UX acceptance.
+6. human-readable English tool activity labels instead of raw tool names;
+7. reuse/edit one transient tool status message per turn where practical;
+8. preserve existing task plan/result formatting;
+9. live UX acceptance.
 
 This should remain mostly inside `ui/telegram/` and existing operational Telegram setup.
 
@@ -337,7 +590,7 @@ The user should never receive a final answer that disagrees with the persisted a
 
 ---
 
-# 10. Streaming UX constraints
+# 12. Streaming UX constraints
 
 Streaming does not need token-by-token UI updates.
 
@@ -356,7 +609,7 @@ Do not add Telegram stop-generation support in this baseline unless separately j
 
 ---
 
-# 11. Architecture boundary
+# 13. Architecture boundary
 
 This item should **not** become a general presentation framework.
 
@@ -384,7 +637,7 @@ Do not make the adapter decide which internal evidence should be exposed to the 
 
 ---
 
-# 12. Acceptance criteria
+# 14. Acceptance criteria
 
 ## Command / onboarding
 
@@ -413,11 +666,31 @@ A malformed or unsupported Markdown response is still delivered as readable text
 
 A long response is delivered fully without Telegram parse failures.
 
+## Tool activity UX
+
+- normal Telegram chat never exposes raw internal tool names such as `send_file`;
+- known tools map to concise English activity labels;
+- assistant answer language remains independent from these English status labels;
+- unknown tools degrade to `Working…`;
+- multiple tool calls do not create a noisy burst of permanent status messages;
+- one transient status message is reused/edited where practical.
+
+## Inline interaction UX
+
+- an actionable inline keyboard can expose two or more choices;
+- after a successful callback, the same message is updated to one settled status button;
+- approved state uses `success` styling where supported;
+- rejected state uses `danger` styling where supported;
+- settled status callbacks cannot repeat the action or wake the model;
+- a failed application transition is never displayed as approved/rejected.
+
 ## Task UX
 
 - existing task plan approval remains readable;
 - existing task result/check presentation remains readable;
-- approval buttons still attach to the intended final message.
+- approval buttons still attach to the intended final message;
+- current plan approval uses the reusable settled-button behavior rather than a
+  plan-specific Telegram-only hack.
 
 ## Streaming
 
@@ -433,7 +706,7 @@ When streaming is implemented:
 
 ---
 
-# 13. Live evidence for queue closure
+# 15. Live evidence for queue closure
 
 The live Telegram acceptance should be small and product-facing.
 
@@ -458,7 +731,30 @@ Ask for an answer that naturally contains:
 
 Verify visually in Telegram that no raw `**`, broken fences, or parse errors remain unless intentionally shown as code.
 
-### Scenario C — capability truth
+### Scenario C — tool activity presentation
+
+Use a request that causes at least two tool calls.
+
+Verify:
+
+- raw tool names are not shown;
+- English activity labels are readable;
+- the chat does not receive a burst of one permanent message per tool;
+- the final assistant answer remains in the language used by the user.
+
+### Scenario D — inline action settlement
+
+Exercise the current approval interaction.
+
+Verify:
+
+- the initial choices are visible;
+- after approval, they become one `✓ Approved` status button;
+- after rejection, they become one `✕ Rejected` status button;
+- success/danger styling is visible on a current Telegram client;
+- pressing the settled button does not repeat the action or wake the model.
+
+### Scenario E — capability truth
 
 Ask the assistant in natural language what it can do.
 
@@ -466,13 +762,13 @@ Compare against `/can`.
 
 The two do not need identical wording, but they must not materially contradict each other.
 
-### Scenario D — ordinary tool-capable answer
+### Scenario F — ordinary tool-capable answer
 
 Use a normal request that causes a tool call and then a final textual answer.
 
 Verify that presentation remains readable and no tool/result semantics are broken.
 
-### Scenario E — streaming, once implemented
+### Scenario G — streaming, once implemented
 
 Use one sufficiently long answer.
 
@@ -488,7 +784,7 @@ One warm live run may exercise several of these together where practical.
 
 ---
 
-# 14. Explicit non-goals for this item
+# 16. Explicit non-goals for this item
 
 Do not use this queue item to redesign:
 
@@ -516,6 +812,8 @@ native commands
 + concise onboarding
 + readable rich text
 + safe code/list formatting
++ clean English tool activity statuses
++ reusable settled inline actions
 + existing task UI
 + responsive generation
 ```

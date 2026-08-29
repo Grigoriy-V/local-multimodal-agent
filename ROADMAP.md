@@ -135,14 +135,24 @@ Verified platform facts and cold-start evidence remain in
    input for analysis, implementation and acceptance throughout this item. It
    supplements, but does not override, the roadmap or canonical documents.
 
-   - **2A — Telegram UX baseline.** Use the native command menu for `/new`,
-     `/can`, `/stop` and `/help`; keep `/check` as a diagnostic. Add concise
-     `/start` and `/help` onboarding. Keep ordinary Markdown as canonical model
-     text and render a small useful subset safely in Telegram, with complete
-     plain-text delivery on malformed markup, parser refusal or unsafe message
-     splitting. Preserve the existing structured plan/result and approval UI.
-     Close 2A with small live scenarios for onboarding, formatting, capability
-     truth and an ordinary tool-capable answer.
+   - **2A — Telegram UX baseline.** Present concise onboarding through the bot
+     description, a native `/new`, `/can`, `/stop`, `/help` menu with readable
+     descriptions, and a compact rich-text `/start` / `/help`; keep `/check` as
+     a diagnostic. Keep ordinary Markdown as canonical model text and render a
+     small useful subset safely in Telegram, with complete plain-text delivery
+     on malformed markup, parser refusal or unsafe message splitting.
+   - Replace raw tool names in normal chat with concise English activity labels
+     and reuse/edit one transient status message per turn where practical;
+     unknown tools degrade to `Working…`, independently of answer language.
+   - Make inline actions reusable and truthful: after the application transition
+     succeeds, edit the same message to one settled Approved/Rejected status
+     button with semantic text and optional success/danger styling. Settled
+     callbacks are model-free no-ops and cannot repeat the action; failures must
+     never appear settled. Preserve the existing structured task plan/result UI
+     through this common interaction behavior.
+   - Close 2A with small live scenarios covering onboarding, formatting, tool
+     activity, inline-action settlement, capability truth and an ordinary
+     tool-capable answer.
 
    - **2B — real answer streaming, deferred.** Telegram drafts are only the
      display half. Do not bypass the agent graph or fake streaming from the
