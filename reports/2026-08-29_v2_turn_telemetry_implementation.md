@@ -162,11 +162,67 @@ this repository; re-running with `PYTHONIOENCODING=utf-8` succeeded.
 deployment is therefore live and untried: the first real Telegram message will
 be the first row in `turn_runs`.
 
+## Accepted live, 2026-08-29
+
+The human sent four messages through the real chat. All four were measured, and
+the rows were read back out of the deployed database rather than inferred from
+the chat.
+
+Every acceptance criterion 3A owns is met live: one `run_id` per turn from
+ingress to delivery; events in order — `turn_started`, router, model,
+`telegram_preview_started`, `telegram_final_sent`, persistence, `turn_finished`;
+token counts covering both model calls; model TTFT and first visible response
+separately measurable; and no message text, attachment or prompt anywhere in
+what was stored.
+
+| run | queued | router | TTFT from start | first visible | total | in/out |
+|---|---|---|---|---|---|---|
+| 9b861f1e | 6466 ms | 3963 ms | 14279 ms | 14605 ms | 15771 ms | 7388/28 |
+| a7b50f07 | 5272 ms | 609 ms | 6196 ms | 6526 ms | 14151 ms | 7440/115 |
+| 31deb3c3 | 241 ms | 966 ms | 1958 ms | 2245 ms | 9356 ms | 4864/342 |
+| fcd7dd26 | 908 ms | 963 ms | 3736 ms | 4088 ms | 8562 ms | 5542/185 |
+
+Three findings the baseline exists to produce:
+
+- **Routing costs about a third of a turn's input tokens** — 2452 against 4936,
+  2478 against 4962, 1190 against 3674, 1529 against 4013. Queue item 5's
+  single-call change now has a measured target instead of an assumption.
+- **The provider's own TTFT is small**: 2293, 140, 586 and 355 ms per call.
+  Everything else before the first visible word is queue wait, worker cold start
+  and the router. Decode-side optimization is not where this product's latency
+  is.
+- **One persistence outlier**: 5636 ms against 36–643 ms elsewhere. A single
+  slow write inside a turn, previously invisible.
+
+`reports/ml_work.jsonl` holds the same numbers as a measured record.
+
+## A capability failure the same session exposed
+
+Unrelated to telemetry, and found *by* it. Asked to send a screenshot of a PDF
+in the workspace, the assistant refused twice — "я текстовая модель", "нет
+технической возможности делать скриншоты" — and the trace shows **zero tool
+calls**, so it never tried.
+
+The wiring is correct. The generated brief names `view_pages` (renders a PDF
+page to PNG in the workspace and returns the path) and `send_file`, and says in
+as many words: *a direct request to receive a screenshot or file is such a
+decision: perform the send_file call instead of only saying that you can*. The
+model broke exactly the rule written against that behaviour, and omitted both
+tools when it listed its own. It also read "скриншот" as screen capture rather
+than a rendered page.
+
+This is instruction adherence in a 12B model, not a wiring defect, so it belongs
+to the agent-loop work in queue item 4 rather than to a one-line fix. The human
+decided not to act on it now; it is recorded here so the next session does not
+rediscover it. A cheap partial idea if it recurs: give the brief the recipe
+(`view_pages` then `send_file`) rather than the rule, and map the word
+"screenshot" onto rendering a page.
+
 ## Gates ahead
 
-**A live turn** used as evidence, which wakes the GPU and is its own gate. After
-one, the honest check is the database: one row for the turn, its events in
-order, and no message text in either.
+None for 3A; it is closed. The rest of item 3 — the `show run <run_id>`
+inspector, finer task-stage detail, and 3C's vLLM prefill/decode/prefix-cache
+baseline, every run of which wakes a GPU — is not approved work yet.
 
 The rest of item 3 — the `show run <run_id>` inspector, finer task-stage detail,
 and all of 3C's vLLM prefill/decode/prefix-cache baseline — is not approved

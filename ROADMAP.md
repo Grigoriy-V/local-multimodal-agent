@@ -4,9 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** item 3, turn telemetry (3A). Implemented, migrated
-and deployed; live and untried, because a live turn wakes the GPU and is its own
-human gate. Every live product-runtime run remains one.
+**Current approved step:** none. Turn telemetry (3A) is deployed and accepted
+live, so the rest of item 3 — the run inspector and the vLLM baseline — is next
+and still needs approval. Every live product-runtime run remains a separate
+human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -154,12 +155,13 @@ Verified platform facts and cold-start evidence remain in
    first part is prepared and not yet authorized to build:
    `reports/2026-08-29_v2_turn_telemetry_preparation.md`.
 
-   - **Application telemetry — implemented offline, not yet deployed.** One
-     `run_id` is generated at ingress and carried to delivery; `turn_runs` and
-     `trace_events` hold the turn's outcome, route, model and tool calls,
-     tokens, first model token and first visible response, in SQLite locally and
-     PostgreSQL deployed. Timings and counts only. Migrated additively and
-     deployed on 2026-08-29, not yet exercised; one live turn remains.
+   - **Application telemetry, accepted live.** One `run_id` per turn from
+     ingress to delivery; `turn_runs` and `trace_events` hold outcome, route,
+     model and tool calls, tokens, first model token and first visible response,
+     in SQLite locally and PostgreSQL deployed, with no message text. Four real
+     turns were measured and read back out of the deployed database. First
+     baseline: routing costs about a third of a turn's input tokens, and
+     provider TTFT is 140-2293 ms while first visible response is 2.2-14.6 s.
      `reports/2026-08-29_v2_turn_telemetry_implementation.md`.
    - **Inspectable agent trace.** The structured detail is now recorded; what is
      missing is the reading half — a `show run <run_id>` inspector and a list of
