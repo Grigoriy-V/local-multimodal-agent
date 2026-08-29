@@ -182,6 +182,26 @@ def test_a_missing_histogram_reads_as_unknown_not_as_zero() -> None:
     assert measured.tpot_ms is None
 
 
+def test_a_counter_that_did_not_move_reads_as_zero_not_as_unknown() -> None:
+    """A cache that was queried and missed every time is a measurement.
+
+    `delta` keeps only what changed, so an unmoved counter is absent from it.
+    Reporting that as unknown would hide the most informative case scenario C
+    has: the request that paid full prefill.
+    """
+
+    unmoved = after_one_request().replace(
+        "vllm:gpu_prefix_cache_hits{" + MODEL + "} 3072.0",
+        "vllm:gpu_prefix_cache_hits{" + MODEL + "} 0.0",
+    )
+    before, after = parse_metrics(SAMPLE), parse_metrics(unmoved)
+
+    measured = summarize(discover(after), delta(before, after))
+
+    assert measured.prefix_cache_hits == 0.0
+    assert measured.prefix_hit_rate == 0.0
+
+
 def test_a_cache_nobody_queried_has_no_hit_rate() -> None:
     assert Measurement(prefix_cache_queries=0, prefix_cache_hits=0).prefix_hit_rate is None
 

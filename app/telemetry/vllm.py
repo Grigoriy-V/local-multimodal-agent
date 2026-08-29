@@ -28,7 +28,13 @@ from dataclasses import dataclass, field
 # under. First match wins; an entry with no match is reported as missing.
 CONCEPTS: dict[str, tuple[str, ...]] = {
     "time_to_first_token": ("vllm:time_to_first_token_seconds",),
-    "time_per_output_token": ("vllm:time_per_output_token_seconds",),
+    # 0.26.0 publishes the per-request average under a longer name and also
+    # exposes raw inter-token latency; the short name the docs use is not here.
+    "time_per_output_token": (
+        "vllm:request_time_per_output_token_seconds",
+        "vllm:time_per_output_token_seconds",
+        "vllm:inter_token_latency_seconds",
+    ),
     "prefill_time": ("vllm:request_prefill_time_seconds",),
     "decode_time": ("vllm:request_decode_time_seconds",),
     "inference_time": ("vllm:request_inference_time_seconds",),
@@ -49,6 +55,11 @@ CONCEPTS: dict[str, tuple[str, ...]] = {
         "vllm:prefix_cache_hits",
     ),
     "requests_finished": ("vllm:request_success_total", "vllm:request_success"),
+    # Block-level hits answer "was the cache used"; these two answer "how much
+    # of this prompt did the GPU actually have to compute", which is the
+    # question scenario C exists for.
+    "cached_prompt_tokens": ("vllm:prompt_tokens_cached_total",),
+    "prefill_kv_computed_tokens": ("vllm:request_prefill_kv_computed_tokens",),
 }
 
 # Concepts without which the baseline cannot answer the questions item 3 asks.
@@ -177,11 +188,19 @@ def mean(changed: Mapping[str, float], base: str | None) -> float | None:
 
 
 def counted(changed: Mapping[str, float], base: str | None) -> float | None:
+    """How much a counter moved, where zero and unknown are different answers.
+
+    `delta` keeps only what changed, so a counter that stayed put is absent from
+    it. That absence means it did not move — which is a measurement, and the
+    prefix cache reporting no hits is exactly the case where confusing it with
+    "not published" would be a lie.
+    """
+
     if not base:
         return None
     if base in changed:
         return changed[base]
-    return changed.get(base + "_count")
+    return changed.get(base + "_count", 0.0)
 
 
 @dataclass(frozen=True)
@@ -200,6 +219,8 @@ class Measurement:
     generation_tokens: float | None = None
     prefix_cache_queries: float | None = None
     prefix_cache_hits: float | None = None
+    cached_prompt_tokens: float | None = None
+    prefill_kv_computed_tokens: float | None = None
 
     @property
     def prefix_hit_rate(self) -> float | None:
@@ -208,6 +229,16 @@ class Measurement:
         if not self.prefix_cache_queries:
             return None
         return (self.prefix_cache_hits or 0.0) / self.prefix_cache_queries
+
+    @property
+    def cached_token_share(self) -> float | None:
+        """How much of the prompt the GPU did not have to compute."""
+
+        if not self.prompt_tokens:
+            return None
+        if self.cached_prompt_tokens is None:
+            return None
+        return self.cached_prompt_tokens / self.prompt_tokens
 
 
 def milliseconds(seconds: float | None) -> float | None:
@@ -229,6 +260,13 @@ def summarize(found: Mapping[str, str | None], changed: Mapping[str, float]) -> 
         generation_tokens=counted(changed, found.get("generation_tokens")),
         prefix_cache_queries=counted(changed, found.get("prefix_cache_queries")),
         prefix_cache_hits=counted(changed, found.get("prefix_cache_hits")),
+        cached_prompt_tokens=counted(changed, found.get("cached_prompt_tokens")),
+        # A histogram of tokens per request: the sum is how many were computed.
+        prefill_kv_computed_tokens=(
+            changed.get(found["prefill_kv_computed_tokens"] + "_sum", 0.0)
+            if found.get("prefill_kv_computed_tokens")
+            else None
+        ),
     )
 
 
@@ -253,6 +291,13 @@ def render_measurement(label: str, measured: Measurement) -> str:
             f"  prefix cache        {number(measured.prefix_cache_hits)}"
             f" hits of {number(measured.prefix_cache_queries)} queries"
             + (f" ({rate:.0%})" if rate is not None else ""),
+            f"  prompt tokens cached {number(measured.cached_prompt_tokens)}"
+            + (
+                f" ({share:.0%} of the prompt)"
+                if (share := measured.cached_token_share) is not None
+                else ""
+            ),
+            f"  KV computed         {number(measured.prefill_kv_computed_tokens)} tokens",
         ]
     )
 
@@ -262,7 +307,7 @@ def render_discovery(snapshot: Snapshot, found: Mapping[str, str | None]) -> str
     for concept in CONCEPTS:
         name = found.get(concept)
         mark = " " if name else "!"
-        lines.append(f" {mark} {concept:<24}{name or 'NOT PUBLISHED'}")
+        lines.append(f" {mark} {concept:<28}{name or 'NOT PUBLISHED'}")
     absent = missing(found)
     lines.append("")
     if absent:

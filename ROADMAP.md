@@ -4,11 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** the model and GPU baseline (3C). Its probe and the
-derived cost view are built and green offline; the measuring run itself has not
-happened. 3B is likewise built offline and waits for the same live window.
-Every live product-runtime run remains a separate human gate, including reading
-the engine's `/metrics`.
+**Current approved step:** finishing item 3. The model and GPU baseline (3C) is
+measured; the run inspector and task-stage detail (3B) are built and green
+offline and still need a deploy and one live autonomous task turn. Every live
+product-runtime run remains a separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -149,13 +148,12 @@ Verified platform facts and cold-start evidence remain in
 ### Queue
 
 3. **Baseline measurement, metrics and logs.** Make both product behaviour and
-   its cost observable before changing the agent loop. Today's 15-17 tok/s
-   conflates network, prefill and decode; there is no prefill measurement on the
-   A10, and prefix caching has never been read out of a startup log. The task
-   input is `docs/baseline_measurement_metrics_logs.md`. Its first part is done;
-   the design for the remainder is prepared and not yet authorized to build:
-   `reports/2026-08-29_v2_turn_telemetry_preparation.md`,
-   `reports/2026-08-29_v2_run_inspector_and_gpu_baseline_preparation.md`.
+   its cost observable before changing the agent loop. The task input is
+   `docs/baseline_measurement_metrics_logs.md`; the designs are in
+   `reports/2026-08-29_v2_turn_telemetry_preparation.md` and
+   `reports/2026-08-29_v2_run_inspector_and_gpu_baseline_preparation.md`. What
+   remains is the live half: a deploy and one live autonomous task turn, read
+   back with the inspector alone.
 
    - **Application telemetry, accepted live.** One `run_id` per turn from
      ingress to delivery; `turn_runs` and `trace_events` hold outcome, route,
@@ -172,14 +170,16 @@ Verified platform facts and cold-start evidence remain in
      change. Not deployed and not accepted live: that needs a deploy and one
      live task turn, which is a GPU gate.
      `reports/2026-08-29_v2_run_inspector_implementation.md`.
-   - **Model and GPU baseline, offline half built.** `tools/vllm_baseline.py`
-     reads the engine's own metrics, discovers which names the deployed vLLM
-     publishes rather than copying them, refuses a delta across an engine
-     restart, and runs short-in/long-out, four input sizes and a repeated
-     prefix in one continuous pass. GPU seconds and cost per turn are derived
-     when a run is read, never stored. **Nothing has been measured yet**: the
-     run needs a GPU wake, which is its own permission.
-     `reports/2026-08-29_v2_gpu_baseline_implementation.md`.
+   - **Model and GPU baseline, measured.** `tools/vllm_baseline.py` reads the
+     engine's own counters and was run twice under permission. Decode is 21-24
+     ms per output token, about 45 tok/s, not the 15-17 that conflated network,
+     prefill and decode. Prefill is what long turns cost: 4.69 s at 9,773 input
+     tokens against 0.64 s of decode, and superlinear. Prefix caching is
+     confirmed active — 98% of a repeated 3,277-token prefix served from cache,
+     prefill 1,370 to 82 ms. GPU seconds and cost per turn are derived when a
+     run is read, never stored.
+     `reports/2026-08-29_v2_gpu_baseline_implementation.md`,
+     `reports/2026-08-29_v2_gpu_baseline_measured.md`.
    - **GPU active seconds per successful user turn** is the primary metric, not
      total spend. "Successful" needs a definition a failed turn cannot satisfy.
    - Cost per turn and per user, counting the harness's two model calls
@@ -222,9 +222,12 @@ Verified platform facts and cold-start evidence remain in
 
 5. **Optimization after the agent is observable.** Improve efficiency against
    the measurements above without delaying the harness phase: adaptive
-   scaledown through `autoscale.py`, prefix caching confirmed rather than
-   assumed, speculative decoding, and the single-call change that removes the
-   router's second full-context request per message.
+   scaledown through `autoscale.py`, and the single-call change that removes the
+   router's second full-context request per message — now priced at about 1.0 s
+   of prefill a turn, since the router shares no prefix with the answer call.
+   Prefix caching is confirmed active and needs no further work before it is
+   used deliberately. Speculative decoding is the weakest lever of the three:
+   decode is 21-24 ms per output token while prefill dominates long turns.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the
