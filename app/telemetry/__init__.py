@@ -16,10 +16,11 @@ from app.telemetry.base import (
     stamp,
 )
 from app.telemetry.open import open_telemetry
-from app.telemetry.trace import NO_TRACE, Telemetry, TurnTrace
+from app.telemetry.trace import NO_TRACE, Telemetry, TurnTrace, resolve
 
 __all__ = [
     "NO_TRACE",
+    "resolve",
     "SUCCESSFUL",
     "Outcome",
     "Status",

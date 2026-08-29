@@ -23,7 +23,7 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any
 
 from app.models import Completion, Message, ModelBackend, StreamEvent, TextDelta
-from app.telemetry.trace import NO_TRACE, TurnTrace
+from app.telemetry.trace import TurnTrace, resolve
 
 
 class TracedBackend(ModelBackend):
@@ -40,10 +40,7 @@ class TracedBackend(ModelBackend):
         self.purpose = purpose
 
     def _trace(self) -> TurnTrace:
-        try:
-            return self.current() or NO_TRACE
-        except Exception:  # noqa: BLE001 - an observation cannot break a call
-            return NO_TRACE
+        return resolve(self.current)
 
     async def context_limit(self) -> int | None:
         return await self.backend.context_limit()

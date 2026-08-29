@@ -961,14 +961,15 @@ class TelegramAdapter:
     ) -> None:
         result = harness.finish_task(thread_id, view)
         if view.outcome is not None:
-            # The task counted its own tool calls as it spent them; this is
-            # where they join the turn that paid for them.
-            trace.run.tool_calls += view.outcome.tool_calls
+            # The turn's own counter is not touched here. Every tool the task
+            # executed was bracketed where it ran, so adding this total would
+            # count each of them twice; what it reports is budget spent, which
+            # also includes calls refused before they ran.
             trace.event(
                 "task_finished",
                 status=view.outcome.status,
                 iterations=view.outcome.iterations,
-                tool_calls=view.outcome.tool_calls,
+                budget_spent=view.outcome.tool_calls,
                 artifacts=len(view.outcome.artifacts) or None,
             )
         # The store keeps the harness's canonical text; the chat gets the same

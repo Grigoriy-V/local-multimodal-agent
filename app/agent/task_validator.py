@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +15,10 @@ from app.agent.task_graph import (
     TaskStageError,
     TestReport,
 )
-from app.agent.task_worker import text_message
+from app.agent.task_worker import text_message, tool_data
 from app.capabilities import tool_inventory
 from app.models import BackendError, ContentPart, Message, ModelBackend
+from app.telemetry import TurnTrace, resolve
 from app.tools import CapabilityRegistry
 
 EVALUATION_RESPONSE_FORMAT = {
@@ -130,12 +132,14 @@ class ModelTaskValidator:
         backend: ModelBackend,
         workspace: Path,
         capability_registry: CapabilityRegistry | None = None,
+        current: Callable[[], TurnTrace] | None = None,
     ) -> None:
         self.backend = backend
         self.workspace = Path(workspace).resolve()
         if not self.workspace.is_dir():
             raise ValueError(f"task workspace {self.workspace} is not a directory")
         self.registry = capability_registry or CapabilityRegistry(self.workspace)
+        self.current = current
 
     def _toolbox(self, context: TaskContext):
         root = context.grant.root(self.workspace)
@@ -166,6 +170,16 @@ class ModelTaskValidator:
 
     async def __call__(
         self, context: TaskContext, implementation: ImplementationResult
+    ) -> TestReport:
+        trace = resolve(self.current)
+        with trace.staged("validate", iteration=context.iteration):
+            return await self._validate(context, implementation, trace)
+
+    async def _validate(
+        self,
+        context: TaskContext,
+        implementation: ImplementationResult,
+        trace: TurnTrace,
     ) -> TestReport:
         if not context.plan.validation_strategy:
             raise TaskStageError("validation unavailable: the plan has no strategy")
@@ -212,7 +226,10 @@ class ModelTaskValidator:
             runnable = completion.tool_calls[:remaining]
             overflow = completion.tool_calls[remaining:]
             for call in runnable:
-                result = await toolbox.run_async(call)
+                with trace.tool(call.name, **tool_data(call)) as measured:
+                    result = await toolbox.run_async(call)
+                    if _failed(result):
+                        measured.failed()
                 messages.append(result)
                 tool_calls += 1
                 if not _failed(result):
@@ -224,6 +241,12 @@ class ModelTaskValidator:
                     )
                     evidence.extend(result.content)
             for call in overflow:
+                trace.event(
+                    "tool_skipped",
+                    tool=call.name,
+                    status="budget_exhausted",
+                    **tool_data(call),
+                )
                 messages.append(
                     Message(
                         role="tool",

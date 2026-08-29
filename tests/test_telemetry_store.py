@@ -165,3 +165,71 @@ def test_an_empty_batch_writes_nothing(store: TelemetryStore) -> None:
     store.record_events([])
 
     assert store.events("r1") == []
+
+
+# --- listing -----------------------------------------------------------------
+
+
+def finished(
+    run_id: str,
+    *,
+    user_id: str = "user-alice",
+    started_at: str,
+    outcome: str = "answer_delivered",
+) -> TurnRun:
+    record = TurnRun(run_id=run_id, user_id=user_id, started_at=started_at)
+    record.status = "failed" if outcome == "failed" else "completed"
+    record.outcome = outcome  # type: ignore[assignment]
+    record.finished_at = started_at
+    record.total_ms = 1000
+    return record
+
+
+def test_recent_runs_are_newest_first_and_bounded(store: TelemetryStore) -> None:
+    for index in range(5):
+        store.start_turn(finished(f"r{index}", started_at=f"2026-08-29T10:0{index}:00.000+00:00"))
+
+    listed = store.recent_runs(limit=3)
+
+    assert [record.run_id for record in listed] == ["r4", "r3", "r2"]
+
+
+def test_recent_runs_can_be_restricted_to_one_user(store: TelemetryStore) -> None:
+    store.start_turn(finished("r1", started_at="2026-08-29T10:00:00.000+00:00"))
+    store.start_turn(
+        finished("r2", user_id="user-bob", started_at="2026-08-29T10:01:00.000+00:00")
+    )
+
+    listed = store.recent_runs(user_id="user-bob")
+
+    assert [record.run_id for record in listed] == ["r2"]
+
+
+def test_the_unsuccessful_list_holds_failures_and_turns_that_never_ended(
+    store: TelemetryStore,
+) -> None:
+    """A container that died leaves `running` forever, and that is the crash.
+
+    Filtering on `status = 'failed'` would show only the failures the
+    application survived long enough to record, which are the ones that were
+    already the least mysterious.
+    """
+
+    store.start_turn(finished("ok", started_at="2026-08-29T10:00:00.000+00:00"))
+    store.start_turn(
+        finished("broke", started_at="2026-08-29T10:01:00.000+00:00", outcome="failed")
+    )
+    store.start_turn(TurnRun(run_id="abandoned", started_at="2026-08-29T10:02:00.000+00:00"))
+    store.start_turn(
+        finished(
+            "stopped", started_at="2026-08-29T10:03:00.000+00:00", outcome="cancelled"
+        )
+    )
+
+    listed = store.recent_runs(unsuccessful=True)
+
+    assert sorted(record.run_id for record in listed) == ["abandoned", "broke"]
+
+
+def test_an_empty_database_lists_nothing(store: TelemetryStore) -> None:
+    assert store.recent_runs() == []

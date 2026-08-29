@@ -47,6 +47,8 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Measure a turn: identity, timings, counts, outcome | `app/telemetry/` | `TurnTrace`, `Telemetry`, `TurnRun`, `TraceEvent`, `NO_TRACE`, `RUN_ID` |
 | Change where turn telemetry is stored | `app/telemetry/open.py` | `open_telemetry`, `SqliteTelemetry`, `PostgresTelemetry` |
 | Count model calls the task path spends | `app/telemetry/backend.py` | `TracedBackend`, `TaskRuntime._measuring` |
+| Read a measured turn back | `app/telemetry/inspect.py`, `tools/show_run.py` | `render_run`, `render_listing`, `recent_runs` |
+| Mark which stage of a task is spending | `app/telemetry/trace.py` | `TurnTrace.staged`, `resolve` |
 | Change SQLite persistence | `app/memory/store.py` | `SqliteStore` |
 | Change deployed PostgreSQL persistence | `app/memory/postgres.py` | `PostgresStore`, `turn_context`, `append` |
 | Change store selection | `app/memory/open.py` | `open_store` |
@@ -380,6 +382,17 @@ state or configuration — it is not serializable and a checkpoint would try.
 
 Code that asks for an unknown run gets `NO_TRACE`, which records nothing, so
 every path without telemetry keeps working unchanged.
+
+Objects built once and reused for every turn — `TracedBackend`,
+`ModelTaskWorker`, `ModelTaskValidator` — hold no run identity. They take a
+`Callable[[], TurnTrace]` and ask `resolve()` for the current turn when
+something happens, which keeps one source for that answer in the runtime that
+started the turn.
+
+Two tool counts exist and mean different things. `TaskOutcome.tool_calls` is
+budget spent, including calls refused before they ran; `TurnRun.tool_calls` is
+calls that actually executed, counted where they executed. Never add them
+together.
 
 ### Conversation store is not checkpoint state
 

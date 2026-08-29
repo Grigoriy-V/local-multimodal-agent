@@ -25,7 +25,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from app.telemetry.base import TelemetryStore, TraceEvent, TurnRun
-from app.telemetry.sqlite import COLUMNS
+from app.telemetry.sqlite import COLUMNS, filters
 
 SCHEMA_VERSION = 1
 
@@ -189,6 +189,24 @@ class PostgresTelemetry(TelemetryStore):
             cursor.execute("SELECT * FROM turn_runs WHERE run_id = %s", (run_id,))
             row = cursor.fetchone()
         return None if row is None else TurnRun(**{name: row[name] for name in COLUMNS})
+
+    def recent_runs(
+        self,
+        *,
+        limit: int = 20,
+        user_id: str | None = None,
+        unsuccessful: bool = False,
+    ) -> list[TurnRun]:
+        clauses, values = filters(user_id, unsuccessful, "%s")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._cursor() as cursor:
+            cursor.execute(
+                f"SELECT * FROM turn_runs{where} ORDER BY started_at DESC, run_id DESC"
+                " LIMIT %s",
+                (*values, max(1, limit)),
+            )
+            rows = cursor.fetchall()
+        return [TurnRun(**{name: row[name] for name in COLUMNS}) for row in rows]
 
     def events(self, run_id: str) -> list[TraceEvent]:
         with self._cursor() as cursor:

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -85,6 +85,10 @@ class TurnTrace:
         self._seq = 0
         self._pending: list[TraceEvent] = []
         self._finished = False
+        # What the turn is currently doing, carried by every event emitted
+        # inside it. A trace of twenty tool calls is only readable if each one
+        # says which stage and which attempt spent it.
+        self._context: dict[str, Any] = {}
 
     # --- elapsed -------------------------------------------------------------
 
@@ -98,13 +102,14 @@ class TurnTrace:
     def event(self, type: str, duration_ms: int | None = None, **data: Any) -> None:
         try:
             self._seq += 1
+            merged = {**self._context, **data}
             record = TraceEvent(
                 run_id=self.run.run_id,
                 seq=self._seq,
                 type=type,
                 timestamp=stamp(),
                 duration_ms=duration_ms,
-                data={key: value for key, value in data.items() if value is not None},
+                data={key: value for key, value in merged.items() if value is not None},
             )
             log_event(record)
             self._pending.append(record)
@@ -213,6 +218,26 @@ class TurnTrace:
             **data,
         )
 
+    @contextmanager
+    def staged(self, stage: str, **data: Any) -> Iterator[None]:
+        """Bracket one stage of the bounded task path, and mark what it spends.
+
+        Everything emitted inside — model calls, tool calls, nested stages —
+        carries the stage and whatever else is passed here, typically the
+        attempt number. That is why a stage is not simply another `step`: the
+        useful question about a task is not how long planning took but which
+        stage spent the twenty tool calls, and only the events themselves can
+        answer it.
+        """
+
+        previous = self._context
+        self._context = {**previous, "stage": stage, **data}
+        try:
+            with self.step(f"task_{stage}"):
+                yield
+        finally:
+            self._context = previous
+
     # --- model calls ---------------------------------------------------------
 
     @contextmanager
@@ -251,10 +276,17 @@ class TurnTrace:
     # --- tool calls ----------------------------------------------------------
 
     @contextmanager
-    def tool(self, name: str) -> Iterator["ToolCall"]:
+    def tool(self, name: str, **data: Any) -> Iterator["ToolCall"]:
+        """Bracket one tool execution.
+
+        `data` is for what makes twenty calls distinguishable from each other —
+        in practice the `path` argument. Never an argument's value: the content
+        a tool writes is the conversation's, and telemetry does not keep that.
+        """
+
         self.run.tool_calls += 1
         call = ToolCall(self, name, self.run.tool_calls)
-        self.event("tool_started", tool=name, call_index=call.index)
+        self.event("tool_started", tool=name, call_index=call.index, **data)
         try:
             yield call
         except Exception as error:  # noqa: BLE001 - recorded, then re-raised
@@ -265,6 +297,7 @@ class TurnTrace:
                 call_index=call.index,
                 error_type=type(error).__name__,
                 status="failed",
+                **data,
             )
             raise
         self.event(
@@ -273,6 +306,7 @@ class TurnTrace:
             tool=name,
             call_index=call.index,
             status=call.status,
+            **data,
         )
 
 
@@ -366,6 +400,24 @@ class NullTrace(TurnTrace):
 
 
 NO_TRACE = NullTrace()
+
+
+def resolve(current: "Callable[[], TurnTrace] | None") -> TurnTrace:
+    """The trace a long-lived object should record against right now.
+
+    Objects built once and used for many turns — the task worker, the
+    validator, the wrapped backend — hold no run identity of their own. They ask
+    for the current one when something happens, which keeps the single source of
+    that answer in the runtime that started the turn. A caller that cannot
+    answer gets a trace that records nothing rather than an exception.
+    """
+
+    if current is None:
+        return NO_TRACE
+    try:
+        return current() or NO_TRACE
+    except Exception:  # noqa: BLE001 - an observation cannot break the work
+        return NO_TRACE
 
 
 class Telemetry:

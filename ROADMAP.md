@@ -4,10 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. Turn telemetry (3A) is deployed and accepted
-live, so the rest of item 3 — the run inspector and the vLLM baseline — is next
-and still needs approval. Every live product-runtime run remains a separate
-human gate.
+**Current approved step:** the run inspector and task-stage detail (3B), built
+and green offline, awaiting a deploy and one live task turn. The vLLM baseline
+(3C) is not approved. Every live product-runtime run remains a separate human
+gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -151,9 +151,10 @@ Verified platform facts and cold-start evidence remain in
    its cost observable before changing the agent loop. Today's 15-17 tok/s
    conflates network, prefill and decode; there is no prefill measurement on the
    A10, and prefix caching has never been read out of a startup log. The task
-   input is `docs/baseline_measurement_metrics_logs.md`; the design for its
-   first part is prepared and not yet authorized to build:
-   `reports/2026-08-29_v2_turn_telemetry_preparation.md`.
+   input is `docs/baseline_measurement_metrics_logs.md`. Its first part is done;
+   the design for the remainder is prepared and not yet authorized to build:
+   `reports/2026-08-29_v2_turn_telemetry_preparation.md`,
+   `reports/2026-08-29_v2_run_inspector_and_gpu_baseline_preparation.md`.
 
    - **Application telemetry, accepted live.** One `run_id` per turn from
      ingress to delivery; `turn_runs` and `trace_events` hold outcome, route,
@@ -163,11 +164,13 @@ Verified platform facts and cold-start evidence remain in
      baseline: routing costs about a third of a turn's input tokens, and
      provider TTFT is 140-2293 ms while first visible response is 2.2-14.6 s.
      `reports/2026-08-29_v2_turn_telemetry_implementation.md`.
-   - **Inspectable agent trace.** The structured detail is now recorded; what is
-     missing is the reading half — a `show run <run_id>` inspector and a list of
-     recent failed runs — and finer stage detail inside the bounded task path.
-     The failed live PDF task reported only that 20 calls were spent; item 3
-     must make those calls readable before the loop is redesigned.
+   - **Inspectable agent trace, offline only.** `tools/show_run.py` renders one
+     run or lists recent and unsuccessful ones, and the bounded task path now
+     records its stages, its attempt numbers and every tool call it executes,
+     refuses or skips past the budget, with the path but no content. No schema
+     change. Not deployed and not accepted live: that needs a deploy and one
+     live task turn, which is a GPU gate.
+     `reports/2026-08-29_v2_run_inspector_implementation.md`.
    - One long-output run separating prefill from decode, and the same for input
      size, as a baseline to beat.
    - **GPU active seconds per successful user turn** is the primary metric, not

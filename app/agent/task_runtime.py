@@ -83,7 +83,9 @@ class TaskRuntime:
         # wrapper, so an autonomous task reports what it actually spent.
         self._trace: TurnTrace = NO_TRACE
         self._measured = TracedBackend(backend, lambda: self._trace)
-        self.tester = tester or ModelTaskValidator(self._measured, self.workspace)
+        self.tester = tester or ModelTaskValidator(
+            self._measured, self.workspace, current=lambda: self._trace
+        )
         self.budget = budget or TaskBudget(max_seconds=300.0)
         if not self.workspace.is_dir():
             raise ValueError(f"task workspace {self.workspace} is not a directory")
@@ -124,6 +126,7 @@ class TaskRuntime:
                 self.tester,
                 budget=self.budget,
                 checkpointer=self._saver,
+                current=lambda: self._trace,
             )
         return self._graph
 

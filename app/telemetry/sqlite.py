@@ -85,6 +85,28 @@ def row_to_run(row: sqlite3.Row) -> TurnRun:
     return TurnRun(**{name: row[name] for name in COLUMNS})
 
 
+def filters(
+    user_id: str | None, unsuccessful: bool, placeholder: str
+) -> tuple[list[str], list[object]]:
+    """The `recent_runs` predicate, shared so both stores select the same rows.
+
+    Two implementations of one contract that disagree about what "failed" means
+    would make the deployed and local answers quietly different, which is worse
+    than having no listing at all.
+    """
+
+    clauses: list[str] = []
+    values: list[object] = []
+    if user_id is not None:
+        clauses.append(f"user_id = {placeholder}")
+        values.append(user_id)
+    if unsuccessful:
+        # A turn that never finished is the crash case: nothing wrote its
+        # outcome because nothing survived to write it.
+        clauses.append("(outcome = 'failed' OR finished_at IS NULL)")
+    return clauses, values
+
+
 class SqliteTelemetry(TelemetryStore):
     """Turn records and traces in a local SQLite file."""
 
@@ -141,6 +163,22 @@ class SqliteTelemetry(TelemetryStore):
             "SELECT * FROM turn_runs WHERE run_id = ?", (run_id,)
         ).fetchone()
         return None if row is None else row_to_run(row)
+
+    def recent_runs(
+        self,
+        *,
+        limit: int = 20,
+        user_id: str | None = None,
+        unsuccessful: bool = False,
+    ) -> list[TurnRun]:
+        clauses, values = filters(user_id, unsuccessful, "?")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._db.execute(
+            f"SELECT * FROM turn_runs{where} ORDER BY started_at DESC, run_id DESC"
+            " LIMIT ?",
+            (*values, max(1, limit)),
+        ).fetchall()
+        return [row_to_run(row) for row in rows]
 
     def events(self, run_id: str) -> list[TraceEvent]:
         rows = self._db.execute(

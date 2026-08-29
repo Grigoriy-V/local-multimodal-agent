@@ -9,6 +9,7 @@ through the separate task validator.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -28,11 +29,13 @@ from app.agent.task_graph import (
     build_task_graph,
 )
 from app.models import BackendError, ContentPart, Message, ModelBackend, ToolCall
+from app.telemetry import TurnTrace, resolve
 from app.tools import (
     BROWSER_INSPECT,
     CapabilityRegistry,
     FILESYSTEM_READ,
     FILESYSTEM_WRITE,
+    tool_failed,
 )
 
 VALIDATION_CAPABILITIES = (FILESYSTEM_READ, BROWSER_INSPECT)
@@ -219,29 +222,63 @@ def repeats_grant_directory(path: str, subdirectory: str) -> bool:
     return bool(granted) and len(requested) > len(granted) and requested[: len(granted)] == granted
 
 
+def tool_data(call: ToolCall) -> dict[str, str]:
+    """What identifies one tool call in a trace, and nothing more.
+
+    The path only. Twenty calls are unreadable without it — the difference
+    between an agent working through a directory and an agent rewriting one file
+    twenty times is exactly this field — and a path is a name inside that
+    person's own sandbox. Every other argument may carry what the tool was asked
+    to write, which telemetry promised not to keep.
+    """
+
+    path = call.arguments.get("path")
+    return {"path": path} if isinstance(path, str) and path else {}
+
+
 class ModelTaskWorker:
     """Plan and implement task attempts through one model backend."""
 
-    def __init__(self, backend: ModelBackend, workspace: Path) -> None:
+    def __init__(
+        self,
+        backend: ModelBackend,
+        workspace: Path,
+        current: Callable[[], TurnTrace] | None = None,
+    ) -> None:
         self.backend = backend
         self.workspace = Path(workspace).resolve()
+        # The same arrangement the wrapped backend uses: this object is built
+        # once and serves every turn, so it asks which turn it is serving when
+        # something happens rather than holding one.
+        self.current = current
         if not self.workspace.is_dir():
             raise ValueError(f"task workspace {self.workspace} is not a directory")
+
+    def trace(self) -> TurnTrace:
+        return resolve(self.current)
 
     async def plan(self, task: str) -> TaskPlan:
         messages = [
             text_message("system", PLANNER_SYSTEM_PROMPT),
             text_message("user", task),
         ]
-        try:
-            completion = await self.backend.invoke(
-                messages, response_format=PLAN_RESPONSE_FORMAT
-            )
-        except BackendError as error:
-            raise TaskStageError(f"planning failed: {error}") from error
-        return parse_plan(completion.text)
+        with self.trace().staged("plan"):
+            try:
+                completion = await self.backend.invoke(
+                    messages, response_format=PLAN_RESPONSE_FORMAT
+                )
+            except BackendError as error:
+                raise TaskStageError(f"planning failed: {error}") from error
+            return parse_plan(completion.text)
 
     async def implement(self, context: TaskContext) -> ImplementationResult:
+        trace = self.trace()
+        with trace.staged("implement", iteration=context.iteration):
+            return await self._implement(context, trace)
+
+    async def _implement(
+        self, context: TaskContext, trace: TurnTrace
+    ) -> ImplementationResult:
         if not context.grant.allows(FILESYSTEM_WRITE):
             raise TaskStageError("implementation refused: task grant is not active")
         if context.remaining_tool_calls < 1:
@@ -256,7 +293,11 @@ class ModelTaskWorker:
             if context.grant.allows(capability)
         )
         toolbox = registry.toolbox(registry.grant(capabilities=capabilities))
-        inspection = toolbox.run(ToolCall("task_inspect", "list_files", {}))
+        # Counted, because it is charged to the budget below like any other.
+        with trace.tool("list_files") as measured:
+            inspection = toolbox.run(ToolCall("task_inspect", "list_files", {}))
+            if tool_failed(inspection):
+                measured.failed()
         listing = inspection.content[0].text or "(empty)"
         used = 1
         artifacts: set[str] = set()
@@ -287,6 +328,7 @@ class ModelTaskWorker:
             overflow = completion.tool_calls[remaining:]
             for call in runnable:
                 path = call.arguments.get("path")
+                identity = tool_data(call)
                 if isinstance(path, str) and repeats_grant_directory(
                     path, context.grant.subdirectory
                 ):
@@ -298,6 +340,12 @@ class ModelTaskWorker:
                     result = Message(
                         role="tool", content=result.content, tool_call_id=call.id
                     )
+                    # Refused before it ran, so it is not a tool call the task
+                    # spent — but it did spend the budget, and a trace that
+                    # showed nothing here would make the exhaustion inexplicable.
+                    trace.event(
+                        "tool_failed", tool=call.name, status="rejected", **identity
+                    )
                 elif toolbox.destructive(call.name) and not context.grant.allows(
                     FILESYSTEM_WRITE
                 ):
@@ -307,8 +355,14 @@ class ModelTaskWorker:
                     result = Message(
                         role="tool", content=result.content, tool_call_id=call.id
                     )
+                    trace.event(
+                        "tool_failed", tool=call.name, status="not_granted", **identity
+                    )
                 else:
-                    result = toolbox.run(call)
+                    with trace.tool(call.name, **identity) as measured:
+                        result = toolbox.run(call)
+                        if tool_failed(result):
+                            measured.failed()
                 messages.append(result)
                 result_text = " ".join(part.text or "" for part in result.content)
                 artifact = path
@@ -320,6 +374,15 @@ class ModelTaskWorker:
                     artifacts.add(Path(artifact).as_posix())
                 used += 1
             for call in overflow:
+                # Never executed, so never counted as spent. Recorded, because
+                # "the model asked for six more calls it could not have" is the
+                # explanation a budget-exhausted task otherwise fails to give.
+                trace.event(
+                    "tool_skipped",
+                    tool=call.name,
+                    status="budget_exhausted",
+                    **tool_data(call),
+                )
                 messages.append(
                     Message(
                         role="tool",
@@ -350,10 +413,11 @@ def build_model_task_graph(
     tester: Tester,
     budget: TaskBudget | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    current: Callable[[], TurnTrace] | None = None,
 ) -> CompiledStateGraph:
     """Wire model planning and sandbox implementation into the task lifecycle."""
 
-    worker = ModelTaskWorker(backend, workspace)
+    worker = ModelTaskWorker(backend, workspace, current)
     return build_task_graph(
         worker.plan,
         worker.implement,

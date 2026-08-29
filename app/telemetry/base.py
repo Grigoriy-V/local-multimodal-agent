@@ -118,6 +118,23 @@ class TelemetryStore(ABC):
     def get_turn(self, run_id: str) -> TurnRun | None: ...
 
     @abstractmethod
+    def recent_runs(
+        self,
+        *,
+        limit: int = 20,
+        user_id: str | None = None,
+        unsuccessful: bool = False,
+    ) -> list[TurnRun]:
+        """The most recently started turns first.
+
+        `unsuccessful` is deliberately not `status = 'failed'`. A turn whose
+        container died never reached the code that closes its row, so it stays
+        `running` forever — and those are exactly the turns worth reading. So
+        the filter means *the outcome was a failure, or the turn never ended at
+        all*, which is the only definition under which a crash is findable.
+        """
+
+    @abstractmethod
     def events(self, run_id: str) -> list[TraceEvent]:
         """This run's events in `seq` order."""
 

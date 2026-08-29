@@ -480,9 +480,29 @@ trace_events   the ordered detail: turn, router, model, tool, approval,
 ```
 
 A turn that ends without an outcome is closed as `failed`/`incomplete` by the
-worker, so a container that died leaves a finished row rather than a `running`
-one. There is no inspection command yet; querying the two tables is the current
-interface, and `show run <run_id>` belongs to the next part of item 3.
+worker, so a container that died in a way the process survived leaves a finished
+row. One whose container disappeared entirely stays `running` forever, and that
+is what `--failed` looks for.
+
+```bash
+python tools/show_run.py <run_id>
+```
+
+```text
+--last N        the most recent runs, newest first
+--failed        runs that failed or never finished at all
+--user <id>     one person's runs
+```
+
+It reads the same database the application writes: the local SQLite file by
+default, and the deployed one when `AGENT_DATABASE_URL` is set in the shell. It
+is read-only — no migration, and nothing started. Rendering lives in
+`app/telemetry/inspect.py`; the script is the entry point.
+
+A rendered run shows the queue wait, first model token and first visible
+response, then model calls with their tokens, tool calls with stage and path,
+task stages with their durations, the full event timeline at its offsets, and
+the totals including time no measured step claimed.
 
 ### Local doctor
 
