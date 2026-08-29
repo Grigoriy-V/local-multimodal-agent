@@ -92,18 +92,30 @@ start, checks, replies, and acknowledgements as required by the live guide.
    manually launched Claude terminal.
 5. Require a start receipt showing that the task input was accepted. Treat
    trust, permission, or startup prompt failures as failed starts.
-6. Wait through Orca for `worker_done`, `question`, or `escalation`. Answer
-   bounded clarification questions without widening authority. A wait timeout is
-   a liveness checkpoint, not task completion.
+6. Wait through one event-driven Orca long-poll for `worker_done`, `question`,
+   or `escalation`, using the live guide's current command shape and a
+   15-minute timeout (currently `--timeout-ms 900000`). Do not replace it with
+   repeated one-minute Orca checks. Heartbeats do not wake this wait. Answer
+   bounded clarification questions without widening authority. A wait timeout
+   is a liveness checkpoint, not task completion; use `worker-show` or a bounded
+   `worker-read` only when a real liveness or debugging question exists.
 7. After accepted `worker_done`, independently inspect the claimed files or diff
    and run proportionate verification. Compare the result with the brief and
    repository canon, not only with Claude's report.
-8. Release the owned worker, acknowledge the Delivery, and close only the
-   coordinator terminal created for this Run.
+8. Before acknowledging or releasing the settled worker, choose its next owner.
+   If review finds an immediate in-scope correction, create a fresh correction
+   Task and start it on the exact same Claude terminal with
+   `worker-start --task <next_task_id> --terminal <handle> --json`. Do not pass
+   `--model` or `--effort` when reusing a terminal; the existing session retains
+   its original `opus / medium` configuration. Require the reuse receipt to show
+   that the new Task input was accepted.
+9. When no immediate correction remains, release the owned worker, acknowledge
+   the Delivery, and close only the coordinator terminal created for this Run.
 
 For review-only work, Claude reports findings and does not edit. If source-code
 corrections are required after implementation, prepare the defects as a fresh
-supervised Claude Task within the already authorized bounded workflow, then
-repeat review and verification. Codex must not silently implement the
-correction. Stop and ask the human if a correction requires wider scope or
-another gate.
+supervised Claude Task within the already authorized bounded workflow and
+prefer the same Claude session as described above, then repeat review and
+verification. Use a fresh worker only when immediate reuse is unavailable or
+inappropriate. Codex must not silently implement the correction. Stop and ask
+the human if a correction requires wider scope or another gate.

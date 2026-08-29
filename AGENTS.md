@@ -75,9 +75,10 @@ spawn agents or invoke Orca recursively. The Supervisor waits for `worker_done`,
 then independently reviews the claimed files or diff and verifies the result in
 proportion to risk. If source-code corrections are needed, the Supervisor
 returns them through a fresh supervised Claude Task within the authorized
-workflow; it does not silently take over implementation. Stop and ask the human
-if a correction would widen scope or cross another gate. Review-only
-delegations do not authorize edits.
+workflow, reusing the same Claude session when the correction is immediate; it
+does not silently take over implementation. Stop and ask the human if a
+correction would widen scope or cross another gate. Review-only delegations do
+not authorize edits.
 
 Before selecting or changing work, read `ROADMAP.md`. It is the only current
 plan. Work on one approved step at a time and do not create a competing plan.
