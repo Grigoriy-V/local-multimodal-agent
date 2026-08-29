@@ -206,6 +206,13 @@ Verified platform facts and cold-start evidence remain in
 no separately hosted caller. The trigger is a UI hosted apart from the
 application; see the amended FastAPI decision in `DECISIONS.md`.
 
+### Not started
+
+Recorded, not approved, not begun, and not in the order above. One line each.
+
+- **Latency to the first visible word**, to give item 5 a "before" number:
+  `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
+
 **Closing criterion:** through Telegram, a normal conversational request is
 answered and a work request completes end to end for two different users without
 either seeing the other's conversations or memory, with no GPU running while the
