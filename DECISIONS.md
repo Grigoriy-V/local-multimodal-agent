@@ -165,7 +165,9 @@ repeat earlier tools from the same node.
 
 Supersedes / Superseded by
 
-None.
+The consent half is superseded by 2026-08-30, "Work inside a person's own
+workspace does not ask permission". Declaring consequence in the tool and owning
+the answer in the runtime still holds.
 
 ## 2026-08-01 — Token accounting comes from the model server
 
@@ -500,3 +502,38 @@ they cannot accidentally configure the local profile.
 Supersedes / Superseded by
 
 None.
+
+## 2026-08-30 — Work inside a person's own workspace does not ask permission
+
+Decision
+
+Routine mutation inside the granted workspace root — creating, writing,
+editing, replacing, removing files and directories — runs without asking. The
+boundary, not the individual call, is what is authorized. Approval remains
+required for actions whose effect leaves that boundary: sending or publishing
+something, spending money, changing infrastructure, or touching data the person
+did not put inside the workspace.
+
+Why
+
+The workspace is already confined per user and is the person's own directory;
+asking before each write buys no safety the confinement does not already give,
+and it turns autonomous work into a sequence of prompts. The desired experience
+is an agent working inside an assigned directory, not one asking to save a file
+it was told to write.
+
+Consequences
+
+`Tool.destructive` stops gating workspace tools and keeps its meaning for
+boundary-crossing ones; consent policy belongs to the tool execution seam rather
+than to the loop. `docs/PRODUCT.md` states the boundary rule instead of the
+per-call one. The current baseline is unaffected until the runtime implements
+it: today exactly two tools are marked destructive, `write_file` and
+`edit_file`, and no tool deletes anything. Preparation and per-sub-step
+acceptance are in `reports/2026-08-30_v2_step4_harness_preparation.md`.
+
+Supersedes / Superseded by
+
+Supersedes the consent half of 2026-08-01, "Tools declare consequence; the graph
+owns consent". The other half stands: a tool declares consequence, and the
+runtime — not the tool and not a UI adapter — owns what to do about it.

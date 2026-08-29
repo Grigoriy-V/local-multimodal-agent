@@ -1,13 +1,13 @@
 # Roadmap
 
-**Updated:** 2026-08-29
+**Updated:** 2026-08-30
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** none. Item 3 is closed and moved to Done, and the
-three defects its live run exposed are fixed and deployed. Item 4, the agent
-harness and loop, is next and needs approval. Every live product-runtime run
-remains a separate human gate.
+three defects its live run exposed are fixed and deployed. Item 4 is prepared
+and ordered into sub-steps; 4.0 is next and needs approval. Every live
+product-runtime run remains a separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -159,48 +159,56 @@ Verified platform facts and cold-start evidence remain in
 
 ### Queue
 
-4. **Agent harness and loop: from a functional assistant to a strong autonomous
-   agent.** This is the real agent-development phase, after baseline tools, the
-   baseline chat product, and basic metrics and logs exist. Improve the complete
-   loop rather than accumulating demo workflows: task understanding, planning,
-   tool choice, use of tool history and provenance, clarification, validation,
-   repair, truthful completion, restart continuity and efficient context use.
-   Evaluate behaviour with scenario suites that assert on harness events and
-   outcomes rather than exact model wording. Live suites run as one warm window
-   only with explicit permission, because every run wakes a GPU.
+4. **Agent harness and loop: one turn, one loop.** The real agent-development
+   phase, now that baseline tools, the baseline chat product and measurement
+   exist. The general loop already exists in `app/agent/graph.py`; this item
+   removes the second lifecycle beside it and the model call that chooses
+   between them, then gives the survivor what only the task path had. Ordered
+   sub-steps, each starting on its own approval. Grounding, risks and
+   per-sub-step acceptance:
+   `reports/2026-08-30_v2_step4_harness_preparation.md`.
 
-   Preserve the failed live PDF task as a future product acceptance scenario:
-   from a natural request, the agent must create a simple PDF, validate the real
-   document and deliver it. It exposed an ungrounded plan, an implementation
-   toolbox unable to execute its own script, an invalid validation strategy and
-   exhaustion of all 20 tool calls before validation. These are loop concerns;
-   the scenario must not become a hard-coded PDF workflow.
+   - **4.0 Conversation serialization.** The known live race: a screenshot and a
+     question sent seconds apart ran in two containers and were answered out of
+     order. A lease on the canonical conversation, drained by ascending
+     `update_id`, in the database both profiles share. Coalescing the two into
+     one intent is held back: it redefines the turn every recorded number
+     counts.
+   - **4.1 One loop.** Delete the answer/act router and the fixed
+     plan/implement/test/evaluate lifecycle. The surviving loop gains step
+     boundaries, its own spend budget — today only the task path has one — and
+     progress a person can watch. Removing the router's second full-context
+     request per message moves here from item 6.
+   - **4.2 Tool execution seam.** One `pre_execute → execute → post_execute`
+     path for every tool, holding consent policy, validation and telemetry.
+     Where autonomy inside the workspace is implemented; `DECISIONS.md`
+     2026-08-30.
+   - **4.3 Turn stopping and proportional validation.** A stopping seam instead
+     of a mandatory repair lifecycle. The preserved product acceptance scenario
+     lands here: from a natural request, create a simple PDF, validate the real
+     document and deliver it — as a harness test, never a PDF workflow.
+   - **4.4 `todo` as agent state, not a mode**, surviving folding and restart.
+   - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
+   - **4.6 Cache-friendly context assembly.** Per-turn retrieved facts sit in
+     front of the conversation today and invalidate the prefix cache from there
+     down.
+   - **4.7 Restart, resume and the scenario suite**, asserting on harness events
+     and outcomes rather than model wording, and compared against item 3's
+     numbers. Live suites run as one warm window and only with explicit
+     permission, because every run wakes a GPU.
 
-   The first known correctness prerequisite is conversation serialization.
-   Found live: a screenshot and a question sent seconds apart ran in two
-   containers and were answered out of order. The inbox leases an `update_id`
-   and nothing else.
+5. **Isolated execution.** A sandbox backend behind the 4.2 seam: shell, Python
+   and package installation in a restricted workspace holding no control-plane
+   secret. Isolation, not a confirmation prompt, is the boundary for arbitrary
+   generated code. What executes it in the local profile is undecided. Every run
+   is a product-runtime worker and a separate human gate.
 
-   - **Mutual exclusion.** Two turns must not run on one thread. Today each
-     loads context without the other's message, both append, and both write the
-     same checkpoint. `current_thread` is a check-then-act, so two workers
-     meeting a user with no thread create two.
-   - **Order.** The owner drains its conversation by ascending `update_id`.
-   - **Coalescing.** A screenshot then a question is one intent in two messages.
-
-   The lease belongs in the database both profiles share, so the behaviour does
-   not depend on the platform. That needs a migration on a populated database,
-   which is a human gate. Stopgap without a migration: `max_containers=1` on the
-   worker.
-
-5. **Optimization after the agent is observable.** Improve efficiency against
-   the measurements above without delaying the harness phase: adaptive
-   scaledown through `autoscale.py`, and the single-call change that removes the
-   router's second full-context request per message — now priced at about 1.0 s
-   of prefill a turn, since the router shares no prefix with the answer call.
-   Prefix caching is confirmed active and needs no further work before it is
-   used deliberately. Speculative decoding is the weakest lever of the three:
-   decode is 21-24 ms per output token while prefill dominates long turns.
+6. **Optimization after the agent is observable.** Adaptive scaledown through
+   `autoscale.py`. Prefix caching is confirmed active and needs no work before
+   it is used deliberately; speculative decoding is the weakest lever, since
+   decode is 21-24 ms per output token while prefill dominates long turns. The
+   router's second request left this item for 4.1, where the same edit deletes
+   it.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the
@@ -210,7 +218,7 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
 
 Recorded, not approved, not begun, and not in the order above. One line each.
 
-- **Latency to the first visible word**, to give item 5 a "before" number:
+- **Latency to the first visible word**, to give 4.1 a "before" number:
   `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
 
 **Closing criterion:** through Telegram, a normal conversational request is

@@ -126,7 +126,7 @@ The default should be the safe answer:
 - no allowed Telegram users means nobody is admitted;
 - model/page/tool output is untrusted data rather than instructions;
 - path-taking tools stay inside their granted root;
-- destructive tools require approval;
+- work inside the granted workspace root is autonomous; an action whose effect leaves that boundary requires approval;
 - public web tools must not become access to internal infrastructure;
 - page JavaScript should not run next to control-plane secrets in the deployed profile.
 
