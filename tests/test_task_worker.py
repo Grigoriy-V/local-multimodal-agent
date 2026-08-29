@@ -76,6 +76,25 @@ async def test_planning_uses_structured_output(tmp_path: Path) -> None:
     assert backend.tools_seen == [None]
 
 
+async def test_a_validation_step_without_capabilities_falls_back_to_reading(
+    tmp_path: Path,
+) -> None:
+    """A blank field must not end a task the user asked for.
+
+    The schema permits an empty list and a validation step cannot use one, so
+    the step gets the evidence every sandbox criterion has: read the files back.
+    Live, this ended "create a text file" at planning.
+    """
+
+    plan = json.loads(plan_json())
+    plan["validation_strategy"][0]["capabilities"] = []
+    worker = ModelTaskWorker(ScriptedBackend(says(json.dumps(plan))), tmp_path)
+
+    result = await worker.plan("Create notes.txt")
+
+    assert result.validation_strategy[0].capabilities == ("filesystem.read",)
+
+
 @pytest.mark.parametrize("text", ["not json", "[]", '{"summary": "only"}'])
 def test_invalid_plans_are_readable_stage_errors(text: str) -> None:
     with pytest.raises(TaskStageError, match="planning failed"):

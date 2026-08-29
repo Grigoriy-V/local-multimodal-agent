@@ -86,7 +86,9 @@ PLANNER_SYSTEM_PROMPT = (
     "Create a concise implementation plan for the task. Return only the requested "
     "structured object. Store observable steps and acceptance criteria, never private "
     "reasoning or chain-of-thought. Define exactly one validation_strategy item for "
-    "each acceptance criterion, copying the criterion text exactly. The model chooses "
+    "each acceptance criterion, copying the criterion text exactly. Every validation "
+    "item names at least one evidence capability; filesystem.read is the minimum and "
+    "is always available. The model chooses "
     "the minimum evidence capabilities required by the criterion: filesystem.read can "
     "list and read sandbox files; browser.inspect can render a self-contained local HTML "
     "file and return page facts, console errors and a screenshot. Use browser.inspect only "
@@ -164,7 +166,12 @@ def parse_plan(text: str) -> TaskPlan:
                 ValidationStep(
                     criterion=item["criterion"],
                     evidence=item["evidence"],
-                    capabilities=tuple(capabilities),
+                    # An empty list is not a choice the model made; the schema
+                    # permits it and a validation step cannot use it. Reading
+                    # the files back is the floor every sandbox criterion has,
+                    # so the step falls back to it rather than ending a task
+                    # the user asked for over a field the model left blank.
+                    capabilities=tuple(capabilities) or (FILESYSTEM_READ,),
                 )
             )
         except ValueError as error:

@@ -4,9 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** queue item 2, real answer streaming. Implemented and
-tested offline; deployment and live acceptance are each still their own human
-gate, as is every live product-runtime run.
+**Current approved step:** none. Real answer streaming is deployed and accepted
+live, so item 3 is next and still needs approval. One fix waits for a deploy:
+the task route's planning failure, below. Every live product-runtime run remains
+a separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -133,19 +134,18 @@ Verified platform facts and cold-start evidence remain in
   stays in the queue.
   `reports/2026-08-29_v2_baseline_chat_product_offline.md`,
   `reports/2026-08-29_v2_conversation_selection.md`.
+- **2. Real answer streaming, accepted live.** The model call streams through
+  the graph, so tool calls, usage, finish reason and persistence are the ones
+  the turn always had; the runtime reports deltas and finished messages as
+  separate events; Telegram shows one message being written and finalizes it in
+  place. Only finished messages are stored, and `AGENT_STREAM_ANSWERS` turns it
+  off in configuration. The same session exposed an unrelated task-route defect:
+  a plan whose validation step named no capability ended the task. Fixed, and
+  **not yet deployed**.
+  `reports/2026-08-29_v2_answer_streaming_preparation.md`,
+  `reports/2026-08-29_v2_answer_streaming_implementation.md`.
 
 ### Queue
-
-2. **Real answer streaming — built, awaiting deployment and live acceptance.**
-   The backend stream now carries tool calls, usage and finish reason; the model
-   node streams through the graph rather than around it; the runtime reports
-   deltas and finished messages as separate events; Telegram shows one message
-   being written and finalizes it in place. Only finished messages are stored.
-   `AGENT_STREAM_ANSWERS` turns it off in configuration.
-   `docs/telegram_real_answer_streaming.md` is the task input;
-   `reports/2026-08-29_v2_answer_streaming_preparation.md` holds the live stream
-   probe, `reports/2026-08-29_v2_answer_streaming_implementation.md` the offline
-   evidence and what live acceptance must show.
 
 3. **Baseline measurement, metrics and logs.** Make both product behaviour and
    its cost observable before changing the agent loop. Today's 15-17 tok/s

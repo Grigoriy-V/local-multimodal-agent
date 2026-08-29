@@ -116,18 +116,50 @@ depends on the example file being edited first.
 `docs/PRODUCT.md` is deliberately unchanged. Its baseline lists accepted product
 behaviour, and this has not been accepted live.
 
+## Accepted live, 2026-08-29
+
+Deployed to `assistant-control` in 21.1 s; five functions re-created, the image
+rebuilt only on its two `ENV` steps. `AGENT_STREAM_ANSWERS` is unset in the
+deployed secret, so streaming is on by its default.
+
+The human ran the acceptance in the real chat and reported it working: the
+answer grows in one message, no duplicate arrives, a tool turn still shows its
+activity and then streams, and conversation selection is unchanged. That is
+their observation, not a reading of the database; the store was not inspected
+afterwards, so "only complete canonical messages are stored" rests on the
+offline tests rather than on deployed data.
+
+One real failure came out of the same session, in the task route rather than
+this work: see below.
+
+## The task route failed on "create a text file"
+
+Live, an `act` request ended at planning with
+`planning failed: a validation step requires non-empty capabilities`.
+
+Nothing to do with streaming. `PLAN_RESPONSE_FORMAT` permits
+`"capabilities": []` — there is no `minItems` — while `ValidationStep` refuses an
+empty list. The model returned a structurally valid plan whose validation step
+named no evidence capability, and one blank field ended a task the user had
+asked for, showing them an internal message.
+
+Fixed where the two disagree: an empty list now becomes `filesystem.read`, the
+evidence floor every sandbox criterion has, instead of a fatal error, and the
+planner prompt says each validation item must name at least one capability.
+`tests/test_task_worker.py` gained the regression.
+
+`minItems: 1` in the schema would stop the model from producing an empty list at
+all, and is deliberately not used: structured decoding on the deployed vLLM has
+never been tested with that keyword here, and an unsupported keyword would fail
+every planning request rather than one. The parse-level floor fixes the
+behaviour without touching the request.
+
 ## Gates ahead
 
-Deployment of `assistant-control` is a human gate. Live acceptance is another,
-and every run of it wakes a GPU. What it must show:
+The planner fix above is **not deployed**: the running control plane still ends
+that task at planning. Deploying it is a separate human gate.
 
-1. a slow answer visibly growing in one message;
-2. no duplicate final answer;
-3. a tool turn still showing activity, then streaming its answer;
-4. the stored conversation holding only complete canonical messages;
-5. conversation selection and persistence behaving exactly as before.
-
-Worth measuring at the same time, and separately from the above: provider TTFT
-against first visible preview. The routing call still runs before the
-conversational answer, so first-visible-token latency includes it until the
-single-call change in queue item 5.
+Never measured here: provider TTFT against first visible preview. The routing
+call still runs before the conversational answer, so first-visible-token latency
+includes it until the single-call change in queue item 5. That belongs to queue
+item 3, which owns measurement.
