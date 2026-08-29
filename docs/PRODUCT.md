@@ -93,6 +93,10 @@ Conversation history, long-term facts and resumable work are application data. T
 The current implementation therefore keeps:
 
 - conversation, summaries and facts behind `ConversationStore`;
+- which conversation a person is in, as a stored explicit choice rather than an
+  inference from recency: a person can start one, list recent ones and return to
+  an older one, and background activity in another conversation never moves
+  them;
 - in-flight LangGraph state in checkpointers;
 - deployed user workspaces on persistent storage;
 - the GPU endpoint as inference infrastructure rather than the owner of product state.

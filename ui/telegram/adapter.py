@@ -34,7 +34,7 @@ from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
 from app.attachments import AttachmentBytes, AttachmentError, admit_uploads
 from app.capabilities import Delivery
 from app.config import AgentSettings, TelegramSettings
-from app.memory import ConversationStore
+from app.memory import ConversationStore, Thread
 from app.models import ContentPart, Message
 from ui.telegram.api import (
     PRODUCT_COMMANDS,
@@ -42,9 +42,13 @@ from ui.telegram.api import (
     TelegramClient,
     TelegramError,
     approval_keyboard,
+    conversations_keyboard,
+    no_keyboard,
     settled_keyboard,
 )
 from ui.telegram.wire import (
+    CHATS_CALLBACK_PREFIX,
+    CHATS_CLOSE,
     SETTLED_CALLBACK_PREFIX,
     Incoming,
     needs_model,
@@ -193,23 +197,89 @@ def canonical_user_id(telegram_user_id: int) -> str:
 
 
 def current_thread(store: ConversationStore, user_id: str) -> str:
-    """This user's open conversation, created if they have none yet.
+    """The conversation this user chose, created if they have none yet.
 
-    The newest thread is the open one. `/new` therefore only has to create an
-    empty thread for it to become current, which keeps the mapping in the store
-    rather than in memory that a restart would lose.
+    Choosing is explicit and stored. It used to be inferred — the most recently
+    updated thread was the open one — which meant a conversation could take
+    somebody over merely by being written to, and made switching back to an
+    older one impossible to express.
+
+    A user who has threads but no recorded choice is one who was here before the
+    choice existed. Adopting their most recent thread hands them back the
+    conversation they were in, rather than opening an empty one beside it.
     """
 
+    chosen = store.active_thread(user_id)
+    if chosen is not None:
+        return chosen
     existing = store.threads(user_id)
     if existing:
+        store.set_active_thread(user_id, existing[0].id)
         return existing[0].id
     return start_thread(store, user_id)
 
 
 def start_thread(store: ConversationStore, user_id: str) -> str:
+    """Create a conversation and move the user into it."""
+
     thread_id = str(uuid.uuid4())
     store.ensure_thread(thread_id, user_id)
+    store.set_active_thread(user_id, thread_id)
     return thread_id
+
+
+def new_thread(store: ConversationStore, user_id: str) -> str:
+    """What `/new` does: a fresh conversation, unless there already is one.
+
+    An untouched conversation is what `/new` produces, so making another one is
+    a promise to the person that something happened when nothing did — and it
+    fills their list with identical unnamed entries they cannot tell apart.
+    """
+
+    chosen = store.active_thread(user_id)
+    if chosen is not None and store.message_count(chosen) == 0:
+        return chosen
+    return start_thread(store, user_id)
+
+
+# How many conversations `/chats` offers. Deliberately a plain cap rather than
+# pagination: this is a personal assistant, the list is ordered by recency, and
+# the tenth entry is already further back than anyone reaches for.
+CONVERSATION_CHOICES = 10
+
+# Telegram centres button text and squeezes it, so a long label becomes
+# unreadable rather than truncated. This is where it is cut instead.
+LABEL_CHARS = 40
+UNNAMED_CONVERSATION = "New conversation"
+
+
+def conversation_label(thread: Thread, *, chosen: bool) -> str:
+    """One line naming a conversation by how it began.
+
+    Model-written titles would read better and are deliberately not here: they
+    would mean a model call to look at a list, and looking at the list must
+    never wake anything.
+    """
+
+    opening = " ".join(thread.opening.split())
+    if len(opening) > LABEL_CHARS:
+        opening = opening[: LABEL_CHARS - 1].rstrip() + "…"
+    label = opening or UNNAMED_CONVERSATION
+    return f"● {label}" if chosen else label
+
+
+def conversation_choices(
+    store: ConversationStore, user_id: str, chosen: str
+) -> list[tuple[str, str]]:
+    """The buttons for `/chats`: label and callback data, most recent first."""
+
+    return [
+        (
+            conversation_label(thread, chosen=thread.id == chosen),
+            f"{CHATS_CALLBACK_PREFIX}{thread.id}",
+        )
+        for thread in store.threads(user_id)[:CONVERSATION_CHOICES]
+    ]
 
 
 # Telegram clears the indicator after about five seconds, so a turn that lasts
@@ -438,8 +508,19 @@ class TelegramAdapter:
             await self.client.send_message(incoming.chat_id, HELP)
             return
         if command == "/new":
-            start_thread(store, user_id)
-            await self.client.send_message(incoming.chat_id, "Started a new conversation.")
+            # Reusing an untouched conversation must not be reported as having
+            # made one: the chat would claim an action that did not happen.
+            before = store.active_thread(user_id)
+            started = new_thread(store, user_id)
+            await self.client.send_message(
+                incoming.chat_id,
+                "Started a new conversation."
+                if started != before
+                else "You are already in a new conversation.",
+            )
+            return
+        if command == "/chats":
+            await self._show_conversations(store, user_id, incoming.chat_id)
             return
         if command == "/can":
             # Answered from the wiring, not by the model. When the assistant
@@ -478,6 +559,66 @@ class TelegramAdapter:
             await self._start_task(harness, incoming.chat_id, thread_id, message, decision.task)
             return
         await self._answer(harness, incoming.chat_id, thread_id, message)
+
+    # --- choosing a conversation ---------------------------------------------
+
+    async def _show_conversations(
+        self, store: ConversationStore, user_id: str, chat_id: int
+    ) -> None:
+        """Offer this user their own recent conversations, and nobody else's.
+
+        `current_thread` first, so a person with no conversations is offered the
+        one they are about to write in rather than an empty list.
+        """
+
+        chosen = current_thread(store, user_id)
+        await self.client.send_message(
+            chat_id,
+            "Conversations",
+            conversations_keyboard(
+                conversation_choices(store, user_id, chosen), CHATS_CLOSE
+            ),
+        )
+
+    async def _choose_conversation(
+        self, store: ConversationStore, user_id: str, incoming: Incoming, data: str
+    ) -> None:
+        """Answer a press on the conversation list. Reads no model, wakes nothing."""
+
+        if data == CHATS_CLOSE:
+            if incoming.callback_id:
+                await self.client.answer_callback(incoming.callback_id)
+            if incoming.callback_message_id is not None:
+                await self.client.edit_reply_markup(
+                    incoming.chat_id, incoming.callback_message_id, no_keyboard()
+                )
+            return
+
+        thread_id = data[len(CHATS_CALLBACK_PREFIX) :]
+        try:
+            store.set_active_thread(user_id, thread_id)
+        except KeyError:
+            # Somebody else's conversation, or one that has since been deleted.
+            # The same answer for both, because the store deliberately does not
+            # distinguish them.
+            if incoming.callback_id:
+                await self.client.answer_callback(
+                    incoming.callback_id, "That conversation is not available"
+                )
+            return
+
+        if incoming.callback_id:
+            await self.client.answer_callback(incoming.callback_id, "Switched")
+        if incoming.callback_message_id is not None:
+            # The same message, remarked. Selecting does not touch `updated_at`,
+            # so the order the person is looking at does not move under them.
+            await self.client.edit_reply_markup(
+                incoming.chat_id,
+                incoming.callback_message_id,
+                conversations_keyboard(
+                    conversation_choices(store, user_id, thread_id), CHATS_CLOSE
+                ),
+            )
 
     # --- the answer branch ---------------------------------------------------
 
@@ -655,6 +796,15 @@ class TelegramAdapter:
                     incoming.callback_id,
                     "Already approved" if data.endswith("approved") else "Already rejected",
                 )
+            return
+
+        if data.startswith(CHATS_CALLBACK_PREFIX):
+            # Also before any thread is read or created: choosing a conversation
+            # is answered from storage, and a tap on this list must not become a
+            # reason to start one, resume a task or wake a GPU.
+            await self._choose_conversation(
+                harness.agent.store, user_id, incoming, data
+            )
             return
 
         thread_id = current_thread(harness.agent.store, user_id)

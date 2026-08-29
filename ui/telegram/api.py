@@ -219,6 +219,29 @@ def settled_keyboard(approved: bool, *, styled: bool = True) -> dict[str, Any]:
     return {"inline_keyboard": [[button]]}
 
 
+def conversations_keyboard(
+    choices: Iterable[tuple[str, str]], close: str
+) -> dict[str, Any]:
+    """The conversation list: one button per conversation, and a way out.
+
+    One per row rather than a grid, because the label is a sentence fragment
+    from the conversation itself and two of them side by side are unreadable on
+    a phone.
+    """
+
+    rows: list[list[dict[str, Any]]] = [
+        [{"text": label, "callback_data": data}] for label, data in choices
+    ]
+    rows.append([{"text": "Close", "callback_data": close}])
+    return {"inline_keyboard": rows}
+
+
+def no_keyboard() -> dict[str, Any]:
+    """What a list that has been closed leaves behind: its text, and no buttons."""
+
+    return {"inline_keyboard": []}
+
+
 @dataclass(frozen=True)
 class BotCommand:
     """One entry of Telegram's own command menu."""
@@ -234,6 +257,7 @@ class BotCommand:
 # halves of that to be true.
 PRODUCT_COMMANDS = (
     BotCommand("new", "Start a new conversation"),
+    BotCommand("chats", "Switch conversation"),
     BotCommand("can", "What I can see, hear, send and change"),
     BotCommand("stop", "Stop the task running in this chat"),
     BotCommand("help", "What this assistant is and how to use it"),

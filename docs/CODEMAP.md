@@ -60,6 +60,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change public web security/networking | `app/web.py` | `check_destination`, `fetch_page`, `render_page`, `render_locally` |
 | Change model-facing web tools | `app/tools/web.py` | `search_web`, `fetch_page`, `view_web_page`, tool builders |
 | Change Telegram behavior | `ui/telegram/adapter.py` | `TelegramAdapter`, `_on_message`, `_deliver`, `_on_callback` |
+| Change which conversation a person is in | `ui/telegram/adapter.py`, `app/memory/base.py` | `current_thread`, `new_thread`, `_choose_conversation`, `active_thread`, `set_active_thread` |
 | Change Telegram raw update parsing | `ui/telegram/wire.py` | `Incoming`, `read_update`, `needs_model` |
 | Change Telegram Markdown rendering | `ui/telegram/markdown.py` | `render`, `balanced` |
 | Change Telegram Bot API transport/presentation primitives | `ui/telegram/api.py` | `TelegramClient`, `Formatted`, `PRODUCT_COMMANDS` |

@@ -31,6 +31,7 @@ from app.models import Completion, ContentPart, Message, ToolCall
 from tests.fakes import ScriptedBackend, calls, says
 from ui.telegram.adapter import (
     HELP,
+    LABEL_CHARS,
     REFUSAL,
     TOOL_ACTIVITY,
     UNKNOWN_ACTIVITY,
@@ -38,10 +39,13 @@ from ui.telegram.adapter import (
     ToolActivity,
     canonical_user_id,
     current_thread,
+    spoken,
     start_thread,
     task_result_text,
 )
 from ui.telegram.wire import (
+    CHATS_CALLBACK_PREFIX,
+    CHATS_CLOSE,
     MODEL_FREE_COMMANDS,
     SETTLED_APPROVED,
     SETTLED_REJECTED,
@@ -194,6 +198,10 @@ def text_update(text: str, sender: int = ALLOWED, update_id: int = 1) -> dict[st
     }
 
 
+def said(text: str) -> Message:
+    return Message(role="user", content=[ContentPart(kind="text", text=text)])
+
+
 # --- identity ----------------------------------------------------------------
 
 
@@ -208,7 +216,7 @@ def test_a_telegram_id_is_mapped_not_adopted() -> None:
     assert derived != canonical_user_id(ALLOWED + 1)
 
 
-def test_the_open_conversation_is_the_newest_one(tmp_path: Path) -> None:
+def test_the_open_conversation_is_the_one_that_was_chosen(tmp_path: Path) -> None:
     with SqliteStore(tmp_path / "m.sqlite3") as store:
         user_id = canonical_user_id(ALLOWED)
         first = current_thread(store, user_id)
@@ -218,6 +226,43 @@ def test_the_open_conversation_is_the_newest_one(tmp_path: Path) -> None:
         second = start_thread(store, user_id)
         assert second != first
         assert current_thread(store, user_id) == second
+
+        store.set_active_thread(user_id, first)
+        assert current_thread(store, user_id) == first
+
+
+def test_activity_elsewhere_cannot_take_the_person_with_it(tmp_path: Path) -> None:
+    """Recency orders the list; it does not decide where the next message lands."""
+
+    with SqliteStore(tmp_path / "m.sqlite3") as store:
+        user_id = canonical_user_id(ALLOWED)
+        chosen = current_thread(store, user_id)
+        other = start_thread(store, user_id)
+        store.set_active_thread(user_id, chosen)
+
+        store.append(other, [said("later")], user_id)
+
+        assert store.threads(user_id)[0].id == other
+        assert current_thread(store, user_id) == chosen
+
+
+def test_a_conversation_from_before_the_choice_existed_is_adopted(
+    tmp_path: Path,
+) -> None:
+    """The upgrade path: a user with threads and no recorded choice.
+
+    Their most recent conversation is handed back to them, rather than an empty
+    one opened beside it.
+    """
+
+    with SqliteStore(tmp_path / "m.sqlite3") as store:
+        user_id = canonical_user_id(ALLOWED)
+        store.append("older", [said("earlier")], user_id)
+        store.append("newer", [said("later")], user_id)
+        assert store.active_thread(user_id) is None
+
+        assert current_thread(store, user_id) == "newer"
+        assert store.active_thread(user_id) == "newer"
 
 
 def test_a_new_conversation_survives_reopening_the_store(tmp_path: Path) -> None:
@@ -436,6 +481,183 @@ async def test_new_starts_a_separate_conversation(
         assert len(store.threads(canonical_user_id(ALLOWED))) == 2
     finally:
         store.close()
+
+
+# --- choosing a conversation -------------------------------------------------
+
+
+def chats_press(
+    data: str, sender: int = ALLOWED, message_id: int = 600
+) -> dict[str, Any]:
+    """A press on the conversation list."""
+
+    return {
+        "update_id": 3,
+        "callback_query": {
+            "id": "cb-chats",
+            "from": {"id": sender},
+            "data": data,
+            "message": {"chat": {"id": CHAT}, "message_id": message_id},
+        },
+    }
+
+
+def buttons(keyboard: dict[str, Any]) -> list[tuple[str, str]]:
+    return [
+        (button["text"], button["callback_data"])
+        for row in keyboard["inline_keyboard"]
+        for button in row
+    ]
+
+
+def threads_of(tmp_path: Path, sender: int = ALLOWED) -> list[Any]:
+    store = SqliteStore(tmp_path / "memory.sqlite3")
+    try:
+        return store.threads(canonical_user_id(sender))
+    finally:
+        store.close()
+
+
+async def test_chats_offers_this_person_s_conversations_newest_first(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    backend = ScriptedBackend(route(), says("first"), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("what is the plan"))
+    await adapter.handle_update(text_update("/new"))
+    await adapter.handle_update(text_update("/chats"))
+
+    assert telegram.sent[-1] == "Conversations"
+    labels = [label for label, _data in buttons(telegram.keyboards[-1])]
+    assert labels == ["● New conversation", "what is the plan", "Close"]
+
+
+async def test_a_long_opening_is_cut_rather_than_squeezed(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    opening = "the first sentence of a conversation that went on for a while"
+    backend = ScriptedBackend(route(), says("noted"), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update(opening))
+    await adapter.handle_update(text_update("/chats"))
+
+    label = buttons(telegram.keyboards[-1])[0][0]
+    assert label.startswith("● the first sentence")
+    assert label.endswith("…")
+    assert len(label) <= len("● ") + LABEL_CHARS
+
+
+async def test_choosing_a_conversation_sends_the_next_message_to_it(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """The acceptance the whole feature exists for."""
+
+    backend = ScriptedBackend(
+        route(),
+        says("first"),
+        route(),
+        says("second"),
+        route(),
+        says("third"),
+        default=says("summary"),
+    )
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("about the roadmap"))
+    await adapter.handle_update(text_update("/new"))
+    await adapter.handle_update(text_update("about the weather"))
+    older = next(
+        thread for thread in threads_of(tmp_path) if thread.opening == "about the roadmap"
+    )
+
+    await adapter.handle_update(chats_press(f"{CHATS_CALLBACK_PREFIX}{older.id}"))
+    await adapter.handle_update(text_update("and one more thing"))
+
+    store = SqliteStore(tmp_path / "memory.sqlite3")
+    try:
+        spoken_in_older = [
+            spoken(message) for message in store.messages(older.id) if message.role == "user"
+        ]
+        assert spoken_in_older == ["about the roadmap", "and one more thing"]
+        assert store.active_thread(canonical_user_id(ALLOWED)) == older.id
+    finally:
+        store.close()
+
+
+async def test_choosing_remarks_the_same_message_and_reads_no_model(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """A person browsing their conversations must not be able to wake a GPU."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/chats"))
+    _label, data = buttons(telegram.keyboards[-1])[0]
+    telegram.calls.clear()
+    await adapter.handle_update(chats_press(data))
+
+    methods = [method for method, _payload in telegram.calls]
+    assert methods == ["answerCallbackQuery", "editMessageReplyMarkup"]
+    edited = dict(telegram.calls)["editMessageReplyMarkup"]
+    assert edited["message_id"] == 600
+    assert buttons(edited["reply_markup"])[0][0].startswith("● ")
+
+
+async def test_closing_the_list_takes_the_buttons_away(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/chats"))
+    await adapter.handle_update(chats_press(CHATS_CLOSE))
+
+    edited = dict(telegram.calls)["editMessageReplyMarkup"]
+    assert edited["reply_markup"] == {"inline_keyboard": []}
+
+
+async def test_one_person_cannot_open_another_person_s_conversation(
+    telegram: FakeTelegram, tmp_path: Path
+) -> None:
+    """A callback carries a thread id, which is an identifier from outside."""
+
+    shared = TelegramSettings(token="test-token", allowed_users=f"{ALLOWED},{STRANGER}")
+    backend = ScriptedBackend(route(), says("first"), default=says("summary"))
+    adapter = build(telegram, shared, tmp_path, backend)
+
+    await adapter.handle_update(text_update("private matters"))
+    [private] = threads_of(tmp_path)
+
+    await adapter.handle_update(
+        chats_press(f"{CHATS_CALLBACK_PREFIX}{private.id}", sender=STRANGER)
+    )
+
+    answered = dict(telegram.calls)["answerCallbackQuery"]
+    assert "not available" in answered["text"]
+    store = SqliteStore(tmp_path / "memory.sqlite3")
+    try:
+        assert store.active_thread(canonical_user_id(STRANGER)) is None
+        assert store.threads(canonical_user_id(STRANGER)) == []
+    finally:
+        store.close()
+
+
+async def test_new_reuses_a_conversation_nothing_was_said_in(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Otherwise the list fills with identical entries nobody can tell apart."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/new"))
+    await adapter.handle_update(text_update("/new"))
+
+    assert len(threads_of(tmp_path)) == 1
+    assert telegram.sent == [
+        "Started a new conversation.",
+        "You are already in a new conversation.",
+    ]
 
 
 async def test_help_does_not_reach_the_model(
@@ -904,7 +1126,7 @@ def test_the_native_menu_is_the_product_and_not_the_diagnostics() -> None:
 
     offered = [entry.command for entry in PRODUCT_COMMANDS]
 
-    assert offered == ["new", "can", "stop", "help"]
+    assert offered == ["new", "chats", "can", "stop", "help"]
     assert "check" not in offered
     assert all(entry.description and entry.description[0].isupper() for entry in PRODUCT_COMMANDS)
     assert len(BOT_DESCRIPTION) <= 512
@@ -943,6 +1165,7 @@ async def test_publishing_the_profile_sends_exactly_the_product_menu(
     sent = dict(telegram.calls)
     assert [entry["command"] for entry in sent["setMyCommands"]["commands"]] == [
         "new",
+        "chats",
         "can",
         "stop",
         "help",
@@ -1230,6 +1453,16 @@ def test_a_settled_button_is_model_free_at_the_front_door() -> None:
         assert incoming is not None
         assert needs_model(incoming) is False
     assert needs_model(Incoming(CHAT, ALLOWED, "", callback_data="task:yes")) is True
+
+
+def test_a_conversation_button_is_model_free_at_the_front_door() -> None:
+    """Browsing your own conversations may not be charged to a GPU."""
+
+    for data in (CHATS_CLOSE, f"{CHATS_CALLBACK_PREFIX}0f0e0d0c-0b0a-0908-0706-050403020100"):
+        incoming = read_update(chats_press(data))
+        assert incoming is not None
+        assert needs_model(incoming) is False
+    assert needs_model(Incoming(CHAT, ALLOWED, "/chats")) is False
 
 
 def plan_completion() -> Completion:

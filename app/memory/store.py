@@ -32,7 +32,7 @@ from app.models import Message
 # Bumped whenever the schema changes. `PRAGMA user_version` is SQLite's own
 # integer on the file, so the database states its shape rather than the code
 # guessing it from which columns happen to exist.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
@@ -62,6 +62,19 @@ CREATE TABLE IF NOT EXISTS facts (
     user_id    TEXT NOT NULL DEFAULT 'local-user',
     thread_id  TEXT,
     created_at TEXT NOT NULL
+);
+
+-- Which conversation each person is in. Separate from `threads` because it is
+-- a fact about the person, not about any one conversation, and because a
+-- column on `threads` would need every other row cleared to move somebody.
+--
+-- `ON DELETE SET NULL` is what keeps a choice from outliving its conversation:
+-- deleting a thread leaves the chooser with no choice, which the reader below
+-- turns back into "not chosen yet".
+CREATE TABLE IF NOT EXISTS user_state (
+    user_id          TEXT PRIMARY KEY,
+    active_thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL,
+    updated_at       TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS threads_by_user ON threads(user_id);
@@ -105,6 +118,12 @@ def migrate(db: sqlite3.Connection) -> int:
     and facts had owners. In the second case every existing row belongs to the
     person who has been using the local profile all along, so the backfill hands
     them to `LOCAL_USER_ID` rather than inventing an owner or refusing to open.
+
+    Version 1 is that database with no record of which conversation anyone is
+    in. Nothing existing changes shape, so re-running the schema is the whole
+    migration: the new table appears and every conversation is still there. A
+    person who was in the middle of one is given it back by the interface, which
+    adopts their most recent thread the first time it finds no choice recorded.
     """
 
     found = int(db.execute("PRAGMA user_version").fetchone()[0])
@@ -200,8 +219,43 @@ class SqliteStore(ConversationStore):
                 "UPDATE facts SET thread_id = NULL WHERE thread_id = ?", (thread_id,)
             )
             self._db.execute("DELETE FROM messages WHERE thread_id = ?", (thread_id,))
+            # `user_state` clears itself through its foreign key.
             self._db.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
         return True
+
+    # --- the chosen conversation ---------------------------------------------
+
+    def active_thread(self, user_id: str) -> str | None:
+        """The conversation this user chose, if it is still theirs and still there."""
+
+        row = self._db.execute(
+            "SELECT s.active_thread_id AS id FROM user_state s"
+            " JOIN threads t ON t.id = s.active_thread_id AND t.user_id = s.user_id"
+            " WHERE s.user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return None if row is None else row["id"]
+
+    def set_active_thread(self, user_id: str, thread_id: str) -> None:
+        """Record the chosen conversation, refusing one that is not this user's.
+
+        The ownership test is the `WHERE EXISTS` of the same statement rather
+        than a read before it: a check that is a separate statement is a check
+        another writer can invalidate between the two.
+        """
+
+        with self._db:
+            cursor = self._db.execute(
+                "INSERT INTO user_state (user_id, active_thread_id, updated_at)"
+                " SELECT ?, ?, ? WHERE EXISTS"
+                " (SELECT 1 FROM threads WHERE id = ? AND user_id = ?)"
+                " ON CONFLICT(user_id) DO UPDATE SET"
+                "  active_thread_id = excluded.active_thread_id,"
+                "  updated_at = excluded.updated_at",
+                (user_id, thread_id, now(), thread_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"no such thread for this user: {thread_id!r}")
 
     # --- messages ------------------------------------------------------------
 

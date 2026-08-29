@@ -110,6 +110,18 @@ Telegram `telegram_updates` inbox table
 
 The normal runtime intentionally does not run these migrations on each request.
 
+Store schema version is **2** in both implementations (`PRAGMA user_version` for
+SQLite, the `schema_version` row for PostgreSQL). Version 2 adds the `user_state`
+table, which records which conversation each person is in. The step from 1 to 2
+is additive: re-running the schema is the whole migration and no conversation is
+touched, so no reset is needed to adopt it.
+
+Resetting a store is a separate destructive operation and stays behind the human
+gate for deleting or migrating a populated database. There is no application
+path to it: `PostgresStore.drop_schema` refuses `public`, and the local file is
+deleted by hand. Nothing about the local or deployed store is reset from a
+worker starting up.
+
 Primary configuration comes from `AgentSettings` / `AGENT_DATABASE_URL`.
 
 The script also has an `--alternate` path for the configured alternate database used by latency comparison work.
@@ -122,8 +134,8 @@ Telegram supports two transport modes that are mutually exclusive from Telegram'
 
 **Owner:** `tools/telegram_profile.py`.
 
-Preview the intended description and `/new`, `/can`, `/stop`, `/help` menu
-without contacting Telegram:
+Preview the intended description and `/new`, `/chats`, `/can`, `/stop`, `/help`
+menu without contacting Telegram:
 
 ```text
 .venv\Scripts\python.exe tools/telegram_profile.py

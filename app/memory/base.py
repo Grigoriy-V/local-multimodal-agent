@@ -14,6 +14,10 @@ Operations keyed by a thread do not repeat the user: a thread belongs to exactly
 one owner from the moment it is created, so the thread identifier already
 carries the scope. `thread_owner` is how a caller checks that ownership before
 acting on a thread it was handed.
+
+`set_active_thread` is the exception that proves it. It names both, because it
+is handed a thread identifier that came from outside — a pressed button — and
+the pairing is exactly what it has to verify rather than assume.
 """
 
 from __future__ import annotations
@@ -68,7 +72,12 @@ class ConversationStore(ABC):
 
     @abstractmethod
     def threads(self, user_id: str) -> list[Thread]:
-        """This user's conversations, most recently touched first."""
+        """This user's conversations, most recently touched first.
+
+        The order describes activity and nothing else. Which conversation the
+        person is in is `active_thread`, so writing to one thread cannot move
+        somebody into it.
+        """
 
     @abstractmethod
     def thread_owner(self, thread_id: str) -> str | None:
@@ -76,7 +85,30 @@ class ConversationStore(ABC):
 
     @abstractmethod
     def delete_thread(self, thread_id: str) -> bool:
-        """Delete one conversation, preserving separately approved facts."""
+        """Delete one conversation, preserving separately approved facts.
+
+        A user whose chosen conversation was the deleted one is left with no
+        choice rather than a dangling one.
+        """
+
+    # --- the chosen conversation ---------------------------------------------
+
+    @abstractmethod
+    def active_thread(self, user_id: str) -> str | None:
+        """The conversation this user chose, or `None` if they have not chosen.
+
+        `None` is also the answer once the chosen conversation is gone, so a
+        caller never has to handle an identifier that no longer resolves.
+        """
+
+    @abstractmethod
+    def set_active_thread(self, user_id: str, thread_id: str) -> None:
+        """Record which conversation this user is in.
+
+        Raises `KeyError` when the thread does not exist *or* belongs to
+        somebody else. One answer for both on purpose: distinguishing them
+        would tell a caller that a thread it may not have exists.
+        """
 
     # --- messages ------------------------------------------------------------
 

@@ -28,6 +28,11 @@ SETTLED_CALLBACK_PREFIX = "settled:"
 SETTLED_APPROVED = f"{SETTLED_CALLBACK_PREFIX}approved"
 SETTLED_REJECTED = f"{SETTLED_CALLBACK_PREFIX}rejected"
 
+# Choosing which conversation to be in. The rest of the data is a thread id,
+# which is a UUID and fits Telegram's 64-byte callback limit with room to spare.
+CHATS_CALLBACK_PREFIX = "chats:"
+CHATS_CLOSE = f"{CHATS_CALLBACK_PREFIX}close"
+
 # The commands the adapter answers from wiring and storage, without a model.
 # Listing the exceptions rather than the rule is the safe direction: anything
 # new needs the model until someone says otherwise, and the cost of being wrong
@@ -38,7 +43,16 @@ SETTLED_REJECTED = f"{SETTLED_CALLBACK_PREFIX}rejected"
 #
 # `tests/test_telegram_adapter.py` answers each of these with a backend that
 # raises on any call, so this list cannot quietly stop being true.
-MODEL_FREE_COMMANDS = frozenset({"/start", "/help", "/new", "/can", "/check", "/stop"})
+MODEL_FREE_COMMANDS = frozenset(
+    {"/start", "/help", "/new", "/chats", "/can", "/check", "/stop"}
+)
+
+# Buttons that are answered from storage. A settled status button describes
+# something that already happened; a conversation button changes which thread
+# the next message goes to. Neither reads a model, and neither may be paid for
+# with a GPU wake — a person browsing their own conversations would otherwise
+# start the expensive half of the system with every tap.
+MODEL_FREE_CALLBACK_PREFIXES = (SETTLED_CALLBACK_PREFIX, CHATS_CALLBACK_PREFIX)
 
 
 @dataclass(frozen=True)
@@ -137,8 +151,7 @@ def needs_model(incoming: Incoming) -> bool:
 
     if incoming.callback_data is not None:
         # An approval button resumes a task, and resuming one calls the model.
-        # A settled status button is the exception: the action it describes has
-        # already happened, so pressing it changes nothing and must not be paid
-        # for with a GPU wake.
-        return not incoming.callback_data.startswith(SETTLED_CALLBACK_PREFIX)
+        # The prefixes above are the exceptions, and they are exceptions the
+        # adapter answers entirely from storage.
+        return not incoming.callback_data.startswith(MODEL_FREE_CALLBACK_PREFIXES)
     return incoming.text.strip().lower() not in MODEL_FREE_COMMANDS

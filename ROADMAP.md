@@ -6,9 +6,10 @@
 
 **Current approved step:** queue 2, Baseline chat product and live evidence,
 with the 2A source implementation verified offline and deployed to
-`assistant-control`, and the bot profile and native command menu published. No
-live Telegram acceptance has run. Every live product-runtime run remains a
-separate human gate.
+`assistant-control`. **2A is closed**, confirmed by the human on 2026-08-29 after
+live checks; the scenario detail is not recorded in this file. Conversation
+selection followed it and is deployed, with its menu entry published and no live
+turn behind it yet. Every live product-runtime run remains a separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -158,9 +159,26 @@ Verified platform facts and cold-start evidence remain in
      description and native command menu. This is implementation and deployment
      evidence, not live product acceptance:
      `reports/2026-08-29_v2_baseline_chat_product_offline.md`.
-   - Close 2A with small live scenarios covering onboarding, formatting, tool
-     activity, inline-action settlement, capability truth and an ordinary
-     tool-capable answer.
+   - **2A closed 2026-08-29.** The human confirmed the live scenarios —
+     onboarding, formatting, tool activity, inline-action settlement, capability
+     truth and an ordinary tool-capable answer — after running them in the real
+     chat. Their detail was not written here.
+
+   - **Conversation selection. Implemented and verified offline 2026-08-29.**
+     The conversation a person is in is a stored explicit choice instead of
+     "the most recently updated thread". `/new` creates and activates one, and
+     reuses an untouched one rather than making a second; `/chats` lists their
+     ten most recent by opening text and switches on a press, editing the same
+     message; the store verifies ownership in the statement that writes the
+     choice. Schema version 2 in both implementations adds `user_state`
+     additively, so no database was reset. Offline suite 678 passed / 1 skipped;
+     the store contract 42 passed including PostgreSQL. **Deployed 2026-08-29**:
+     the Neon schema migrated to version 2 with its 5 conversations intact,
+     `assistant-control` deployed in 20.4 s, and the native menu published with
+     `/chats`. No deployed function was called and no live turn has used it, so
+     this is deployment evidence, not product acceptance.
+     `reports/2026-08-29_v2_conversation_selection.md`,
+     task input `docs/telegram_conversation_selection_task.md`.
 
    - **2B — real answer streaming, deferred.** Telegram drafts are only the
      display half. Do not bypass the agent graph or fake streaming from the

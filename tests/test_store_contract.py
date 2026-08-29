@@ -215,6 +215,88 @@ def test_an_unknown_thread_has_no_summary(store: ConversationStore) -> None:
     assert store.summary("never-seen") == (None, 0)
 
 
+# --- the chosen conversation -------------------------------------------------
+
+
+def test_nobody_is_in_a_conversation_until_they_choose(store: ConversationStore) -> None:
+    store.append("t1", [user("hello")], ALICE)
+
+    assert store.active_thread(ALICE) is None
+
+
+def test_the_choice_is_remembered(store: ConversationStore) -> None:
+    store.append("t1", [user("hello")], ALICE)
+
+    store.set_active_thread(ALICE, "t1")
+
+    assert store.active_thread(ALICE) == "t1"
+
+
+def test_writing_to_another_conversation_does_not_move_anyone(
+    store: ConversationStore,
+) -> None:
+    """The whole point of storing the choice: recency is not selection.
+
+    An older conversation someone deliberately returned to must stay theirs even
+    while a background write touches a newer one.
+    """
+
+    store.append("old", [user("earlier")], ALICE)
+    store.append("new", [user("later")], ALICE)
+    store.set_active_thread(ALICE, "old")
+
+    store.append("new", [user("later still")], ALICE)
+
+    assert [thread.id for thread in store.threads(ALICE)] == ["new", "old"]
+    assert store.active_thread(ALICE) == "old"
+
+
+def test_one_user_cannot_choose_another_user_s_conversation(
+    store: ConversationStore,
+) -> None:
+    store.append("hers", [user("alice writes")], ALICE)
+    store.append("his", [user("bob writes")], BOB)
+    store.set_active_thread(BOB, "his")
+
+    with pytest.raises(KeyError):
+        store.set_active_thread(BOB, "hers")
+
+    assert store.active_thread(BOB) == "his"
+
+
+def test_choosing_a_conversation_that_does_not_exist_is_refused(
+    store: ConversationStore,
+) -> None:
+    """Indistinguishable from choosing somebody else's, deliberately."""
+
+    with pytest.raises(KeyError):
+        store.set_active_thread(ALICE, "never-seen")
+
+    assert store.active_thread(ALICE) is None
+
+
+def test_deleting_the_chosen_conversation_leaves_no_choice(
+    store: ConversationStore,
+) -> None:
+    """Rather than an identifier that no longer resolves."""
+
+    store.append("t1", [user("hello")], ALICE)
+    store.set_active_thread(ALICE, "t1")
+
+    assert store.delete_thread("t1") is True
+    assert store.active_thread(ALICE) is None
+
+
+def test_the_choice_survives_reopening(tmp_path: Path) -> None:
+    path = tmp_path / "chosen.sqlite3"
+    with SqliteStore(path) as first:
+        first.append("hers", [user("alice writes")], ALICE)
+        first.set_active_thread(ALICE, "hers")
+
+    with SqliteStore(path) as second:
+        assert second.active_thread(ALICE) == "hers"
+
+
 # --- durability --------------------------------------------------------------
 
 

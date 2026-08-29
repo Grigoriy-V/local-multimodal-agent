@@ -49,7 +49,7 @@ from app.models import Message
 # Bumped whenever the schema changes, and stored in the database rather than
 # inferred from which columns happen to exist. Postgres has no `user_version`,
 # so the row below is this project's own equivalent.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -87,6 +87,15 @@ CREATE TABLE IF NOT EXISTS facts (
     search     tsvector GENERATED ALWAYS AS (to_tsvector('simple', text)) STORED
 );
 
+-- Which conversation each person is in. A fact about the person rather than
+-- about any one conversation, and `ON DELETE SET NULL` keeps a choice from
+-- outliving the thread it points at.
+CREATE TABLE IF NOT EXISTS user_state (
+    user_id          TEXT PRIMARY KEY,
+    active_thread_id TEXT REFERENCES threads (id) ON DELETE SET NULL,
+    updated_at       TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS threads_by_user ON threads (user_id);
 CREATE INDEX IF NOT EXISTS facts_by_user ON facts (user_id);
 CREATE INDEX IF NOT EXISTS facts_search ON facts USING GIN (search);
@@ -114,9 +123,11 @@ def match_query(query: str) -> str:
 def migrate(connection: psycopg.Connection, schema: str) -> int:
     """Bring the database up to `SCHEMA_VERSION`, returning the version found.
 
-    Version 0 is an empty database. Unlike the SQLite store there is no earlier
-    shape to carry forward: this implementation has never been deployed, so the
-    first migration is the schema itself.
+    Version 0 is an empty database. Version 1 is a deployed one that has no
+    record of which conversation anyone is in; the step to 2 only adds a table,
+    so re-running the schema is the whole migration and no conversation is
+    touched. This runs from `tools/setup_control_plane.py`, never from a worker
+    starting up.
     """
 
     with connection.cursor() as cursor:
@@ -274,9 +285,46 @@ class PostgresStore(ConversationStore):
                 "UPDATE facts SET thread_id = NULL WHERE thread_id = %s", (thread_id,)
             )
             cursor.execute("DELETE FROM messages WHERE thread_id = %s", (thread_id,))
+            # `user_state` clears itself through its foreign key.
             cursor.execute("DELETE FROM threads WHERE id = %s", (thread_id,))
             cursor.connection.commit()
         return True
+
+    # --- the chosen conversation ---------------------------------------------
+
+    def active_thread(self, user_id: str) -> str | None:
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT s.active_thread_id AS id FROM user_state s"
+                " JOIN threads t ON t.id = s.active_thread_id AND t.user_id = s.user_id"
+                " WHERE s.user_id = %s",
+                (user_id,),
+            )
+            row = cursor.fetchone()
+        return None if row is None else row["id"]
+
+    def set_active_thread(self, user_id: str, thread_id: str) -> None:
+        """Record the chosen conversation, refusing one that is not this user's.
+
+        The ownership test is the `WHERE EXISTS` of this statement rather than a
+        read before it, so no other writer can slip between the check and the
+        write.
+        """
+
+        with self._cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO user_state (user_id, active_thread_id, updated_at)"
+                " SELECT %s, %s, %s WHERE EXISTS"
+                " (SELECT 1 FROM threads WHERE id = %s AND user_id = %s)"
+                " ON CONFLICT (user_id) DO UPDATE SET"
+                "  active_thread_id = EXCLUDED.active_thread_id,"
+                "  updated_at = EXCLUDED.updated_at",
+                (user_id, thread_id, now(), thread_id, user_id),
+            )
+            written = cursor.rowcount
+            cursor.connection.commit()
+        if written == 0:
+            raise KeyError(f"no such thread for this user: {thread_id!r}")
 
     # --- messages ------------------------------------------------------------
 
