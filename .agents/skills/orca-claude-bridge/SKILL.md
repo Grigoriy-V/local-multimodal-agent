@@ -1,15 +1,19 @@
 ---
 name: orca-claude-bridge
-description: Run Claude Code as a supervised Orca worker only when the human explicitly asks Codex to pass work to Claude, then wait for and verify the result.
+description: Run Claude Code as a supervised Orca worker for a large cohesive source-code implementation batch, or when the human explicitly requests Claude, then wait for and verify the result.
 ---
 
 # Orca Claude Bridge
 
-Use this skill only after an explicit human request to pass the current work to
-Claude, use Claude through Orca, or invoke `$orca-claude-bridge`. Do not infer
-delegation merely because Claude might be useful. One explicit request
-authorizes one bounded supervised workflow, including fresh correction Tasks
-needed to satisfy the original brief, but not later or widened work.
+Use this skill when the repository routing contract assigns a large cohesive
+source-code implementation batch to Claude, or when the human explicitly asks
+to pass the current work to Claude, use Claude through Orca, or invoke
+`$orca-claude-bridge`. Keep architecture, planning, canonical documents,
+inspection, review, verification and small localized implementation in Codex
+unless the human says otherwise. One routed task authorizes one bounded
+supervised workflow, including fresh correction Tasks needed to satisfy the
+original brief, but not later or widened work. Tell the human whenever the
+Claude route is used.
 
 Use the installed `orchestration` and `orca-cli` skills. Before issuing Orca
 commands, load the version-matched live guide with

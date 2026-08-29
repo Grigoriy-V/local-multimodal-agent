@@ -22,18 +22,26 @@ smaller implementation that preserves the product rather than a smaller product.
 
 ## Execution
 
-Work directly as one project agent by default. Do not delegate or create
-subagents unless the human explicitly asks to pass the current work to Claude,
-use Claude through Orca, or invokes `$orca-claude-bridge`. The human controls
-direction.
+Codex is the primary project agent and Supervisor. It owns architecture,
+planning, canonical documents, repository inspection, review, verification and
+the final report. It also implements small, localized code changes itself.
 
-### Optional Claude implementation through Orca
+Delegate a large cohesive source-code implementation batch to Claude through
+Orca by default unless the human says to keep that task in Codex. "Large" means
+the task requires a substantial package of implementation and tests, typically
+across several modules or an architectural boundary; do not delegate merely
+because a task is difficult. Analysis, design, documentation, code review and
+small fixes stay with Codex unless the human asks otherwise. Do not create
+other subagents. The human controls direction and may override this routing for
+any task.
 
-An explicit request to pass work to Claude authorizes one supervised development
-workflow for that bounded task, including fresh Claude correction Tasks needed
-to satisfy the original brief. It does not authorize later or widened work,
-product-runtime workers, model endpoints, containers, deployments, or other
-externally consequential actions.
+### Claude implementation through Orca
+
+The routing rule above authorizes one supervised Claude development workflow for
+each qualifying bounded implementation task, including fresh Claude correction
+Tasks needed to satisfy the original brief. Tell the human when this routing is
+being used. It does not authorize widened work, product-runtime workers, model
+endpoints, containers, deployments, or other externally consequential actions.
 
 For that workflow the primary Codex chat becomes the Supervisor. It owns
 inspection, discussion, planning, the Worker brief, review, and the final report,
