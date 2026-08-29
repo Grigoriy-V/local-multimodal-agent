@@ -101,11 +101,33 @@ would offer a command the running bot answers by handing it to the model.
 No deployed function was called: `self_test` and any live turn start a worker,
 which is its own gate.
 
-## Not verified
+## Accepted live, 2026-08-29
 
-- **Live.** No real Telegram turn has listed or switched a conversation. The
-  deployed code and the deployed schema are in place; that is deployment
-  evidence, not product acceptance.
+The human switched conversation in the real chat and sent a message. Read out of
+the deployed database afterwards — timings, positions and counts only, no message
+text:
+
+```text
+user_state: one row
+  user d992be3b -> thread 37b95a2d, chosen 2026-08-29T04:53:51+00:00
+
+before the test    37b95a2d  last activity 2026-08-28T20:51:10   36 messages
+                   05c36e0c  last activity 2026-08-29T03:47:58   12 messages  <- newest
+after the test     37b95a2d  positions 36-37 written at 04:54:40
+```
+
+The conversation chosen was almost seven hours behind the newest one. Under the
+rule this replaced, the message would have gone to `05c36e0c`; it went where the
+person put it. Three further readings from the same query:
+
+- the `user_state` row is stamped at the moment of the press, not the moment of
+  the message, so the choice went through PostgreSQL rather than living in a
+  container that disappears between turns;
+- the thread count did not change, so listing and pressing created nothing;
+- no empty thread exists, so `/new` left no unnamed entries behind.
+
+Not covered: the rendered list itself was not observed here, only its effect —
+the labels and the `●` marker were seen by the human in the chat.
 
 ## Files
 

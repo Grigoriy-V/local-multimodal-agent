@@ -4,12 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** queue 2, Baseline chat product and live evidence,
-with the 2A source implementation verified offline and deployed to
-`assistant-control`. **2A is closed**, confirmed by the human on 2026-08-29 after
-live checks; the scenario detail is not recorded in this file. Conversation
-selection followed it and is deployed, with its menu entry published and no live
-turn behind it yet. Every live product-runtime run remains a separate human gate.
+**Current approved step:** none. The baseline chat product is closed; the queue's
+first item, real answer streaming, is deferred, so item 3 is next and still needs
+approval. Every live product-runtime run remains a separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -30,8 +27,9 @@ documents.
 
 ## Current state
 
-- Local database at schema version 1; conversations, memory and files scoped by
-  user. Deployed database is **Neon**, reached through its pooled endpoint.
+- Both databases at schema version 2; conversations, memory and files scoped by
+  user, and the conversation each person is in stored as their own choice.
+  Deployed database is **Neon**, reached through its pooled endpoint.
 - `assistant-llm-v2` at
   `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run` is the primary
   model deployment, reached with `MODEL_AUTH_STYLE=modal_proxy`. The original
@@ -123,69 +121,27 @@ Verified platform facts and cold-start evidence remain in
   close the product capability.
   `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`,
   `reports/2026-08-29_v2_web_capability.md`.
+- **2. Baseline chat product, accepted live.** Onboarding, Telegram Markdown with
+  a plain fallback, transient English tool activity and truthful inline
+  settlement were confirmed in the real chat. Conversation selection then
+  replaced "the newest thread is the open one" with a stored choice: `/new`,
+  `/chats`, and ownership verified where the choice is written. It was deployed
+  with an additive schema-2 migration that left the existing conversations in
+  place, and accepted live — a conversation nearly seven hours behind the newest
+  was chosen at 04:53:51 and the next message landed in it at 04:54:40, where the
+  old rule would have sent it elsewhere. Real answer streaming was carved out and
+  stays in the queue.
+  `reports/2026-08-29_v2_baseline_chat_product_offline.md`,
+  `reports/2026-08-29_v2_conversation_selection.md`.
 
 ### Queue
 
-2. **Baseline chat product and live evidence.** Confirm in the real interface
-   that the assistant answers a capability question correctly, `/can` agrees,
-   and ordinary plans and results are readable. This closes the basic chatbot
-   experience; serious work on the harness and agent loop belongs to item 4.
-   Read and use `docs/telegram_baseline_chat_product.md` as the working design
-   input for analysis, implementation and acceptance throughout this item. It
-   supplements, but does not override, the roadmap or canonical documents.
-
-   - **2A — Telegram UX baseline.** Present concise onboarding through the bot
-     description, a native `/new`, `/can`, `/stop`, `/help` menu with readable
-     descriptions, and a compact rich-text `/start` / `/help`; keep `/check` as
-     a diagnostic. Keep ordinary Markdown as canonical model text and render a
-     small useful subset safely in Telegram, with complete plain-text delivery
-     on malformed markup, parser refusal or unsafe message splitting.
-   - Replace raw tool names in normal chat with concise English activity labels
-     and reuse/edit one transient status message per turn where practical;
-     unknown tools degrade to `Working…`, independently of answer language.
-   - Make inline actions reusable and truthful: after the application transition
-     succeeds, edit the same message to one settled Approved/Rejected status
-     button with semantic text and optional success/danger styling. Settled
-     callbacks are model-free no-ops and cannot repeat the action; failures must
-     never appear settled. Preserve the existing structured task plan/result UI
-     through this common interaction behavior.
-   - **Implemented, verified offline, deployed and published 2026-08-29.** The native profile/menu
-     publisher, shared Telegram Markdown rendering with plain fallback, transient
-     English tool activity, and reusable truthful inline settlement are present.
-     The focused Telegram checks passed, and the full offline suite was 660
-     passed / 1 skipped before the final localized correction; its focused
-     recheck was 102 passed. `assistant-control` was then deployed without a
-     live function call, and Telegram accepted the bot description, short
-     description and native command menu. This is implementation and deployment
-     evidence, not live product acceptance:
-     `reports/2026-08-29_v2_baseline_chat_product_offline.md`.
-   - **2A closed 2026-08-29.** The human confirmed the live scenarios —
-     onboarding, formatting, tool activity, inline-action settlement, capability
-     truth and an ordinary tool-capable answer — after running them in the real
-     chat. Their detail was not written here.
-
-   - **Conversation selection. Implemented and verified offline 2026-08-29.**
-     The conversation a person is in is a stored explicit choice instead of
-     "the most recently updated thread". `/new` creates and activates one, and
-     reuses an untouched one rather than making a second; `/chats` lists their
-     ten most recent by opening text and switches on a press, editing the same
-     message; the store verifies ownership in the statement that writes the
-     choice. Schema version 2 in both implementations adds `user_state`
-     additively, so no database was reset. Offline suite 678 passed / 1 skipped;
-     the store contract 42 passed including PostgreSQL. **Deployed 2026-08-29**:
-     the Neon schema migrated to version 2 with its 5 conversations intact,
-     `assistant-control` deployed in 20.4 s, and the native menu published with
-     `/chats`. No deployed function was called and no live turn has used it, so
-     this is deployment evidence, not product acceptance.
-     `reports/2026-08-29_v2_conversation_selection.md`,
-     task input `docs/telegram_conversation_selection_task.md`.
-
-   - **2B — real answer streaming, deferred.** Telegram drafts are only the
-     display half. Do not bypass the agent graph or fake streaming from the
-     adapter: the normal runtime must preserve tool calls, tool results, usage,
-     finish reason, persistence and the same final assistant message. The
-     current `ModelBackend.stream` contract drops `tool_calls` and `usage`, so
-     this remains after the single-call change in item 5 unless reprioritized.
+2. **Real answer streaming, deferred.** Telegram drafts are only the display
+   half. Do not bypass the agent graph or fake streaming from the adapter: the
+   normal runtime must preserve tool calls, tool results, usage, finish reason,
+   persistence and the same final assistant message. The current
+   `ModelBackend.stream` contract drops `tool_calls` and `usage`, so this remains
+   after the single-call change in item 5 unless reprioritized.
 
 3. **Baseline measurement, metrics and logs.** Make both product behaviour and
    its cost observable before changing the agent loop. Today's 15-17 tok/s
