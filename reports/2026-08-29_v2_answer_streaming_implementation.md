@@ -156,8 +156,9 @@ behaviour without touching the request.
 
 ## Gates ahead
 
-The planner fix above is **not deployed**: the running control plane still ends
-that task at planning. Deploying it is a separate human gate.
+The planner fix was deployed the same day: `assistant-control` redeployed in
+21.1 s, five functions re-created. It was not exercised afterwards — the human
+asked for the deploy without a live check — so it is live and untried.
 
 Never measured here: provider TTFT against first visible preview. The routing
 call still runs before the conversational answer, so first-visible-token latency

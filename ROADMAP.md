@@ -5,9 +5,8 @@
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** none. Real answer streaming is deployed and accepted
-live, so item 3 is next and still needs approval. One fix waits for a deploy:
-the task route's planning failure, below. Every live product-runtime run remains
-a separate human gate.
+live, so item 3 is next and still needs approval. Every live product-runtime run
+remains a separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -140,8 +139,8 @@ Verified platform facts and cold-start evidence remain in
   separate events; Telegram shows one message being written and finalizes it in
   place. Only finished messages are stored, and `AGENT_STREAM_ANSWERS` turns it
   off in configuration. The same session exposed an unrelated task-route defect:
-  a plan whose validation step named no capability ended the task. Fixed, and
-  **not yet deployed**.
+  a plan whose validation step named no capability ended the task. Fixed and
+  deployed, not yet exercised live.
   `reports/2026-08-29_v2_answer_streaming_preparation.md`,
   `reports/2026-08-29_v2_answer_streaming_implementation.md`.
 
