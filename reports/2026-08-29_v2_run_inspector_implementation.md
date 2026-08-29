@@ -190,8 +190,11 @@ All three were found by reading real output, not by the suite.
 
 Each has a test. The suite is **768 passed, 1 skipped**.
 
-These fixes are not deployed: the acceptance above was produced by the code as
-deployed, and redeploying is a separate gate.
+The acceptance above was produced by the code as deployed at the time. The three
+fixes went out in a second deploy on 2026-08-30, 22.1 s, five functions
+re-created, no GPU touched. The first visibility numbers of turns recorded
+before that deploy stay as they were measured: a run is evidence of what
+happened, not of what the code does now.
 
 ## The primary metric, closing item 3
 

@@ -4,10 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. Item 3 is closed and moved to Done. Three
-inspector and visibility defects the live run exposed are fixed offline and
-await a deploy. Item 4, the agent harness and loop, is next and needs approval.
-Every live product-runtime run remains a separate human gate.
+**Current approved step:** none. Item 3 is closed and moved to Done, and the
+three defects its live run exposed are fixed and deployed. Item 4, the agent
+harness and loop, is next and needs approval. Every live product-runtime run
+remains a separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
