@@ -22,6 +22,7 @@ same call to a spawned worker and answer Telegram immediately.
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager, suppress
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.harness import GeneralHarness
-from app.agent.runtime import create_agent
+from app.agent.runtime import AssistantDelta, create_agent
 from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
 from app.attachments import AttachmentBytes, AttachmentError, admit_uploads
 from app.capabilities import Delivery
@@ -188,6 +189,121 @@ class ToolActivity:
         message_id, self.message_id, self._shown = self.message_id, None, None
         if message_id is not None:
             await self.client.delete_message(self.chat_id, message_id)
+
+
+# One edit per token would be refused by Telegram long before it would be
+# readable. A second is roughly how fast an answer can be re-read anyway.
+PREVIEW_INTERVAL = 1.0
+# Below this, a preview is a bubble containing one word that is about to be
+# replaced. The wait costs nothing: the deltas that follow arrive in the same
+# breath, and a short answer simply arrives whole.
+PREVIEW_START_CHARS = 24
+
+
+class AnswerPreview:
+    """The answer, shown in one message while it is still being written.
+
+    The same message is edited and then finalized, rather than a preview being
+    replaced by a fresh bubble: the person watches one answer appear once. What
+    is shown is the model's raw text, because Markdown that is half-written is
+    not valid markup — the rendering happens at the end, when the text is whole.
+
+    Nothing here can fail a turn. A preview that could not be sent or edited is
+    a turn that answers the ordinary way, which is why every failure ends with
+    this object standing aside rather than raising.
+    """
+
+    def __init__(
+        self,
+        client: TelegramClient,
+        chat_id: int,
+        interval: float = PREVIEW_INTERVAL,
+        now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.client = client
+        self.chat_id = chat_id
+        self.interval = interval
+        self._now = now
+        self.text = ""
+        self.message_id: int | None = None
+        self._shown = ""
+        self._edited_at = 0.0
+        self._stood_aside = False
+
+    async def add(self, delta: str) -> bool:
+        """Take one delta. True when this is the moment the preview appeared."""
+
+        self.text += delta
+        if self._stood_aside:
+            return False
+        if self.message_id is None:
+            if len(self.text.strip()) < PREVIEW_START_CHARS:
+                return False
+            return await self._send()
+        if self._now() - self._edited_at >= self.interval:
+            await self._edit()
+        return False
+
+    async def _send(self) -> bool:
+        try:
+            sent = await self.client.send_message(self.chat_id, self.text)
+            self.message_id = int(sent["message_id"]) if sent else None
+        except (TelegramError, KeyError, TypeError, ValueError):
+            self._stood_aside = True
+            return False
+        self._shown, self._edited_at = self.text, self._now()
+        return self.message_id is not None
+
+    async def _edit(self) -> None:
+        if self.text == self._shown or self.message_id is None:
+            return
+        try:
+            await self.client.edit_message(self.chat_id, self.message_id, self.text)
+        except (TelegramError, ValueError):
+            self._stood_aside = True
+            return
+        self._shown, self._edited_at = self.text, self._now()
+
+    async def finish(self, body: str) -> bool:
+        """Make the preview the final answer. False means it must be sent normally.
+
+        A failed final edit takes the half-written preview out of the chat: an
+        answer arriving twice, once truncated, is worse than one arriving once.
+        """
+
+        message_id = self.message_id
+        if message_id is None:
+            self.reset()
+            return False
+        try:
+            await self.client.replace_message(
+                self.chat_id, message_id, Formatted.from_markdown(body)
+            )
+        except TelegramError:
+            await self.discard()
+            return False
+        self.reset()
+        return True
+
+    async def discard(self) -> None:
+        """Take an unfinished preview out of the chat. Never raises."""
+
+        message_id = self.message_id
+        self.reset()
+        if message_id is not None:
+            await self.client.delete_message(self.chat_id, message_id)
+
+    def reset(self) -> None:
+        """Forget this answer, so the next model call gets its own preview.
+
+        One turn can produce several assistant messages — text, then a tool,
+        then more text — and each is its own message in the chat.
+        """
+
+        self.text = self._shown = ""
+        self.message_id = None
+        self._edited_at = 0.0
+        self._stood_aside = False
 
 
 def canonical_user_id(telegram_user_id: int) -> str:
@@ -626,17 +742,30 @@ class TelegramAdapter:
         self, harness: GeneralHarness, chat_id: int, thread_id: str, message: Message
     ) -> None:
         activity = ToolActivity(self.client, chat_id)
+        preview = AnswerPreview(self.client, chat_id)
         try:
-            async for produced in harness.agent.steps(thread_id, message):
-                await self._deliver(chat_id, produced, activity)
+            async for event in harness.agent.events(thread_id, message):
+                if isinstance(event, AssistantDelta):
+                    if await preview.add(event.text):
+                        # There is something to read now, so the status has
+                        # done its job; it goes before the answer grows under it.
+                        await activity.clear()
+                    continue
+                await self._deliver(chat_id, event.message, activity, preview)
         finally:
             # Including when the turn failed: the last thing a person should be
-            # left looking at is not "Reading page…" on a turn that stopped.
+            # left looking at is not "Reading page…" on a turn that stopped, and
+            # not half an answer that is never going to be finished.
             await activity.clear()
+            await preview.discard()
         await self._ask_pending_calls(harness, chat_id, thread_id)
 
     async def _deliver(
-        self, chat_id: int, produced: Message, activity: ToolActivity | None = None
+        self,
+        chat_id: int,
+        produced: Message,
+        activity: ToolActivity | None = None,
+        preview: AnswerPreview | None = None,
     ) -> None:
         body = spoken(produced)
         if produced.role == "tool":
@@ -654,8 +783,15 @@ class TelegramAdapter:
             if activity is not None:
                 await activity.clear()
             # The canonical answer is the model's ordinary Markdown, which is
-            # what the store keeps. This renders that same text for Telegram.
-            await self.client.send_message(chat_id, Formatted.from_markdown(body))
+            # what the store keeps. This renders that same text for Telegram —
+            # into the message the person already watched being written, when
+            # there was one, and as a new message when there was not.
+            if preview is None or not await preview.finish(body):
+                await self.client.send_message(chat_id, Formatted.from_markdown(body))
+        elif preview is not None:
+            # A completion with tool calls and no text: whatever was previewed
+            # is not an answer, so it does not stay in the chat.
+            await preview.discard()
         await self._send_media(chat_id, produced)
         if produced.tool_calls:
             labels = activity_labels(produced.tool_calls)
@@ -819,14 +955,21 @@ class TelegramAdapter:
             approved = verdict == "yes"
             settled = False
             activity = ToolActivity(self.client, incoming.chat_id)
+            preview = AnswerPreview(self.client, incoming.chat_id)
             try:
-                async for produced in harness.agent.resume(thread_id, {call_id: approved}):
+                events = harness.agent.resume_events(thread_id, {call_id: approved})
+                async for event in events:
                     if not settled:
                         await self._settle(incoming, approved=approved)
                         settled = True
-                    await self._deliver(incoming.chat_id, produced, activity)
+                    if isinstance(event, AssistantDelta):
+                        if await preview.add(event.text):
+                            await activity.clear()
+                        continue
+                    await self._deliver(incoming.chat_id, event.message, activity, preview)
             finally:
                 await activity.clear()
+                await preview.discard()
             if not settled:
                 await self._settle(incoming, approved=approved)
             await self._ask_pending_calls(harness, incoming.chat_id, thread_id)

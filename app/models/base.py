@@ -91,6 +91,29 @@ class Completion:
     finish_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class TextDelta:
+    """A piece of assistant text, as it arrives."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class CompletionDone:
+    """The finished result, identical to what `invoke` would have returned.
+
+    A stream that only yielded text would lose tool calls, usage and the finish
+    reason, which is the difference between showing an answer being written and
+    running the agent on the stream. Every stream ends with exactly one of
+    these, so a caller never has to reassemble anything itself.
+    """
+
+    completion: Completion
+
+
+StreamEvent = TextDelta | CompletionDone
+
+
 class ModelBackend(ABC):
     """A provider-agnostic model.
 
@@ -114,8 +137,13 @@ class ModelBackend(ABC):
         messages: Sequence[Message],
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
-    ) -> AsyncIterator[str]:
-        """Yield text chunks as they arrive."""
+    ) -> AsyncIterator[StreamEvent]:
+        """Yield `TextDelta` as text arrives, then one final `CompletionDone`.
+
+        The events carry everything `invoke` carries, so a caller can both show
+        the answer being written and go on running the agent — tool calls,
+        usage and finish reason included — from the same request.
+        """
 
     async def warm(self) -> bool:
         """Start the model serving, without waiting for it to be ready.

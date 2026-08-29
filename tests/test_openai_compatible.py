@@ -16,11 +16,12 @@ import pytest
 
 from app.attachments import MEDIA_KINDS
 from app.config import ModelSettings
-from app.models import ContentPart, Message, ToolCall
+from app.models import CompletionDone, ContentPart, Message, TextDelta, ToolCall
 from app.models.openai_compatible import (
     BackendError,
     ContextOverflowError,
     OpenAICompatibleBackend,
+    StreamedCompletion,
     build_messages,
     is_context_overflow,
     parse_completion,
@@ -306,19 +307,148 @@ def test_an_empty_response_is_refused() -> None:
 
 
 @pytest.mark.parametrize(
-    ("line", "expected"),
-    [
-        ('data: {"choices": [{"delta": {"content": "one"}}]}', "one"),
-        ('data: {"choices": [{"delta": {}}]}', None),
-        ('data: {"choices": []}', None),
-        ("data: [DONE]", None),
-        ("data:", None),
-        ("", None),
-        (": keep-alive", None),
-    ],
+    "line",
+    ["data: [DONE]", "data:", "", ": keep-alive"],
 )
-def test_stream_lines_yield_only_text(line: str, expected: str | None) -> None:
-    assert parse_stream_line(line) == expected
+def test_lines_that_are_not_chunks_carry_nothing(line: str) -> None:
+    assert parse_stream_line(line) is None
+
+
+def test_a_chunk_without_choices_is_still_a_chunk() -> None:
+    """Usage arrives that way, and dropping it would drop the turn's size."""
+
+    line = 'data: {"choices": [], "usage": {"prompt_tokens": 3}}'
+
+    assert parse_stream_line(line) == {"choices": [], "usage": {"prompt_tokens": 3}}
+
+
+# --- assembling a streamed completion ----------------------------------------
+#
+# The chunk shapes below were read off the deployed vLLM, not invented:
+# reports/2026-08-29_v2_answer_streaming_preparation.md.
+
+
+def assemble(chunks: list[dict[str, Any]]) -> Any:
+    streamed = StreamedCompletion()
+    text = "".join(streamed.add(chunk) for chunk in chunks)
+    result = streamed.result()
+    assert text == result.text  # what was shown is what was assembled
+    return result
+
+
+def delta(payload: dict[str, Any], finish: str | None = None) -> dict[str, Any]:
+    return {"choices": [{"delta": payload, "finish_reason": finish}]}
+
+
+def test_streamed_text_assembles_into_the_same_answer() -> None:
+    result = assemble(
+        [
+            delta({"role": "assistant", "content": ""}),
+            delta({"content": "One"}),
+            delta({"content": ", two"}),
+            delta({}, finish="stop"),
+            {"choices": [], "usage": {"prompt_tokens": 21, "completion_tokens": 4}},
+        ]
+    )
+
+    assert result.text == "One, two"
+    assert result.tool_calls == ()
+    assert result.finish_reason == "stop"
+    assert result.usage.input_tokens == 21
+    assert result.usage.output_tokens == 4
+
+
+def test_a_fragmented_tool_call_assembles_into_one_call() -> None:
+    result = assemble(
+        [
+            delta({"role": "assistant", "content": ""}),
+            delta(
+                {
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "index": 0,
+                            "function": {"name": "get_weather"},
+                        }
+                    ]
+                }
+            ),
+            delta({"tool_calls": [{"index": 0, "function": {"arguments": '{"city": "'}}]}),
+            delta({"tool_calls": [{"index": 0, "function": {"arguments": "Paris"}}]}),
+            delta({"tool_calls": [{"index": 0, "function": {"arguments": '"}'}}]}),
+            delta({}, finish="tool_calls"),
+        ]
+    )
+
+    assert result.text == ""
+    assert result.tool_calls == (
+        ToolCall(id="call-1", name="get_weather", arguments={"city": "Paris"}),
+    )
+    assert result.finish_reason == "tool_calls"
+
+
+def test_several_tool_calls_keep_their_positions() -> None:
+    """Fragments interleave, so position is the only thing tying them together."""
+
+    result = assemble(
+        [
+            delta({"tool_calls": [{"id": "a", "index": 0, "function": {"name": "first"}}]}),
+            delta({"tool_calls": [{"id": "b", "index": 1, "function": {"name": "second"}}]}),
+            delta({"tool_calls": [{"index": 1, "function": {"arguments": '{"n": 2}'}}]}),
+            delta({"tool_calls": [{"index": 0, "function": {"arguments": '{"n": 1}'}}]}),
+        ]
+    )
+
+    assert [(call.name, call.arguments) for call in result.tool_calls] == [
+        ("first", {"n": 1}),
+        ("second", {"n": 2}),
+    ]
+
+
+def test_text_and_a_tool_call_can_arrive_from_one_response() -> None:
+    result = assemble(
+        [
+            delta({"content": "Paris is lovely."}),
+            delta({"tool_calls": [{"id": "a", "index": 0, "function": {"name": "get_weather"}}]}),
+            delta({"tool_calls": [{"index": 0, "function": {"arguments": "{}"}}]}),
+            delta({}, finish="tool_calls"),
+        ]
+    )
+
+    assert result.text == "Paris is lovely."
+    assert result.tool_calls[0].name == "get_weather"
+
+
+def test_a_streamed_tool_call_without_a_name_is_refused() -> None:
+    streamed = StreamedCompletion()
+    streamed.add(delta({"tool_calls": [{"index": 0, "function": {"arguments": "{}"}}]}))
+
+    with pytest.raises(BackendError, match="without a name"):
+        streamed.result()
+
+
+def test_streamed_arguments_that_are_not_json_are_refused() -> None:
+    streamed = StreamedCompletion()
+    streamed.add(delta({"tool_calls": [{"id": "a", "index": 0, "function": {"name": "cut"}}]}))
+    streamed.add(delta({"tool_calls": [{"index": 0, "function": {"arguments": "{oops"}}]}))
+
+    with pytest.raises(BackendError, match="invalid JSON"):
+        streamed.result()
+
+
+def test_reasoning_is_not_shown_and_does_not_break_assembly() -> None:
+    """A server may split reasoning out; `invoke` ignores it and so does this."""
+
+    result = assemble(
+        [
+            delta({"reasoning_content": "thinking about it"}),
+            delta({"content": "Four."}),
+            delta({}, finish="stop"),
+        ]
+    )
+
+    assert result.text == "Four."
 
 
 # --- requests ----------------------------------------------------------------
@@ -392,11 +522,16 @@ async def test_a_request_without_tools_omits_them() -> None:
     assert "response_format" not in seen
 
 
-async def test_stream_yields_the_text_chunks_in_order() -> None:
-    body = "".join(
-        f'data: {json.dumps({"choices": [{"delta": {"content": word}}]})}\n\n'
-        for word in ("one", " two", " three")
-    ) + "data: [DONE]\n\n"
+async def test_stream_yields_text_in_order_and_then_the_completion() -> None:
+    body = (
+        "".join(
+            f"data: {json.dumps(delta({'content': word}))}\n\n"
+            for word in ("one", " two", " three")
+        )
+        + f"data: {json.dumps(delta({}, finish='stop'))}\n\n"
+        + 'data: {"choices": [], "usage": {"prompt_tokens": 7, "completion_tokens": 3}}\n\n'
+        + "data: [DONE]\n\n"
+    )
     seen: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -404,10 +539,44 @@ async def test_stream_yields_the_text_chunks_in_order() -> None:
         return httpx.Response(200, content=body.encode())
 
     async with backend(handler) as client:
-        chunks = [chunk async for chunk in client.stream([Message(role="user", content=[text_part()])])]
+        events = [
+            event async for event in client.stream([Message(role="user", content=[text_part()])])
+        ]
 
-    assert chunks == ["one", " two", " three"]
+    assert events[:-1] == [TextDelta("one"), TextDelta(" two"), TextDelta(" three")]
+    assert isinstance(events[-1], CompletionDone)
+    assert events[-1].completion.text == "one two three"
+    assert events[-1].completion.usage.input_tokens == 7
+    assert events[-1].completion.finish_reason == "stop"
     assert seen["stream"] is True
+    # Usage is not sent unless it is asked for, and a turn of unknown size
+    # cannot be folded or reported.
+    assert seen["stream_options"] == {"include_usage": True}
+
+
+async def test_a_broken_stream_is_not_retried_and_yields_no_completion() -> None:
+    """Half an answer has already been read; sending it twice is worse."""
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+
+        async def content() -> Any:
+            yield f"data: {json.dumps(delta({'content': 'partial'}))}\n\n".encode()
+            raise httpx.ReadError("the connection dropped")
+
+        return httpx.Response(200, content=content())
+
+    seen: list[Any] = []
+    async with backend(handler) as client:
+        with pytest.raises(httpx.ReadError):
+            async for event in client.stream([Message(role="user", content=[text_part()])]):
+                seen.append(event)
+
+    assert seen == [TextDelta("partial")]
+    assert attempts == 1
 
 
 async def test_an_http_error_becomes_a_backend_error() -> None:

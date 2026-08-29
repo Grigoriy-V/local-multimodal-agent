@@ -389,6 +389,58 @@ class TelegramClient:
             return packed
         return [Piece(piece) for piece in split_message(text) or [""]]
 
+    async def replace_message(
+        self, chat_id: int, message_id: int, text: str | Formatted
+    ) -> None:
+        """Turn a message already in the chat into a finished, rendered one.
+
+        This is how a preview a person watched grow becomes the answer itself
+        instead of a second bubble appearing underneath it. Everything the
+        answer needs beyond one message is sent after it, in order, so the
+        length rules are the same ones `send_message` follows.
+
+        Raises rather than degrading silently: the caller has a whole answer to
+        fall back on, and would otherwise have no way to know it is needed.
+        """
+
+        pieces = [piece for piece in self._render(text) if piece.text]
+        if not pieces:
+            return
+        await self._edit_piece(chat_id, message_id, pieces[0])
+        for piece in pieces[1:]:
+            payload: dict[str, Any] = {"chat_id": chat_id, "text": piece.text}
+            if piece.plain is not None:
+                payload["parse_mode"] = "HTML"
+            await self._send_piece(payload, piece)
+
+    async def _edit_piece(self, chat_id: int, message_id: int, piece: Piece) -> None:
+        """Edit one piece into place, with the same fallbacks a send has."""
+
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": piece.text,
+        }
+        if piece.plain is not None:
+            payload["parse_mode"] = "HTML"
+        try:
+            await self._call("editMessageText", payload)
+            return
+        except TelegramError as error:
+            # An answer whose rendering matches what was already shown is
+            # finished, not failed: Telegram simply has nothing to change.
+            if "not modified" in str(error).lower():
+                return
+            if piece.plain is None or not is_parse_refusal(error):
+                raise
+        plain = dict(payload, text=piece.plain)
+        plain.pop("parse_mode", None)
+        try:
+            await self._call("editMessageText", plain)
+        except TelegramError as error:
+            if "not modified" not in str(error).lower():
+                raise
+
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> None:
         """Replace a message's text, ignoring Telegram's "nothing changed" refusal."""
 

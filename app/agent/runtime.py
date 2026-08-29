@@ -17,7 +17,7 @@ from typing import Any
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
-from app.agent.graph import build_agent, latest_text
+from app.agent.graph import ASSISTANT_DELTA, build_agent, latest_text
 from app.checkpoints import CheckpointHandle
 from app.capabilities import (
     CHAT_DELIVERY,
@@ -58,6 +58,23 @@ CHECKPOINT_TYPES = [
     ("app.agent.task_graph", "Evaluation"),
     ("app.agent.task_graph", "TaskOutcome"),
 ]
+
+
+@dataclass(frozen=True)
+class AssistantDelta:
+    """Part of an answer being written. Presentation only; never stored."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class MessageProduced:
+    """A message the graph finished. This is what the conversation keeps."""
+
+    message: Message
+
+
+AgentEvent = AssistantDelta | MessageProduced
 
 
 @dataclass(frozen=True)
@@ -104,8 +121,10 @@ class Agent:
         capability_grant: CapabilityGrant | None = None,
         user_id: str = LOCAL_USER_ID,
         delivery: Delivery = CHAT_DELIVERY,
+        stream_answers: bool = True,
     ) -> None:
         self.backend = backend
+        self.stream_answers = stream_answers
         self.store = store
         self.user_id = user_id
         self.workspace = Path(workspace).resolve()
@@ -229,37 +248,67 @@ class Agent:
                 replace(self.policy, max_input_tokens=await self.budget()),
                 prompt,
                 await self._checkpointer(),
+                self.stream_answers,
             )
         return self._graphs[thread_id]
 
-    async def _run(self, thread_id: str, command: Any) -> AsyncIterator[Message]:
-        """Drive the graph and yield only what the conversation gained.
+    async def _run(self, thread_id: str, command: Any) -> AsyncIterator[AgentEvent]:
+        """Drive the graph and report what the turn produced, as it happens.
+
+        Two kinds of thing come out, and the difference is the whole point:
+        `AssistantDelta` is text on its way to being an answer, presentation
+        only and never stored, while `MessageProduced` is a message the graph
+        finished and the store will keep. An interface may show the first and
+        must act on the second.
 
         An interrupt arrives here as a patch that is not a node's messages; the
-        caller learns about it from `pending`, which keeps this an iterator of
-        messages rather than of two different things.
+        caller learns about it from `pending`, which keeps this stream to what
+        the conversation gained.
         """
 
         graph = await self._graph(thread_id)
         config = {"configurable": {"thread_id": thread_id}}
-        async for update in graph.astream(command, config=config, stream_mode="updates"):
-            for node, patch in update.items():
+        stream = graph.astream(command, config=config, stream_mode=["updates", "custom"])
+        async for mode, payload in stream:
+            if mode == "custom":
+                text = (payload or {}).get(ASSISTANT_DELTA) if isinstance(payload, dict) else None
+                if text:
+                    yield AssistantDelta(text)
+                continue
+            for node, patch in payload.items():
                 if node.startswith("__") or not isinstance(patch, dict):
                     continue
                 usage = patch.get("usage")
                 if usage is not None:
                     self._usage = usage
                 for produced in patch.get("messages") or []:
-                    yield produced
+                    yield MessageProduced(produced)
+
+    async def events(self, thread_id: str, message: Message) -> AsyncIterator[AgentEvent]:
+        """Run one turn, reporting deltas and finished messages as they occur."""
+
+        async for event in self._run(thread_id, {"thread_id": thread_id, "messages": [message]}):
+            yield event
+
+    async def resume_events(
+        self, thread_id: str, answers: dict[str, bool]
+    ) -> AsyncIterator[AgentEvent]:
+        """Answer the pending question and carry on, reporting the same events."""
+
+        async for event in self._run(thread_id, Command(resume=answers)):
+            yield event
 
     async def steps(self, thread_id: str, message: Message) -> AsyncIterator[Message]:
         """Yield each message as its node finishes, so a UI can show the work.
 
-        The user's own message is not yielded: the caller already has it.
+        The user's own message is not yielded: the caller already has it. An
+        interface that only wants finished messages keeps using this and never
+        learns that a turn is streamed at all.
         """
 
-        async for produced in self._run(thread_id, {"thread_id": thread_id, "messages": [message]}):
-            yield produced
+        async for event in self.events(thread_id, message):
+            if isinstance(event, MessageProduced):
+                yield event.message
 
     def context_prompt(
         self,
@@ -297,8 +346,9 @@ class Agent:
     async def resume(self, thread_id: str, answers: dict[str, bool]) -> AsyncIterator[Message]:
         """Answer the pending question — call id to approved — and carry on."""
 
-        async for produced in self._run(thread_id, Command(resume=answers)):
-            yield produced
+        async for event in self.resume_events(thread_id, answers):
+            if isinstance(event, MessageProduced):
+                yield event.message
 
     async def answer(self, thread_id: str, message: Message) -> list[Message]:
         """Run one turn and return everything the agent produced for it.
@@ -390,4 +440,5 @@ def create_agent(
         context_fraction=agent_settings.context_fraction,
         user_id=user_id,
         delivery=delivery,
+        stream_answers=agent_settings.stream_answers,
     )

@@ -16,21 +16,28 @@ from typing import Annotated, Any
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import interrupt
+from langgraph.types import StreamWriter, interrupt
 
 from app.context import Context, ContextPolicy, fold_older_messages, load_turn_context
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import ConversationStore
 from app.models import (
+    BackendError,
     Completion,
     ContentPart,
     ContextOverflowError,
     Message,
     ModelBackend,
+    TextDelta,
     ToolCall,
     Usage,
 )
 from app.tools import Toolbox
+
+# The key a text delta travels under on LangGraph's custom stream channel. The
+# channel carries anything, so the runtime and the graph have to agree on one
+# name; nothing else in this project writes to it.
+ASSISTANT_DELTA = "assistant_delta"
 
 
 def extend(current: list[Message], incoming: list[Message]) -> list[Message]:
@@ -133,6 +140,7 @@ def build_agent(
     policy: ContextPolicy | None = None,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     checkpointer: BaseCheckpointSaver | None = None,
+    stream_answers: bool = True,
 ) -> CompiledStateGraph:
     """Compile the graph. The loop's only exit is an answer without tool calls.
 
@@ -162,9 +170,31 @@ def build_agent(
     def load(state: AgentState) -> dict[str, Context]:
         return {"context": assemble_context(state)}
 
-    async def call_model(state: AgentState) -> dict[str, Any]:
+    async def complete(prompt: list[Message], writer: StreamWriter) -> Completion:
+        """One model call, streamed or not, with the same result either way.
+
+        Streaming is how the answer becomes visible while it is being written;
+        it must not change what the graph does with it. The events carry the
+        whole completion, so tool calls, usage and the finish reason survive the
+        stream and the rest of this node cannot tell which path it took.
+        """
+
+        if not stream_answers:
+            return await backend.invoke(prompt, tools=schemas)
+        completion: Completion | None = None
+        async for event in backend.stream(prompt, tools=schemas):
+            if isinstance(event, TextDelta):
+                # Presentation only. Nothing on this channel is ever persisted.
+                writer({ASSISTANT_DELTA: event.text})
+            else:
+                completion = event.completion
+        if completion is None:
+            raise BackendError("the model stream ended without a completion")
+        return completion
+
+    async def call_model(state: AgentState, writer: StreamWriter) -> dict[str, Any]:
         try:
-            completion = await backend.invoke(state.context.prompt(state.messages), tools=schemas)
+            completion = await complete(state.context.prompt(state.messages), writer)
         except ContextOverflowError:
             try:
                 folded = await fold_older_messages(
@@ -177,9 +207,7 @@ def build_agent(
 
             recovered = assemble_context(state)
             try:
-                completion = await backend.invoke(
-                    recovered.prompt(state.messages), tools=schemas
-                )
+                completion = await complete(recovered.prompt(state.messages), writer)
             except ContextOverflowError:
                 return {
                     "context": recovered,

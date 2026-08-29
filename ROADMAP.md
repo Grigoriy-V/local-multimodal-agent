@@ -4,9 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. The baseline chat product is closed; the queue's
-first item, real answer streaming, is deferred, so item 3 is next and still needs
-approval. Every live product-runtime run remains a separate human gate.
+**Current approved step:** queue item 2, real answer streaming. Implemented and
+tested offline; deployment and live acceptance are each still their own human
+gate, as is every live product-runtime run.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -136,15 +136,16 @@ Verified platform facts and cold-start evidence remain in
 
 ### Queue
 
-2. **Real answer streaming, deferred.** Telegram drafts are only the display
-   half. Do not bypass the agent graph or fake streaming from the adapter: the
-   normal runtime must preserve tool calls, tool results, usage, finish reason,
-   persistence and the same final assistant message. The current
-   `ModelBackend.stream` contract drops `tool_calls` and `usage`, so this remains
-   after the single-call change in item 5 unless reprioritized. Prepared, not
-   approved: `docs/telegram_real_answer_streaming.md` is the task input and
+2. **Real answer streaming — built, awaiting deployment and live acceptance.**
+   The backend stream now carries tool calls, usage and finish reason; the model
+   node streams through the graph rather than around it; the runtime reports
+   deltas and finished messages as separate events; Telegram shows one message
+   being written and finalizes it in place. Only finished messages are stored.
+   `AGENT_STREAM_ANSWERS` turns it off in configuration.
+   `docs/telegram_real_answer_streaming.md` is the task input;
    `reports/2026-08-29_v2_answer_streaming_preparation.md` holds the live stream
-   probe and the proposed plan. Implementation needs its own start signal.
+   probe, `reports/2026-08-29_v2_answer_streaming_implementation.md` the offline
+   evidence and what live acceptance must show.
 
 3. **Baseline measurement, metrics and logs.** Make both product behaviour and
    its cost observable before changing the agent loop. Today's 15-17 tok/s

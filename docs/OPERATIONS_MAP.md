@@ -48,11 +48,17 @@ All normal application environment configuration belongs to one of these setting
 | Prefix | Class | Purpose |
 |---|---|---|
 | `MODEL_` | `ModelSettings` | model endpoint, model name, auth, timeouts/generation |
-| `AGENT_` | `AgentSettings` | DB/store, checkpoints, workspace, context policy |
+| `AGENT_` | `AgentSettings` | DB/store, checkpoints, workspace, context policy, answer streaming |
 | `TELEGRAM_` | `TelegramSettings` | Bot API, webhook secret, access policy |
 | `WEB_` | `WebSettings` | search, direct fetch, renderer/browser configuration |
 
 Local example/defaults: `.env.example`.
+
+`AGENT_STREAM_ANSWERS` is on by default: the conversational model call is
+streamed, and Telegram shows the answer in one message while it is written.
+Setting it to `false` and redeploying returns the turn to a single complete
+request, without reverting code. It changes what is shown, never what is stored:
+only finished messages reach the store either way.
 
 Application code should not invent a second environment-loading path when the value belongs in one of these classes.
 

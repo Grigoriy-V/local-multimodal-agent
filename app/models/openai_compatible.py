@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from typing import Any, Self
 
 import httpx
@@ -19,10 +20,13 @@ from app.config import ModelSettings
 from app.models.base import (
     BackendError,
     Completion,
+    CompletionDone,
     ContentPart,
     ContextOverflowError,
     Message,
     ModelBackend,
+    StreamEvent,
+    TextDelta,
     ToolCall,
     Usage,
 )
@@ -124,6 +128,25 @@ def build_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
     return payload
 
 
+def parse_arguments(name: str, arguments: str) -> dict[str, Any]:
+    """Read one tool call's arguments, which arrive as a JSON string."""
+
+    try:
+        parsed = json.loads(arguments or "{}")
+    except json.JSONDecodeError as error:
+        raise BackendError(f"tool call {name} sent invalid JSON: {arguments!r}") from error
+    if not isinstance(parsed, dict):
+        raise BackendError(f"tool call {name} sent arguments that are not an object: {parsed!r}")
+    return parsed
+
+
+def parse_usage(usage: dict[str, Any] | None) -> Usage:
+    return Usage(
+        input_tokens=(usage or {}).get("prompt_tokens"),
+        output_tokens=(usage or {}).get("completion_tokens"),
+    )
+
+
 def parse_completion(payload: dict[str, Any]) -> Completion:
     """Turn one chat-completion response into a `Completion`."""
 
@@ -139,23 +162,18 @@ def parse_completion(payload: dict[str, Any]) -> Completion:
         name = function.get("name")
         if not name:
             raise BackendError(f"a tool call arrived without a name: {raw}")
-        arguments = function.get("arguments") or "{}"
-        try:
-            parsed = json.loads(arguments)
-        except json.JSONDecodeError as error:
-            raise BackendError(f"tool call {name} sent invalid JSON: {arguments!r}") from error
-        if not isinstance(parsed, dict):
-            raise BackendError(f"tool call {name} sent arguments that are not an object: {parsed!r}")
-        calls.append(ToolCall(id=raw.get("id") or "", name=name, arguments=parsed))
+        calls.append(
+            ToolCall(
+                id=raw.get("id") or "",
+                name=name,
+                arguments=parse_arguments(name, function.get("arguments") or "{}"),
+            )
+        )
 
-    usage = payload.get("usage") or {}
     return Completion(
         text=message.get("content") or "",
         tool_calls=tuple(calls),
-        usage=Usage(
-            input_tokens=usage.get("prompt_tokens"),
-            output_tokens=usage.get("completion_tokens"),
-        ),
+        usage=parse_usage(payload.get("usage")),
         finish_reason=choice.get("finish_reason"),
     )
 
@@ -175,8 +193,12 @@ def parse_context_limit(payload: dict[str, Any], name: str) -> int | None:
     return None
 
 
-def parse_stream_line(line: str) -> str | None:
-    """Return the text carried by one server-sent-events line, if it carries any."""
+def parse_stream_line(line: str) -> dict[str, Any] | None:
+    """Return the chunk one server-sent-events line carries, if it carries one.
+
+    Keep-alives, blank lines and the closing `[DONE]` are not chunks. A chunk
+    with an empty `choices` list is: that is how usage arrives.
+    """
 
     if not line.startswith("data:"):
         return None
@@ -184,10 +206,100 @@ def parse_stream_line(line: str) -> str | None:
     if not data or data == "[DONE]":
         return None
     chunk = json.loads(data)
-    choices = chunk.get("choices") or []
-    if not choices:
-        return None
-    return (choices[0].get("delta") or {}).get("content") or None
+    return chunk if isinstance(chunk, dict) else None
+
+
+@dataclass
+class _PartialCall:
+    """One tool call while its fragments are still arriving."""
+
+    id: str = ""
+    name: str = ""
+    arguments: str = ""
+
+
+class StreamedCompletion:
+    """Assembles streamed chunks into the result `invoke` would have returned.
+
+    Separate from the HTTP loop so the shapes a real server sends can be tested
+    without one. Those shapes were read off the deployed vLLM rather than
+    assumed; `reports/2026-08-29_v2_answer_streaming_preparation.md` records
+    them. Three of them decide this code:
+
+    - a tool call is opened by a chunk carrying `id` and `name` at an `index`,
+      and continued by chunks carrying only that `index` and a slice of the
+      argument string, so the JSON is parsed once at the end and never per
+      chunk;
+    - `finish_reason` arrives alone, in a chunk whose delta is empty;
+    - `usage` arrives after that, in a chunk with no choices at all, and only
+      because the request asked for it.
+    """
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._calls: dict[int, _PartialCall] = {}
+        self._usage = Usage()
+        self._finish_reason: str | None = None
+
+    def add(self, chunk: dict[str, Any]) -> str:
+        """Take one chunk; return the assistant text it carried, if any.
+
+        An empty string is the common answer: the opening chunk carries only a
+        role, and every tool-call chunk carries no text at all.
+        """
+
+        if chunk.get("usage"):
+            self._usage = parse_usage(chunk["usage"])
+        choices = chunk.get("choices") or []
+        if not choices:
+            return ""
+        choice = choices[0]
+        if choice.get("finish_reason"):
+            self._finish_reason = choice["finish_reason"]
+        delta = choice.get("delta") or {}
+        for raw in delta.get("tool_calls") or ():
+            self._fragment(raw)
+        # Reasoning, where a server separates it, is deliberately not returned:
+        # `invoke` reads `content` alone, and a preview must show what the
+        # answer will say, not the model thinking about it.
+        text = delta.get("content") or ""
+        if text:
+            self._text.append(text)
+        return text
+
+    def _fragment(self, raw: dict[str, Any]) -> None:
+        index = raw.get("index")
+        # Position is what ties fragments together. A server that omits it can
+        # only be describing the call already in progress.
+        key = int(index) if isinstance(index, int) else len(self._calls) - 1
+        partial = self._calls.setdefault(max(key, 0), _PartialCall())
+        if raw.get("id"):
+            partial.id = raw["id"]
+        function = raw.get("function") or {}
+        if function.get("name"):
+            partial.name = function["name"]
+        partial.arguments += function.get("arguments") or ""
+
+    def result(self) -> Completion:
+        """The finished completion. Tool calls keep the order they were opened in."""
+
+        calls = []
+        for _, partial in sorted(self._calls.items()):
+            if not partial.name:
+                raise BackendError(f"a streamed tool call arrived without a name: {partial}")
+            calls.append(
+                ToolCall(
+                    id=partial.id,
+                    name=partial.name,
+                    arguments=parse_arguments(partial.name, partial.arguments),
+                )
+            )
+        return Completion(
+            text="".join(self._text),
+            tool_calls=tuple(calls),
+            usage=self._usage,
+            finish_reason=self._finish_reason,
+        )
 
 
 class OpenAICompatibleBackend(ModelBackend):
@@ -270,6 +382,9 @@ class OpenAICompatibleBackend(ModelBackend):
             body["response_format"] = response_format
         if stream:
             body["stream"] = True
+            # Without this the streamed response carries no usage at all, and a
+            # turn whose size is unknown cannot be folded or reported.
+            body["stream_options"] = {"include_usage": True}
         return body
 
     async def _completion(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -320,15 +435,22 @@ class OpenAICompatibleBackend(ModelBackend):
         messages: Sequence[Message],
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
-    ) -> AsyncIterator[str]:
-        """Yield text as it arrives. Not retried: see the note below.
+    ) -> AsyncIterator[StreamEvent]:
+        """Yield text as it arrives, then the assembled result. Not retried.
 
         A stream that fails halfway has already given the caller part of an
         answer, and there is no way to ask for the rest — retrying would repeat
-        what was said. `invoke`, which the agent uses, is retried instead.
+        what was said, in front of the person reading it. A failure before the
+        first delta could be retried safely, and is not, for now: the caller
+        sees one failure mode either way.
+
+        `CompletionDone` is yielded only if the response ended; a stream that
+        breaks raises out of here instead, so a caller can never mistake a
+        truncated answer for a finished one.
         """
 
         body = self._body(messages, tools, response_format, stream=True)
+        streamed = StreamedCompletion()
         async with self._client.stream("POST", "/chat/completions", json=body) as response:
             if response.status_code >= 400:
                 await response.aread()
@@ -339,9 +461,13 @@ class OpenAICompatibleBackend(ModelBackend):
                 )
                 raise error_type(f"HTTP {response.status_code}: {response.text}")
             async for line in response.aiter_lines():
-                text = parse_stream_line(line)
+                chunk = parse_stream_line(line)
+                if chunk is None:
+                    continue
+                text = streamed.add(chunk)
                 if text:
-                    yield text
+                    yield TextDelta(text)
+        yield CompletionDone(streamed.result())
 
     async def context_limit(self) -> int | None:
         """Ask the server how long a request it will take.

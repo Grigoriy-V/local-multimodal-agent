@@ -178,3 +178,9 @@ class AgentSettings(BaseSettings):
     # number are one number and one lie waiting to happen. The headroom is what
     # lets the fold react to a measured overshoot instead of guessing ahead.
     context_fraction: float = 0.6
+    # Ask the model for its answer as it is written, so an interface can show it
+    # growing. Off, the conversational turn is one complete request again. It is
+    # a switch rather than a constant because the visible half of a turn is the
+    # part a person notices breaking: turning it off is a redeployed setting,
+    # not a reverted release.
+    stream_answers: bool = True

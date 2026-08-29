@@ -35,6 +35,7 @@ from ui.telegram.adapter import (
     REFUSAL,
     TOOL_ACTIVITY,
     UNKNOWN_ACTIVITY,
+    AnswerPreview,
     TelegramAdapter,
     ToolActivity,
     canonical_user_id,
@@ -1233,7 +1234,9 @@ async def test_an_ordinary_markdown_answer_reaches_the_chat_as_telegram_markup(
 
     await adapter.handle_update(text_update("tell me"))
 
-    payload = [payload for method, payload in telegram.calls if method == "sendMessage"][-1]
+    # The answer was previewed while it was written, so the rendered version
+    # arrives as the edit that finishes that message, not as a fresh one.
+    payload = [payload for method, payload in telegram.calls if method == "editMessageText"][-1]
     assert payload["parse_mode"] == "HTML"
     assert markdown.balanced(payload["text"])
     for expected in ("<b>Findings</b>", "<i>second</i>", "<code>inline_code</code>", "<pre>"):
@@ -1616,3 +1619,152 @@ async def test_settlement_falls_back_to_an_uncoloured_button(
         await client.aclose()
 
     assert len(refusals) == 1
+
+
+# --- the answer, while it is being written -----------------------------------
+#
+# One message that grows and then becomes the answer. Two things must never
+# happen: the same answer arriving twice, and half an answer staying in the chat.
+
+LONG_ANSWER = (
+    "Paris is the capital of France and has been for a very long time indeed."
+)
+
+
+def texts(telegram: FakeTelegram, method: str) -> list[str]:
+    return [payload["text"] for name, payload in telegram.calls if name == method]
+
+
+async def test_an_answer_is_previewed_once_and_finished_in_the_same_message(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    backend = ScriptedBackend(route(), says(LONG_ANSWER), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("tell me about paris"))
+
+    # One message was sent — the preview — and the finished answer replaced it.
+    assert len(texts(telegram, "sendMessage")) == 1
+    assert LONG_ANSWER.startswith(texts(telegram, "sendMessage")[0])
+    assert texts(telegram, "editMessageText")[-1] == LONG_ANSWER
+    # The answer never arrives twice: nothing was sent after the preview.
+    assert [name for name, _ in telegram.calls].count("sendMessage") == 1
+    assert "deleteMessage" not in [name for name, _ in telegram.calls]
+
+
+async def test_a_short_answer_arrives_whole_rather_than_previewed(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """A preview holding one word that is about to be replaced helps nobody."""
+
+    backend = ScriptedBackend(route(), says("Yes."), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("is it true"))
+
+    assert telegram.sent == ["Yes."]
+    assert texts(telegram, "editMessageText") == []
+
+
+async def test_a_tool_step_previews_only_the_answer(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """A model turn that only calls a tool has nothing to show yet."""
+
+    backend = ScriptedBackend(
+        route(),
+        calls("list_files", path="."),
+        says(LONG_ANSWER),
+        default=says("summary"),
+    )
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("what is here"))
+
+    sent = texts(telegram, "sendMessage")
+    # Two messages: the tool activity, then the preview that becomes the answer.
+    assert sent[0] == TOOL_ACTIVITY["list_files"]
+    assert len(sent) == 2
+    assert LONG_ANSWER.startswith(sent[1])
+    assert texts(telegram, "editMessageText")[-1] == LONG_ANSWER
+
+
+async def test_a_failed_final_edit_delivers_the_answer_and_clears_the_preview(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Falling back must not leave a truncated answer sitting above the real one."""
+
+    calls_seen: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        calls_seen.append(method)
+        payload = json.loads(request.content or b"{}")
+        if method == "editMessageText":
+            return httpx.Response(
+                200, json={"ok": False, "description": "Bad Request: message to edit not found"}
+            )
+        if method == "sendMessage":
+            telegram.sent.append(payload["text"])
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 501}})
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    client = TelegramClient(settings, transport=httpx.MockTransport(handle))
+    backend = ScriptedBackend(route(), says(LONG_ANSWER), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+    await adapter.client.aclose()
+    adapter.client = client
+
+    await adapter.handle_update(text_update("tell me about paris"))
+
+    assert telegram.sent[-1] == LONG_ANSWER
+    assert "deleteMessage" in calls_seen
+
+
+async def test_the_preview_is_edited_on_a_throttle_not_on_every_delta(
+    telegram: FakeTelegram, settings: TelegramSettings
+) -> None:
+    """One edit per token would be refused long before it would be readable."""
+
+    clock = [0.0]
+    client = TelegramClient(settings, transport=telegram.transport())
+    preview = AnswerPreview(client, CHAT, interval=1.0, now=lambda: clock[0])
+    try:
+        for index in range(40):
+            clock[0] += 0.1
+            await preview.add(f"word{index} ")
+    finally:
+        await client.aclose()
+
+    # Four seconds of deltas: one message, then an edit per whole second, rather
+    # than forty edits. What is shown lags the text but is always a prefix of it,
+    # and the deltas after the last edit arrive when the answer is finished.
+    assert len(texts(telegram, "sendMessage")) == 1
+    assert len(texts(telegram, "editMessageText")) == 3
+    shown = texts(telegram, "editMessageText")[-1]
+    assert preview.text.startswith(shown)
+    assert "word39 " in preview.text and "word39" not in shown
+
+
+async def test_a_preview_that_cannot_be_sent_stands_aside(
+    telegram: FakeTelegram, settings: TelegramSettings
+) -> None:
+    """A cosmetic failure must not become a failed turn."""
+
+    attempts: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.url.path.rsplit("/", 1)[-1])
+        return httpx.Response(200, json={"ok": False, "description": "Bad Request: chat not found"})
+
+    client = TelegramClient(settings, transport=httpx.MockTransport(handle))
+    preview = AnswerPreview(client, CHAT)
+    try:
+        for _ in range(5):
+            assert await preview.add("a long enough piece of text ") is False
+        assert await preview.finish("the answer") is False
+    finally:
+        await client.aclose()
+
+    # Tried once, then stopped trying: the turn is answered the ordinary way.
+    assert attempts == ["sendMessage"]

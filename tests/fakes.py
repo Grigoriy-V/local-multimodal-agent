@@ -9,7 +9,17 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall, Usage
+from app.models import (
+    Completion,
+    CompletionDone,
+    ContentPart,
+    Message,
+    ModelBackend,
+    StreamEvent,
+    TextDelta,
+    ToolCall,
+    Usage,
+)
 
 
 class ScriptedBackend(ModelBackend):
@@ -58,8 +68,18 @@ class ScriptedBackend(ModelBackend):
         messages: Sequence[Message],
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
-    ) -> AsyncIterator[str]:
-        yield (await self.invoke(messages, tools, response_format)).text
+    ) -> AsyncIterator[StreamEvent]:
+        """The scripted completion, delivered the way a server delivers one.
+
+        The text arrives in pieces that concatenate back to it exactly, and the
+        completion itself arrives at the end, so a test cannot pass because the
+        fake was tidier than a real stream.
+        """
+
+        completion = await self.invoke(messages, tools, response_format)
+        for start in range(0, len(completion.text), 8):
+            yield TextDelta(completion.text[start : start + 8])
+        yield CompletionDone(completion)
 
 
 def says(text: str, input_tokens: int | None = None) -> Completion:

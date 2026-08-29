@@ -10,7 +10,16 @@ import pytest
 from app.context import Context, ContextPolicy, build_prelude, fold_older_messages, transcript
 from app.context.window import DEFAULT_SYSTEM_PROMPT, first_user_turn, system
 from app.memory import LOCAL_USER_ID, SqliteStore
-from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall
+from app.models import (
+    Completion,
+    CompletionDone,
+    ContentPart,
+    Message,
+    ModelBackend,
+    StreamEvent,
+    TextDelta,
+    ToolCall,
+)
 
 
 class EchoBackend(ModelBackend):
@@ -34,8 +43,9 @@ class EchoBackend(ModelBackend):
         messages: Sequence[Message],
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
-    ) -> AsyncIterator[str]:
-        yield self.summary
+    ) -> AsyncIterator[StreamEvent]:
+        yield TextDelta(self.summary)
+        yield CompletionDone(Completion(text=self.summary))
 
 
 def user(value: str) -> Message:

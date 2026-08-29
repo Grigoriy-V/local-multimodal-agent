@@ -33,6 +33,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change environment/config | `app/config.py` | `.env.example`, `ModelSettings`, `AgentSettings`, `TelegramSettings`, `WebSettings` |
 | Change ordinary agent loop | `app/agent/graph.py` | `build_agent`, `AgentState`, `interrupt`, `tests/test_agent_graph.py` |
 | Change agent wiring/context/tools | `app/agent/runtime.py` | `Agent`, `create_agent`, `toolbox`, `_graph` |
+| Change how an answer streams as it is written | `app/agent/graph.py`, `ui/telegram/adapter.py` | `complete`, `ASSISTANT_DELTA`, `AssistantDelta`, `MessageProduced`, `AnswerPreview`, `StreamedCompletion` |
 | Change answer-vs-task routing | `app/agent/harness.py` | `GeneralHarness`, `HarnessDecision`, `ROUTER_SYSTEM_PROMPT` |
 | Change bounded task lifecycle | `app/agent/task_graph.py` | `TaskBudget`, `TaskPlan`, `TaskGrant`, `build_task_graph` |
 | Change task planner/implementation | `app/agent/task_worker.py` | `ModelTaskWorker`, `PLANNER_SYSTEM_PROMPT`, `IMPLEMENTER_SYSTEM_PROMPT` |

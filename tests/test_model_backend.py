@@ -7,7 +7,17 @@ from typing import Any
 
 import pytest
 
-from app.models import Completion, ContentPart, Message, ModelBackend, ToolCall, Usage
+from app.models import (
+    Completion,
+    CompletionDone,
+    ContentPart,
+    Message,
+    ModelBackend,
+    StreamEvent,
+    TextDelta,
+    ToolCall,
+    Usage,
+)
 
 
 class FakeBackend(ModelBackend):
@@ -29,10 +39,11 @@ class FakeBackend(ModelBackend):
         messages: Sequence[Message],
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[StreamEvent]:
         self.seen.append(messages)
         for word in self.completion.text.split():
-            yield word
+            yield TextDelta(word)
+        yield CompletionDone(self.completion)
 
 
 def text_message(role: str = "user", text: str = "hello") -> Message:
@@ -102,9 +113,14 @@ async def test_invoke_returns_completion_with_tool_calls() -> None:
 async def test_stream_yields_chunks() -> None:
     backend = FakeBackend(Completion(text="one two three"))
 
-    chunks = [chunk async for chunk in backend.stream([text_message()])]
+    events = [event async for event in backend.stream([text_message()])]
 
-    assert chunks == ["one", "two", "three"]
+    assert events == [
+        TextDelta("one"),
+        TextDelta("two"),
+        TextDelta("three"),
+        CompletionDone(backend.completion),
+    ]
 
 
 @pytest.mark.asyncio

@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from app.config import ModelSettings
-from app.models import ContentPart, Message
+from app.models import ContentPart, Message, TextDelta
 from app.models.openai_compatible import OpenAICompatibleBackend
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
@@ -111,13 +111,25 @@ async def system_prompt(backend: OpenAICompatibleBackend) -> tuple[bool, str]:
 async def streaming(backend: OpenAICompatibleBackend) -> tuple[bool, str]:
     start = time.perf_counter()
     first = None
-    chunks = []
-    async for chunk in backend.stream([user(text("Count from one to ten in words."))]):
-        if first is None:
-            first = time.perf_counter() - start
-        chunks.append(chunk)
+    chunks: list[str] = []
+    final = None
+    async for event in backend.stream([user(text("Count from one to ten in words."))]):
+        if isinstance(event, TextDelta):
+            if first is None:
+                first = time.perf_counter() - start
+            chunks.append(event.text)
+        else:
+            final = event.completion
     joined = "".join(chunks).lower()
-    ok = len(chunks) > 1 and "one" in joined and "ten" in joined
+    # The assembled completion is what the agent would actually run on, so the
+    # check is that it says the same thing the person watching it read.
+    ok = (
+        len(chunks) > 1
+        and "one" in joined
+        and "ten" in joined
+        and final is not None
+        and final.text == "".join(chunks)
+    )
     return ok, f"{len(chunks)} chunks, first after {first or 0:.2f} s"
 
 
