@@ -4,8 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** queue 1, capabilities. No worker start is authorized;
-each deploy, sandbox or container run is asked for separately.
+**Current approved step:** none. Queue 1 is closed; queue 2 is next and still
+requires explicit approval. No worker start is authorized; each deploy, sandbox
+or container run is asked for separately.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -112,53 +113,18 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
   first message about 9.2 s against 14.4 s, unconfirmed live. Telegram's typing
   indicator runs for any turn that reaches the model.
   `reports/2026-08-29_v2_control_plane_cold_start.md`.
+- **1. Baseline capabilities, accepted live.** The deployed assistant has a
+  persistent per-user workspace, filesystem tools, document text and visual
+  reading, an isolated browser, web search/fetch/view, and agent-controlled file
+  delivery. In the final live web scenario the model chose `view_web_page`,
+  inspected the returned page and screenshot, chose `send_file`, delivered the
+  PNG and described what it saw. This also exercised the deployed shared
+  Chromium cleanup correction; another synthetic `/check` was not required to
+  close the product capability.
+  `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`,
+  `reports/2026-08-29_v2_web_capability.md`.
 
 ### Queue
-
-1. **Capabilities the assistant actually has. Reopened 2026-08-29:** an earlier
-   deployed run passed 10/10, but a later free `/check` passed 8/9 and a real
-   Telegram turn reproduced the same Chromium profile-cleanup race. The small
-   fix is deployed; acceptance is pending a real check.
-
-   - **Done: a browser, a workspace that survives, and documents.** Deployed
-     2026-08-29, `/check` 6/6 in the container, and a real PDF read correctly in
-     a real chat. Chromium runs where the agent runs; each person's workspace is
-     a directory on a Modal volume; a document is saved there and read with
-     `read_document`, or looked at with `view_pages`.
-     `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`.
-   - **Done: agent-controlled presentation.** Reading, viewing and inspecting are
-     observation tools whose results stay internal. Sending a chosen workspace
-     item is the separate `send_file` action. Offline: 548 passed, 1 skipped.
-     In a clean real Telegram chat the agent found a PDF, inspected both pages
-     with `view_pages`, explicitly sent both selected page images with
-     `send_file`, and then explained what it saw. The observation images did not
-     appear before the explicit sends. Personal document content is not recorded.
-     The expanded deployed `/check` then passed 7/7, including
-     `presentation.file`. The deployment's exact build identity was not captured.
-   - **Browser image layering is deployed but its cache benefit is unconfirmed.**
-     Chromium is installed below the copied source. v14 paid the slow build once;
-     the next deploy is the first measurement of whether that layer is reused.
-   - **Web: search, fetch and visual view — three tools, not one.** Built and
-     accepted in the local profile: `/check` 9/9 free plus the credit-costing
-     search probe 1/1, against real pages and a real browser. `search_web` uses
-     Firecrawl and `WEB_FIRECRAWL_API_KEY`; `fetch_page` is our own bounded
-     direct HTTP tool and spends no provider credit; `view_web_page` renders in
-     the isolated CPU function `render_web_page` when `WEB_RENDERER_URL` is set,
-     and the deployed agent image refuses to render locally without it.
-     Firecrawl scrape stays the fallback for pages neither client can read and
-     is not implemented. `reports/2026-08-29_v2_web_capability.md`,
-     `reports/2026-08-29_v2_web_capability_options.md`.
-
-     A deployed self-test historically passed **10/10**, including all three web
-     tools. A later `browser.inspect` check failed 8/9, and Neon showed the same
-     `Directory not empty` cleanup failure from `view_web_page` on Habr. The
-     shared Chromium cleanup no longer lets removal of a temporary profile
-     discard otherwise successful evidence. The change is deployed but has not
-     run there yet. The same real turn also showed the model repairing browser failure
-     with `fetch_page`, then later describing screenshot tools instead of using
-     them; general outcome/recovery guidance now tells it to act and finish the
-     requested delivery. One deployed `/check` and one live screenshot request
-     remain the acceptance evidence.
 
 2. **Baseline chat product and live evidence.** Confirm in the real interface
    that the assistant answers a capability question correctly, `/can` agrees,
@@ -183,6 +149,11 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
      with the boundaries `docs/control_plane_cold_start_notes.md` names, plus
      token counts and success. Timings and counts only — no message text, no
      attachments, nothing about a person beyond the owner id.
+   - **Inspectable agent trace.** Persist enough structured detail to reconstruct
+     and read the agent's internal work: model steps, tool calls, tool results,
+     errors and stage transitions. The failed live PDF task reported only that
+     20 calls were spent; item 3 must make those calls inspectable before the
+     loop is redesigned.
    - One long-output run separating prefill from decode, and the same for input
      size, as a baseline to beat.
    - **GPU active seconds per successful user turn** is the primary metric, not
@@ -200,6 +171,13 @@ profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
    Evaluate behaviour with scenario suites that assert on harness events and
    outcomes rather than exact model wording. Live suites run as one warm window
    only with explicit permission, because every run wakes a GPU.
+
+   Preserve the failed live PDF task as a future product acceptance scenario:
+   from a natural request, the agent must create a simple PDF, validate the real
+   document and deliver it. It exposed an ungrounded plan, an implementation
+   toolbox unable to execute its own script, an invalid validation strategy and
+   exhaustion of all 20 tool calls before validation. These are loop concerns;
+   the scenario must not become a hard-coded PDF workflow.
 
    The first known correctness prerequisite is conversation serialization.
    Found live: a screenshot and a question sent seconds apart ran in two
