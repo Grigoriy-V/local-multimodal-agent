@@ -4,9 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** item 3, turn telemetry (3A). Implemented and proven
-offline; the deployed database migration, the deploy and any live turn are each
-still their own human gate. Every live product-runtime run remains one.
+**Current approved step:** item 3, turn telemetry (3A). Implemented, migrated
+and deployed; live and untried, because a live turn wakes the GPU and is its own
+human gate. Every live product-runtime run remains one.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -158,8 +158,8 @@ Verified platform facts and cold-start evidence remain in
      `run_id` is generated at ingress and carried to delivery; `turn_runs` and
      `trace_events` hold the turn's outcome, route, model and tool calls,
      tokens, first model token and first visible response, in SQLite locally and
-     PostgreSQL deployed. Timings and counts only. Remaining gates: the additive
-     migration on the populated database, the deploy, and one live turn.
+     PostgreSQL deployed. Timings and counts only. Migrated additively and
+     deployed on 2026-08-29, not yet exercised; one live turn remains.
      `reports/2026-08-29_v2_turn_telemetry_implementation.md`.
    - **Inspectable agent trace.** The structured detail is now recorded; what is
      missing is the reading half — a `show run <run_id>` inspector and a list of

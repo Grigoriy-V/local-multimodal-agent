@@ -142,18 +142,35 @@ documented in `docs/OPERATIONS_MAP.md`.
 
 `docs/PRODUCT.md` is unchanged. Telemetry changes nothing a user sees.
 
+## Migrated and deployed, 2026-08-29
+
+Both gates were authorized by the human and crossed the same day.
+
+The migration ran through `tools/setup_control_plane.py` against the deployed
+Neon database. Afterwards the schema holds `telemetry_version` at 1, `turn_runs`
+and `trace_events`, and `telegram_updates` has gained `run_id` as its last
+column. Nothing existing was touched: 81 queue rows and 5 conversations are
+still there, and `turn_runs` is empty because no turn has run yet.
+
+`assistant-control` deployed in 8.3 s; five functions re-created
+(`render_web_page`, `measure_database_latency`, `telegram_webhook`,
+`process_telegram_update`, `self_test`). The first attempt failed on a Windows
+console encoding error printing Modal's own tick character, not on anything in
+this repository; re-running with `PYTHONIOENCODING=utf-8` succeeded.
+
+**No deployed function was invoked and no live turn was run.** Telemetry in the
+deployment is therefore live and untried: the first real Telegram message will
+be the first row in `turn_runs`.
+
 ## Gates ahead
 
-1. **The additive migration on the deployed database** —
-   `python tools/setup_control_plane.py` — which creates `turn_runs` and
-   `trace_events` and adds the nullable `run_id` column to `telegram_updates`.
-   It touches a populated database and is a human gate.
-2. **The deploy** of `assistant-control`.
-3. **A live turn** used as evidence, which wakes the GPU and is its own gate.
+**A live turn** used as evidence, which wakes the GPU and is its own gate. After
+one, the honest check is the database: one row for the turn, its events in
+order, and no message text in either.
 
-Until 1 and 2 happen the deployed profile records nothing: the worker would find
-no telemetry tables. Nothing else about the deployment changes if they are
-delayed — a missing table makes telemetry fail silently by design, not the turn.
+The rest of item 3 — the `show run <run_id>` inspector, finer task-stage detail,
+and all of 3C's vLLM prefill/decode/prefix-cache baseline — is not approved
+work yet.
 
 Acceptance criteria 1 to 6 of the task document are met offline and need one
 live turn to be met live. Criteria 7 to 9 belong to 3C and criterion 5's
