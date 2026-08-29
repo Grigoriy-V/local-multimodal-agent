@@ -3,9 +3,9 @@
 **Date:** 2026-08-30
 **Status:** preparation. Nothing here authorizes implementation; each sub-step
 starts on its own word from the human.
-**Design origin:** `docs/step4_agent_harness_preparation_ru.md` (the human's own
-handoff, untracked in the working tree), with DeepSeek Harness as the primary
-lifecycle reference and Hermes as a secondary practical one.
+**Design origin:** `docs/step4_agent_harness_preparation_ru.md`, the human's own
+handoff, with DeepSeek Harness as the primary lifecycle reference and Hermes as
+a secondary practical one.
 **Grounded against:** `app/agent/graph.py`, `harness.py`, `task_graph.py`,
 `task_worker.py`, `task_validator.py`, `task_runtime.py`, `app/tools/base.py`,
 `app/context/window.py`, `ui/telegram/adapter.py`, `ui/telegram/inbox.py`,
