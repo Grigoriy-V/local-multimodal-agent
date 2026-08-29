@@ -231,18 +231,22 @@ comes back resets everything. The probe therefore records a container identity
 with every snapshot and refuses to report a delta across a boot rather than
 publishing a negative number as a measurement.
 
-**The idle window is shorter than the experiment.** `SCALEDOWN_WINDOW = 12`
-seconds. Any pause between scenarios longer than that ends the container, and
-each scenario would then measure a cold start instead of prefill. Two options,
-and the second is recommended:
+**The idle window bounds the pause between requests, not the run.**
+`SCALEDOWN_WINDOW = 12` seconds, and a gap longer than that ends the container,
+so the next scenario would measure a cold start instead of prefill. The
+correction that follows from stating it that way: the probe is one script that
+issues its requests back to back, analysing nothing until every snapshot is
+saved, and its gaps are then fractions of a second. **Twelve seconds is enough
+and `autoscale.py` does not need to be touched** — one fewer gate. Raising the
+window is the fallback if a real run turns out to be ragged, decided on
+evidence rather than in advance.
 
-1. Run every scenario back to back with no gap. Fragile: one slow request and
-   the window closes mid-suite.
-2. Raise the window for the probe through `deploy/modal/autoscale.py`, which
-   changes it live without a deploy, and restore it immediately afterwards. At
-   the A10's $0.000306/s, holding the GPU for a ten-minute probe window is about
-   **$0.18**. This is an infrastructure action on a live deployment and is named
-   here as its own permission, separate from the permission to run the probe.
+The whole suite is about two minutes of GPU work: roughly 32 s for scenario A's
+512-token generation at the measured ~16 tok/s, 60-70 s for B's four input sizes
+times three repeats at 64 output tokens each, 15 s for C, and about 20 s of
+metric reads and snapshot restore. At the A10's $0.000306/s that is near
+**$0.05**, plus one trailing idle window. A full cold boot instead of a restore
+would add roughly 190 s, about $0.06 more.
 
 ## C3. Scenarios
 
@@ -284,9 +288,10 @@ billing`, which reads and starts nothing.
 
 ## C5. Gates
 
-Every probe run wakes the GPU and needs permission that run. Changing the
-scaledown window is a second, separate permission. Neither is implied by
-approving the step.
+Every probe run wakes the GPU and needs permission for that run — not for the
+step, and not for the session. Writing the probe, and analysing snapshots it
+already produced, need nothing. If the scaledown window ever has to be raised,
+that is a second permission, asked for when a ragged run shows it is needed.
 
 ---
 
