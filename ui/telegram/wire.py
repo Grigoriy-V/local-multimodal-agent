@@ -19,6 +19,15 @@ from typing import Any
 PHOTO_MEDIA_TYPE = "image/jpeg"
 VOICE_MEDIA_TYPE = "audio/ogg"
 
+# An inline action that has already been carried out leaves one status button
+# behind. Telegram needs callback data for a button to exist at all, so the
+# settled state gets its own prefix — and the prefix is what tells the front
+# door that pressing it is a no-op. Recognising it here rather than in the
+# adapter is what keeps a curious tap from waking a GPU.
+SETTLED_CALLBACK_PREFIX = "settled:"
+SETTLED_APPROVED = f"{SETTLED_CALLBACK_PREFIX}approved"
+SETTLED_REJECTED = f"{SETTLED_CALLBACK_PREFIX}rejected"
+
 # The commands the adapter answers from wiring and storage, without a model.
 # Listing the exceptions rather than the rule is the safe direction: anything
 # new needs the model until someone says otherwise, and the cost of being wrong
@@ -42,6 +51,10 @@ class Incoming:
     files: tuple[tuple[str, str, str], ...] = ()  # (file_id, name, media_type)
     callback_id: str | None = None
     callback_data: str | None = None
+    # The message the pressed button belongs to. Carried because settling an
+    # inline action means editing that same message's keyboard, and without the
+    # id the adapter would have to send a second message to say what happened.
+    callback_message_id: int | None = None
 
 
 def read_update(update: dict[str, Any]) -> Incoming | None:
@@ -54,12 +67,14 @@ def read_update(update: dict[str, Any]) -> Incoming | None:
         sender = callback.get("from") or {}
         if not chat.get("id") or not sender.get("id"):
             return None
+        message_id = message.get("message_id")
         return Incoming(
             chat_id=int(chat["id"]),
             telegram_user_id=int(sender["id"]),
             text="",
             callback_id=str(callback.get("id", "")),
             callback_data=str(callback.get("data", "")),
+            callback_message_id=int(message_id) if message_id is not None else None,
         )
 
     message = update.get("message")
@@ -122,5 +137,8 @@ def needs_model(incoming: Incoming) -> bool:
 
     if incoming.callback_data is not None:
         # An approval button resumes a task, and resuming one calls the model.
-        return True
+        # A settled status button is the exception: the action it describes has
+        # already happened, so pressing it changes nothing and must not be paid
+        # for with a GPU wake.
+        return not incoming.callback_data.startswith(SETTLED_CALLBACK_PREFIX)
     return incoming.text.strip().lower() not in MODEL_FREE_COMMANDS

@@ -28,18 +28,33 @@ from app.agent.task_runtime import TaskRuntime, TaskView
 from app.config import AgentSettings, TelegramSettings
 from app.memory import SqliteStore
 from app.models import Completion, ContentPart, Message, ToolCall
-from tests.fakes import ScriptedBackend, says
+from tests.fakes import ScriptedBackend, calls, says
 from ui.telegram.adapter import (
+    HELP,
     REFUSAL,
+    TOOL_ACTIVITY,
+    UNKNOWN_ACTIVITY,
     TelegramAdapter,
+    ToolActivity,
     canonical_user_id,
     current_thread,
     start_thread,
     task_result_text,
 )
-from ui.telegram.wire import MODEL_FREE_COMMANDS, read_update
+from ui.telegram.wire import (
+    MODEL_FREE_COMMANDS,
+    SETTLED_APPROVED,
+    SETTLED_REJECTED,
+    Incoming,
+    needs_model,
+    read_update,
+)
+from ui.telegram import markdown
 from ui.telegram.api import (
+    BOT_DESCRIPTION,
+    BOT_SHORT_DESCRIPTION,
     MAX_MESSAGE_CHARS,
+    PRODUCT_COMMANDS,
     Formatted,
     TelegramClient,
     split_message,
@@ -647,9 +662,11 @@ async def test_can_is_answered_from_the_wiring_and_never_by_the_model(
     assert "Ask first: write_file, edit_file" in answer
 
 
-async def test_a_batch_of_tool_calls_arrives_as_one_message(
+async def test_a_batch_of_tool_calls_arrives_as_one_message_of_readable_labels(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
+    """One message rather than a burst, and not one internal name in it."""
+
     adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
     produced = Message(
         role="assistant",
@@ -662,7 +679,9 @@ async def test_a_batch_of_tool_calls_arrives_as_one_message(
 
     await adapter._deliver(CHAT, produced)
 
-    assert telegram.sent == ["· read_file\n· list_files"]
+    assert telegram.sent == ["Reading file…\nListing files…"]
+    assert "read_file" not in telegram.sent[0]
+    assert "list_files" not in telegram.sent[0]
 
 
 async def test_a_formatted_message_marks_its_own_headings_and_escapes_the_rest(
@@ -875,3 +894,492 @@ async def test_a_file_the_agent_explicitly_selected_reaches_the_person(
 
     assert telegram.photos == ["page.png"]
     assert not any("Selected page.png" in sent for sent in telegram.sent)
+
+
+# --- the command shell -------------------------------------------------------
+
+
+def test_the_native_menu_is_the_product_and_not_the_diagnostics() -> None:
+    """`/check` runs every capability for real; it is not one of four choices."""
+
+    offered = [entry.command for entry in PRODUCT_COMMANDS]
+
+    assert offered == ["new", "can", "stop", "help"]
+    assert "check" not in offered
+    assert all(entry.description and entry.description[0].isupper() for entry in PRODUCT_COMMANDS)
+    assert len(BOT_DESCRIPTION) <= 512
+    assert len(BOT_SHORT_DESCRIPTION) <= 120
+
+
+async def test_check_is_absent_from_the_menu_and_still_a_working_command(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Not promoted is not removed, and it still costs no GPU."""
+
+    backend = ScriptedBackend()
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("/check"))
+
+    assert "check" not in [entry.command for entry in PRODUCT_COMMANDS]
+    assert backend.requests == []
+    assert telegram.sent and telegram.sent[0].strip()
+    assert "/check" in MODEL_FREE_COMMANDS
+
+
+async def test_publishing_the_profile_sends_exactly_the_product_menu(
+    telegram: FakeTelegram, settings: TelegramSettings
+) -> None:
+    """The tool is a deployment action; this asserts what it would send."""
+
+    client = TelegramClient(settings, transport=telegram.transport())
+    try:
+        await client.set_my_commands(PRODUCT_COMMANDS)
+        await client.set_my_description(BOT_DESCRIPTION)
+        await client.set_my_short_description(BOT_SHORT_DESCRIPTION)
+    finally:
+        await client.aclose()
+
+    sent = dict(telegram.calls)
+    assert [entry["command"] for entry in sent["setMyCommands"]["commands"]] == [
+        "new",
+        "can",
+        "stop",
+        "help",
+    ]
+    assert all(entry["description"] for entry in sent["setMyCommands"]["commands"])
+    assert sent["setMyDescription"]["description"] == BOT_DESCRIPTION
+    assert sent["setMyShortDescription"]["short_description"] == BOT_SHORT_DESCRIPTION
+
+
+@pytest.mark.parametrize("command", ["/start", "/help"])
+async def test_onboarding_is_one_short_formatted_message(
+    command: str, telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update(command))
+
+    assert len(telegram.sent) == 1
+    _, payload = telegram.calls[-1]
+    assert payload["parse_mode"] == "HTML"
+    assert markdown.balanced(payload["text"])
+    assert "**" not in payload["text"]
+    assert len(payload["text"]) < MAX_MESSAGE_CHARS
+    for entry in PRODUCT_COMMANDS:
+        assert f"/{entry.command}" in payload["text"]
+    # `/can` is the truthful capability source; onboarding must not become a
+    # second, staler answer to the same question.
+    assert "inspect_page" not in payload["text"]
+
+
+def test_the_onboarding_card_names_every_command_the_menu_does() -> None:
+    for entry in PRODUCT_COMMANDS:
+        assert f"/{entry.command}" in HELP.plain
+    assert "/check" in HELP.plain
+
+
+# --- rich text in the chat ---------------------------------------------------
+
+
+ANSWER = """## Findings
+
+The **first** point and the *second*, with `inline_code`.
+
+1. Ordered one
+2. Ordered two
+
+- Bulleted one
+- Bulleted two
+
+> A quoted remark.
+
+See [the notes](https://example.com/notes).
+
+```python
+print("hello")
+```
+"""
+
+
+async def test_an_ordinary_markdown_answer_reaches_the_chat_as_telegram_markup(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    backend = ScriptedBackend(route(), says(ANSWER), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("tell me"))
+
+    payload = [payload for method, payload in telegram.calls if method == "sendMessage"][-1]
+    assert payload["parse_mode"] == "HTML"
+    assert markdown.balanced(payload["text"])
+    for expected in ("<b>Findings</b>", "<i>second</i>", "<code>inline_code</code>", "<pre>"):
+        assert expected in payload["text"]
+    assert "<blockquote>" in payload["text"]
+    assert '<a href="https://example.com/notes">' in payload["text"]
+    assert "**" not in payload["text"] and "##" not in payload["text"]
+
+
+async def test_the_store_keeps_the_model_text_and_not_the_telegram_rendering(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Rendering is presentation. The canonical answer stays ordinary Markdown."""
+
+    backend = ScriptedBackend(route(), says(ANSWER), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("tell me"))
+
+    store = SqliteStore(tmp_path / "memory.sqlite3")
+    try:
+        thread = store.threads(canonical_user_id(ALLOWED))[0]
+        stored = "\n".join(
+            part.text or ""
+            for message in store.messages(thread.id)
+            for part in message.content
+            if message.role == "assistant"
+        )
+    finally:
+        store.close()
+
+    assert "## Findings" in stored
+    assert "<b>" not in stored
+
+
+async def test_an_answer_telegram_refuses_to_parse_arrives_complete_and_plain(
+    settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Telegram's parser is the only authority on what Telegram accepts."""
+
+    accepted: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content or b"{}")
+        if payload.get("parse_mode") == "HTML":
+            return httpx.Response(
+                200,
+                json={"ok": False, "description": "Bad Request: can't parse entities"},
+            )
+        accepted.append(payload)
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+    client = TelegramClient(settings, transport=httpx.MockTransport(handle))
+    try:
+        await client.send_message(CHAT, Formatted.from_markdown(ANSWER))
+    finally:
+        await client.aclose()
+
+    delivered = "\n\n".join(payload["text"] for payload in accepted)
+    assert accepted and all("parse_mode" not in payload for payload in accepted)
+    for word in ("Findings", "first", "second", "inline_code", "Ordered two", "Bulleted two"):
+        assert word in delivered
+    assert "https://example.com/notes" in delivered
+    assert 'print("hello")' in delivered
+
+
+async def test_a_long_markdown_answer_arrives_whole_with_no_half_written_markup(
+    telegram: FakeTelegram, settings: TelegramSettings
+) -> None:
+    client = TelegramClient(settings, transport=telegram.transport())
+    long_answer = "\n\n".join(f"**Point {index}** of a long answer." for index in range(400))
+    try:
+        await client.send_message(CHAT, Formatted.from_markdown(long_answer))
+    finally:
+        await client.aclose()
+
+    assert len(telegram.sent) > 1
+    for piece in telegram.sent:
+        assert len(piece) <= MAX_MESSAGE_CHARS
+        assert markdown.balanced(piece)
+    joined = "".join(telegram.sent)
+    assert "<b>Point 0</b>" in joined and "<b>Point 399</b>" in joined
+
+
+# --- tool activity -----------------------------------------------------------
+
+
+async def test_every_tool_the_agent_can_call_has_a_readable_label(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """`Working…` is the safety net, not the plan for tools that already exist."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+    agent = adapter.harness(canonical_user_id(ALLOWED)).agent
+    thread = current_thread(agent.store, canonical_user_id(ALLOWED))
+
+    for name in agent.toolbox(thread).names:
+        assert name in TOOL_ACTIVITY, f"{name} would be shown as {UNKNOWN_ACTIVITY}"
+
+    for name, label in TOOL_ACTIVITY.items():
+        assert name not in label
+        assert label.endswith("…") and label[0].isupper()
+
+
+def test_an_unknown_tool_says_something_rather_than_its_name(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    from ui.telegram.adapter import activity_labels  # noqa: PLC0415
+
+    labels = activity_labels([ToolCall(id="x", name="frobnicate_widget", arguments={})])
+
+    assert labels == [UNKNOWN_ACTIVITY] == ["Working…"]
+    assert "frobnicate" not in labels[0]
+
+
+async def test_consecutive_tool_calls_reuse_one_transient_status_message(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """One message, edited — not a column of notifications left in the history."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    activity = ToolActivity(adapter.client, CHAT)
+
+    await adapter._deliver(
+        CHAT,
+        Message(role="assistant", content=[], tool_calls=(ToolCall("a", "search_web", {}),)),
+        activity,
+    )
+    await adapter._deliver(
+        CHAT,
+        Message(role="assistant", content=[], tool_calls=(ToolCall("b", "fetch_page", {}),)),
+        activity,
+    )
+    await adapter._deliver(
+        CHAT,
+        Message(role="assistant", content=[ContentPart(kind="text", text="Done.")]),
+        activity,
+    )
+
+    methods = [method for method, _ in telegram.calls]
+    assert methods.count("sendMessage") == 2  # the status once, then the answer
+    assert "editMessageText" in methods
+    assert methods.index("deleteMessage") < methods.index("sendMessage", 1)
+    assert telegram.sent == ["Searching the web…", "Done."]
+    edited = [payload for method, payload in telegram.calls if method == "editMessageText"]
+    assert edited[-1]["text"] == "Reading page…"
+
+
+async def test_a_whole_turn_that_uses_a_tool_never_shows_its_name(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    backend = ScriptedBackend(
+        route(), calls("list_files", path="."), says("Nothing there yet."), default=says("summary")
+    )
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("what is in my workspace"))
+
+    assert "Nothing there yet." in telegram.sent
+    assert not any("list_files" in sent for sent in telegram.sent)
+    assert any("Listing files…" in sent for sent in telegram.sent)
+    # And it does not survive the turn it belonged to.
+    assert "deleteMessage" in [method for method, _ in telegram.calls]
+
+
+async def test_a_status_that_cannot_be_sent_does_not_fail_the_turn(
+    settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Progress chrome is the least important thing in a turn."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("sendMessage"):
+            return httpx.Response(200, json={"ok": False, "description": "Forbidden"})
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    client = TelegramClient(settings, transport=httpx.MockTransport(handle))
+    activity = ToolActivity(client, CHAT)
+    try:
+        await activity.show(["Searching the web…"])
+        await activity.clear()
+    finally:
+        await client.aclose()
+
+    assert activity.message_id is None
+
+
+# --- settled inline actions --------------------------------------------------
+
+
+def approval_update(data: str, message_id: int | None = 500) -> dict[str, Any]:
+    message: dict[str, Any] = {"chat": {"id": CHAT}}
+    if message_id is not None:
+        message["message_id"] = message_id
+    return {
+        "update_id": 2,
+        "callback_query": {
+            "id": "cb1",
+            "from": {"id": ALLOWED},
+            "data": data,
+            "message": message,
+        },
+    }
+
+
+def test_a_callback_now_carries_the_message_it_belongs_to() -> None:
+    incoming = read_update(approval_update("task:yes"))
+
+    assert incoming is not None
+    assert incoming.callback_message_id == 500
+
+
+def test_a_settled_button_is_model_free_at_the_front_door() -> None:
+    """The webhook reads this to decide whether to spend a GPU wake."""
+
+    for data in (SETTLED_APPROVED, SETTLED_REJECTED):
+        incoming = read_update(approval_update(data))
+        assert incoming is not None
+        assert needs_model(incoming) is False
+    assert needs_model(Incoming(CHAT, ALLOWED, "", callback_data="task:yes")) is True
+
+
+def plan_completion() -> Completion:
+    return Completion(
+        text=json.dumps(
+            {
+                "summary": "Create the file",
+                "steps": ["write notes.txt"],
+                "acceptance_criteria": ["notes.txt exists"],
+                "validation_strategy": [
+                    {
+                        "criterion": "notes.txt exists",
+                        "evidence": "list the directory",
+                        "capabilities": ["filesystem.read"],
+                    }
+                ],
+            }
+        ),
+        finish_reason="stop",
+    )
+
+
+def settlements(telegram: FakeTelegram) -> list[dict[str, Any]]:
+    return [
+        payload for method, payload in telegram.calls if method == "editMessageReplyMarkup"
+    ]
+
+
+async def test_a_rejected_plan_settles_the_same_message_to_one_status_button(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    backend = ScriptedBackend(
+        route(task="create notes.txt"), plan_completion(), default=says("summary")
+    )
+    adapter = build(telegram, settings, tmp_path, backend)
+    await adapter.handle_update(text_update("create notes.txt"))
+
+    await adapter.handle_update(approval_update("task:no"))
+
+    settled = settlements(telegram)
+    assert len(settled) == 1
+    assert settled[0]["message_id"] == 500
+    buttons = settled[0]["reply_markup"]["inline_keyboard"]
+    assert len(buttons) == 1 and len(buttons[0]) == 1
+    assert buttons[0][0]["text"] == "✕ Rejected"
+    assert buttons[0][0]["callback_data"] == SETTLED_REJECTED
+    assert buttons[0][0]["style"] == "danger"
+
+
+async def test_an_approved_plan_settles_to_the_success_button(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    backend = ScriptedBackend(
+        route(task="create notes.txt"), plan_completion(), default=says("summary")
+    )
+    adapter = build(telegram, settings, tmp_path, backend)
+    await adapter.handle_update(text_update("create notes.txt"))
+
+    await adapter.handle_update(approval_update("task:yes"))
+
+    settled = settlements(telegram)
+    assert settled, "an accepted approval must show as accepted"
+    button = settled[-1]["reply_markup"]["inline_keyboard"][0][0]
+    assert button["text"] == "✓ Approved"
+    assert button["callback_data"] == SETTLED_APPROVED
+    assert button["style"] == "success"
+    assert settled[-1]["message_id"] == 500
+
+
+async def test_a_transition_that_failed_is_never_shown_as_settled(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """The button is evidence of a state change, not decoration over one.
+
+    Note what this does *not* claim. Settlement follows the approval being
+    accepted, so a task that resumes and then fails on its own work is still
+    genuinely approved and says so. What must never settle is the transition
+    itself failing, which is what is forced here.
+    """
+
+    backend = ScriptedBackend(
+        route(task="create notes.txt"), plan_completion(), default=says("summary")
+    )
+    adapter = build(telegram, settings, tmp_path, backend)
+    await adapter.handle_update(text_update("create notes.txt"))
+
+    async def refuse(*_arguments: Any, **_keywords: Any) -> Any:
+        raise RuntimeError("the task could not be resumed")
+        yield  # pragma: no cover - never reached, but makes this a generator
+
+    adapter.harness(canonical_user_id(ALLOWED)).resume_task_with_progress = refuse
+
+    await adapter.handle_update(approval_update("task:yes"))
+
+    assert settlements(telegram) == []
+    assert any("failed" in sent.lower() for sent in telegram.sent)
+    # Nor may the chat itself carry the claim the button was denied: progress
+    # text before the first proof of resume says only that the press arrived.
+    assert not any("approved" in sent.lower() for sent in telegram.sent)
+
+
+async def test_pressing_a_settled_button_changes_nothing(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """No model, no task, no new conversation — an acknowledgement and nothing."""
+
+    backend = ScriptedBackend()
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(approval_update(SETTLED_APPROVED))
+    await adapter.handle_update(approval_update(SETTLED_REJECTED))
+
+    assert backend.requests == []
+    assert [method for method, _ in telegram.calls] == [
+        "answerCallbackQuery",
+        "answerCallbackQuery",
+    ]
+    store = SqliteStore(tmp_path / "memory.sqlite3")
+    try:
+        assert store.threads(canonical_user_id(ALLOWED)) == []
+    finally:
+        store.close()
+
+
+async def test_settlement_falls_back_to_an_uncoloured_button(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """`style` is recent; the word is the state and must survive without it."""
+
+    refusals: list[dict[str, Any]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content or b"{}")
+        if request.url.path.endswith("editMessageReplyMarkup"):
+            button = payload["reply_markup"]["inline_keyboard"][0][0]
+            if "style" in button:
+                refusals.append(payload)
+                return httpx.Response(
+                    200, json={"ok": False, "description": "Bad Request: unknown field style"}
+                )
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+    client = TelegramClient(settings, transport=httpx.MockTransport(handle))
+    adapter = TelegramAdapter(client, settings, AgentSettings())
+    try:
+        await adapter._settle(
+            Incoming(CHAT, ALLOWED, "", callback_data="task:yes", callback_message_id=500),
+            approved=True,
+        )
+    finally:
+        await client.aclose()
+
+    assert len(refusals) == 1

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
@@ -37,12 +37,19 @@ from app.config import AgentSettings, TelegramSettings
 from app.memory import ConversationStore
 from app.models import ContentPart, Message
 from ui.telegram.api import (
+    PRODUCT_COMMANDS,
     Formatted,
     TelegramClient,
     TelegramError,
     approval_keyboard,
+    settled_keyboard,
 )
-from ui.telegram.wire import Incoming, needs_model, read_update
+from ui.telegram.wire import (
+    SETTLED_CALLBACK_PREFIX,
+    Incoming,
+    needs_model,
+    read_update,
+)
 
 # A fixed namespace so a chat maps to the same canonical identity on every run
 # and on every machine. Changing it orphans every existing conversation.
@@ -52,14 +59,33 @@ REFUSAL = (
     "This assistant is private and your account is not on its allowed list. "
     "Nothing you send here is processed."
 )
-HELP = (
-    "Send a message and I will answer, or ask for work and I will plan it, "
-    "ask before touching the workspace, and report what happened.\n\n"
-    "/new — start a fresh conversation\n"
-    "/stop — stop the task running in this chat\n"
-    "/can — what I can actually see, hear, send and change\n"
-    "/check — try each of those and report what really works"
+# What `/start` and `/help` say. One text for both: the first question a person
+# has and the one they come back with are the same question, and a second
+# wording is a second thing to keep true. Written as ordinary Markdown and put
+# through the same renderer as an assistant answer, so this card is proof the
+# formatting path works rather than a special case beside it.
+#
+# The command lines are generated from the native menu so the two cannot
+# disagree. `/check` is named afterwards, in a sentence, because it is a
+# diagnostic rather than one of the four things this assistant is for.
+HELP_MARKDOWN = "\n".join(
+    [
+        "**Personal assistant**",
+        "",
+        "Talk to me normally. You can send text, images, voice messages and "
+        "supported documents. I can read your files, use the web, and carry out "
+        "longer tasks when they are needed. I ask before consequential actions.",
+        "",
+        "**Commands**",
+        # Bold rather than code: Telegram turns a `/command` in message text
+        # into something tappable, and monospace is the one style that reads as
+        # a thing to copy rather than a thing to press.
+        *(f"**/{entry.command}** — {entry.description}" for entry in PRODUCT_COMMANDS),
+        "",
+        "**/check** tries every capability for real and reports what actually works.",
+    ]
 )
+HELP = Formatted.from_markdown(HELP_MARKDOWN)
 
 # What `_send_media` can actually put in this chat, declared where that method
 # is, so the two cannot drift apart. Images go as photos and sound as a file,
@@ -78,6 +104,86 @@ MEDIA_SUFFIXES = {
     "audio/flac": ".flac",
     "audio/ogg": ".ogg",
 }
+
+
+# What the person sees while a tool runs. Internal names are how the agent and
+# the traces talk about a tool; they are not what a product says out loud, and
+# `send_file` in a chat reads as a leaked implementation detail rather than as
+# progress. Deliberately English whatever language the conversation is in: this
+# is interface chrome, not part of the answer, and translating it would mean
+# guessing a language from presentation code.
+#
+# Anything not listed says `Working…` — a new tool must be able to appear
+# without leaking its name, so the default is the safe one rather than the
+# informative one.
+TOOL_ACTIVITY = {
+    "search_web": "Searching the web…",
+    "fetch_page": "Reading page…",
+    "view_web_page": "Opening page…",
+    "inspect_page": "Inspecting page…",
+    "read_document": "Reading document…",
+    "view_pages": "Inspecting document…",
+    "list_files": "Listing files…",
+    "read_file": "Reading file…",
+    "write_file": "Writing file…",
+    "edit_file": "Editing file…",
+    "send_file": "Sending file…",
+    "remember_fact": "Saving to memory…",
+    "search_memory": "Searching memory…",
+}
+UNKNOWN_ACTIVITY = "Working…"
+
+
+def activity_labels(calls: Iterable[Any]) -> list[str]:
+    """The user-facing labels for one batch of tool calls, in order, deduped."""
+
+    labels: list[str] = []
+    for call in calls:
+        label = TOOL_ACTIVITY.get(call.name, UNKNOWN_ACTIVITY)
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
+class ToolActivity:
+    """One transient status message per turn, edited as the work moves on.
+
+    A message per tool call turned a turn with a browser in it into a column of
+    notifications that stayed in the history forever. This is the same
+    information in one message that is edited while the tools run and deleted
+    when there is an answer to read, so what remains in the chat afterwards is
+    the conversation.
+
+    Nothing here can fail a turn. A status that could not be sent, edited or
+    removed is a cosmetic loss, and the answer it was describing is not.
+    """
+
+    def __init__(self, client: TelegramClient, chat_id: int) -> None:
+        self.client = client
+        self.chat_id = chat_id
+        self.message_id: int | None = None
+        self._shown: str | None = None
+
+    async def show(self, labels: list[str]) -> None:
+        text = "\n".join(labels)
+        if not text or text == self._shown:
+            return
+        try:
+            if self.message_id is None:
+                sent = await self.client.send_message(self.chat_id, text)
+                self.message_id = int(sent["message_id"]) if sent else None
+            else:
+                await self.client.edit_message(self.chat_id, self.message_id, text)
+        except (TelegramError, KeyError, TypeError, ValueError):
+            return
+        self._shown = text
+
+    async def clear(self) -> None:
+        """Take the status out of the chat, so it cannot sit under the answer."""
+
+        message_id, self.message_id, self._shown = self.message_id, None, None
+        if message_id is not None:
+            await self.client.delete_message(self.chat_id, message_id)
 
 
 def canonical_user_id(telegram_user_id: int) -> str:
@@ -378,27 +484,44 @@ class TelegramAdapter:
     async def _answer(
         self, harness: GeneralHarness, chat_id: int, thread_id: str, message: Message
     ) -> None:
-        async for produced in harness.agent.steps(thread_id, message):
-            await self._deliver(chat_id, produced)
+        activity = ToolActivity(self.client, chat_id)
+        try:
+            async for produced in harness.agent.steps(thread_id, message):
+                await self._deliver(chat_id, produced, activity)
+        finally:
+            # Including when the turn failed: the last thing a person should be
+            # left looking at is not "Reading page…" on a turn that stopped.
+            await activity.clear()
         await self._ask_pending_calls(harness, chat_id, thread_id)
 
-    async def _deliver(self, chat_id: int, produced: Message) -> None:
+    async def _deliver(
+        self, chat_id: int, produced: Message, activity: ToolActivity | None = None
+    ) -> None:
         body = spoken(produced)
         if produced.role == "tool":
             # Tool results are working material. Only a presentation tool can
             # mark a concrete item outbound; observing a page or screenshot is
             # never interpreted as a send decision by this adapter.
+            if activity is not None and any(
+                part.outbound and part.data for part in produced.content
+            ):
+                await activity.clear()
             await self._send_media(chat_id, produced, outbound_only=True)
             return
         if body:
-            await self.client.send_message(chat_id, body)
+            # The status has done its job the moment there is something to read.
+            if activity is not None:
+                await activity.clear()
+            # The canonical answer is the model's ordinary Markdown, which is
+            # what the store keeps. This renders that same text for Telegram.
+            await self.client.send_message(chat_id, Formatted.from_markdown(body))
         await self._send_media(chat_id, produced)
         if produced.tool_calls:
-            # One line per call, but one message: a batch of calls used to arrive
-            # as a burst of near-empty notifications.
-            await self.client.send_message(
-                chat_id, "\n".join(f"· {call.name}" for call in produced.tool_calls)
-            )
+            labels = activity_labels(produced.tool_calls)
+            if activity is not None:
+                await activity.show(labels)
+            else:
+                await self.client.send_message(chat_id, "\n".join(labels))
 
     async def _send_media(
         self, chat_id: int, produced: Message, *, outbound_only: bool = False
@@ -457,19 +580,45 @@ class TelegramAdapter:
         await self._finish_task(harness, chat_id, thread_id, view)
 
     async def _run_task(
-        self, harness: GeneralHarness, chat_id: int, thread_id: str, approved: bool
+        self, harness: GeneralHarness, incoming: Incoming, thread_id: str, approved: bool
     ) -> None:
+        chat_id = incoming.chat_id
         if not approved:
             view = await harness.resume_task(thread_id, False)
+            await self._settle(incoming, approved=False)
             await self._finish_task(harness, chat_id, thread_id, view)
             return
-        sent = await self.client.send_message(chat_id, "Approved; working…")
-        lines = ["Approved; working…"]
+        # Responsive without claiming anything yet. Until the resume has
+        # produced proof that it happened, the only honest thing the chat can
+        # say is that the press arrived: an "Approved" written here would
+        # outlive a transition that never took place.
+        sent = await self.client.send_message(chat_id, "Starting…")
+        message_id = int(sent["message_id"]) if sent else None
+        lines: list[str] = []
+        settled = False
+
+        async def confirm() -> None:
+            # The first proof that the task really did resume, which is the
+            # moment both the button and the text may say it was approved.
+            nonlocal settled
+            if settled:
+                return
+            await self._settle(incoming, approved=True)
+            settled = True
+            lines.append("Approved; working…")
+
         async for progress in harness.resume_task_with_progress(thread_id, True):
+            await confirm()
             lines.append(progress_text(progress))
-            if sent:
-                await self.client.edit_message(chat_id, int(sent["message_id"]), "\n".join(lines))
-        await self._finish_task(harness, chat_id, thread_id, await harness.task_view(thread_id))
+            if message_id is not None:
+                await self.client.edit_message(chat_id, message_id, "\n".join(lines))
+        view = await harness.task_view(thread_id)
+        if not settled:
+            # A resume that finished without reporting a stage still resumed.
+            await confirm()
+            if message_id is not None:
+                await self.client.edit_message(chat_id, message_id, "\n".join(lines))
+        await self._finish_task(harness, chat_id, thread_id, view)
 
     async def _finish_task(
         self, harness: GeneralHarness, chat_id: int, thread_id: str, view: TaskView
@@ -496,18 +645,66 @@ class TelegramAdapter:
         self, harness: GeneralHarness, user_id: str, incoming: Incoming
     ) -> None:
         data = incoming.callback_data or ""
+        if data.startswith(SETTLED_CALLBACK_PREFIX):
+            # A button that already says what happened. Answering the callback
+            # is all Telegram needs, and it is all this may do: before any
+            # thread is read or created, so pressing it cannot start a
+            # conversation, resume a task, or wake anything.
+            if incoming.callback_id:
+                await self.client.answer_callback(
+                    incoming.callback_id,
+                    "Already approved" if data.endswith("approved") else "Already rejected",
+                )
+            return
+
         thread_id = current_thread(harness.agent.store, user_id)
         if incoming.callback_id:
             await self.client.answer_callback(incoming.callback_id)
 
         if data.startswith("task:"):
-            await self._run_task(harness, incoming.chat_id, thread_id, data == "task:yes")
+            await self._run_task(harness, incoming, thread_id, data == "task:yes")
             return
         if data.startswith("call:"):
             _, verdict, call_id = data.split(":", 2)
-            async for produced in harness.agent.resume(thread_id, {call_id: verdict == "yes"}):
-                await self._deliver(incoming.chat_id, produced)
+            approved = verdict == "yes"
+            settled = False
+            activity = ToolActivity(self.client, incoming.chat_id)
+            try:
+                async for produced in harness.agent.resume(thread_id, {call_id: approved}):
+                    if not settled:
+                        await self._settle(incoming, approved=approved)
+                        settled = True
+                    await self._deliver(incoming.chat_id, produced, activity)
+            finally:
+                await activity.clear()
+            if not settled:
+                await self._settle(incoming, approved=approved)
             await self._ask_pending_calls(harness, incoming.chat_id, thread_id)
+
+    async def _settle(self, incoming: Incoming, *, approved: bool) -> None:
+        """Turn the choices back into the one state that was actually reached.
+
+        Called only after the application transition succeeded, because that is
+        what the button then claims. A settlement that could not be written is
+        left unsettled rather than reported as done: a stale pair of buttons is
+        honest, and a green tick over a transition that did not happen is not.
+        """
+
+        if incoming.callback_message_id is None:
+            return
+        for styled in (True, False):
+            try:
+                await self.client.edit_reply_markup(
+                    incoming.chat_id,
+                    incoming.callback_message_id,
+                    settled_keyboard(approved, styled=styled),
+                )
+                return
+            except TelegramError:
+                # `style` is a recent Bot API field. An older server refuses the
+                # whole edit for it, so the second attempt drops the colour and
+                # keeps the state, which is the half that carries the meaning.
+                continue
 
     async def aclose(self) -> None:
         for harness in self._harnesses.values():

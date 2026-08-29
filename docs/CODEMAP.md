@@ -61,7 +61,8 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change model-facing web tools | `app/tools/web.py` | `search_web`, `fetch_page`, `view_web_page`, tool builders |
 | Change Telegram behavior | `ui/telegram/adapter.py` | `TelegramAdapter`, `_on_message`, `_deliver`, `_on_callback` |
 | Change Telegram raw update parsing | `ui/telegram/wire.py` | `Incoming`, `read_update`, `needs_model` |
-| Change Telegram Bot API transport | `ui/telegram/api.py` | `TelegramClient` |
+| Change Telegram Markdown rendering | `ui/telegram/markdown.py` | `render`, `balanced` |
+| Change Telegram Bot API transport/presentation primitives | `ui/telegram/api.py` | `TelegramClient`, `Formatted`, `PRODUCT_COMMANDS` |
 | Change deployed webhook handoff | `ui/telegram/webhook.py` | `TelegramWebhook`, `TelegramUpdateWorker` |
 | Change deployed Telegram inbox | `ui/telegram/inbox.py` | `PostgresUpdateInbox`, `UpdateInbox` |
 | Change local Telegram polling | `ui/telegram/run.py` | `PollingBot`, per-chat locks |
@@ -73,6 +74,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | **Synchronize deployed control-plane secrets** | **`tools/sync_control_secret.py`** | **`ALLOWED`, `assistant-control`, `DEPLOY_WEB_RENDERER_URL`** |
 | Run deployed DB/checkpoint/inbox migrations | `tools/setup_control_plane.py` | `setup_control_plane`, `--alternate` |
 | Register/delete/check Telegram webhook | `tools/telegram_webhook.py` | `setWebhook`, `deleteWebhook`, `getWebhookInfo` |
+| Preview/publish Telegram bot profile and command menu | `tools/telegram_profile.py` | `--publish`, `PRODUCT_COMMANDS`, bot descriptions |
 | Append/search work journals | `tools/work_log.py` | `reports/agent_tasks.jsonl`, `reports/ml_work.jsonl` |
 | Diagnose local installation | `scripts/doctor.py` | diagnostics |
 | Measure model endpoint wake | `scripts/measure_endpoint_wake.py` | wake measurement |
@@ -218,8 +220,9 @@ app/tools/presentation.py
 
 ```text
 wire.py       raw Telegram JSON -> minimal Incoming; model-free predicate
-api.py        Bot API network calls
-adapter.py    Incoming <-> application + chat presentation
+markdown.py   ordinary Markdown -> safe Telegram HTML/plain blocks
+api.py        Bot API network calls + Telegram presentation primitives
+adapter.py    Incoming <-> application + chat presentation/activity state
 inbox.py      durable deployed update queue/lease
 webhook.py    validate/admit/spawn/worker core
 run.py        local long-poll driver
@@ -273,6 +276,14 @@ The runtime does not silently run these migrations on each request.
 **Owner:** `tools/telegram_webhook.py`
 
 This switches Telegram between webhook delivery and long polling and reports webhook status.
+
+### Telegram bot profile
+
+**Owner:** `tools/telegram_profile.py`
+
+Without arguments it previews the bot description, short description and native
+command menu. `--publish` sends them to Telegram and is therefore an explicit
+external mutation rather than adapter startup behavior.
 
 ### GPU autoscaling experiment
 

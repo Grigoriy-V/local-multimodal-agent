@@ -5,12 +5,10 @@
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** queue 2, Baseline chat product and live evidence,
-currently limited to analysis and planning. No large source-code implementation
-or Claude worker start is authorized until the human separately and explicitly
-says that the large implementation may begin. After that signal Codex prepares
-the brief and acceptance criteria and runs the approved development workflow
-without another brief-review gate. Live product-runtime runs, deploys, sandboxes
-and containers remain separate gates.
+with the 2A source implementation verified offline and deployed to
+`assistant-control`, and the bot profile and native command menu published. No
+live Telegram acceptance has run. Every live product-runtime run remains a
+separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -150,6 +148,16 @@ Verified platform facts and cold-start evidence remain in
      callbacks are model-free no-ops and cannot repeat the action; failures must
      never appear settled. Preserve the existing structured task plan/result UI
      through this common interaction behavior.
+   - **Implemented, verified offline, deployed and published 2026-08-29.** The native profile/menu
+     publisher, shared Telegram Markdown rendering with plain fallback, transient
+     English tool activity, and reusable truthful inline settlement are present.
+     The focused Telegram checks passed, and the full offline suite was 660
+     passed / 1 skipped before the final localized correction; its focused
+     recheck was 102 passed. `assistant-control` was then deployed without a
+     live function call, and Telegram accepted the bot description, short
+     description and native command menu. This is implementation and deployment
+     evidence, not live product acceptance:
+     `reports/2026-08-29_v2_baseline_chat_product_offline.md`.
    - Close 2A with small live scenarios covering onboarding, formatting, tool
      activity, inline-action settlement, capability truth and an ordinary
      tool-capable answer.

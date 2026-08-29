@@ -118,6 +118,26 @@ The script also has an `--alternate` path for the configured alternate database 
 
 Telegram supports two transport modes that are mutually exclusive from Telegram's perspective.
 
+### Bot profile and native command menu
+
+**Owner:** `tools/telegram_profile.py`.
+
+Preview the intended description and `/new`, `/can`, `/stop`, `/help` menu
+without contacting Telegram:
+
+```text
+.venv\Scripts\python.exe tools/telegram_profile.py
+```
+
+Publish them only after the human authorizes the external mutation:
+
+```text
+.venv\Scripts\python.exe tools/telegram_profile.py --publish
+```
+
+The tool reads `TELEGRAM_TOKEN` from settings. `/check` remains a working typed
+diagnostic but is intentionally absent from the native product menu.
+
 ### Deployed webhook
 
 **Registration/status owner:** `tools/telegram_webhook.py`.
@@ -439,6 +459,7 @@ Human-readable implementation evidence belongs in `reports/` rather than in the 
 | Publish control secret from `.env` | `tools/sync_control_secret.py` |
 | Create/migrate deployed DB/checkpoints/inbox | `tools/setup_control_plane.py` |
 | Register/remove/show Telegram webhook | `tools/telegram_webhook.py` |
+| Preview/publish Telegram profile and command menu | `tools/telegram_profile.py` |
 | Deploy CPU control plane | `deploy/modal/control_app.py` |
 | Deploy model server | `deploy/modal/model_app.py` |
 | Change current GPU idle window without deploy | `deploy/modal/autoscale.py` |

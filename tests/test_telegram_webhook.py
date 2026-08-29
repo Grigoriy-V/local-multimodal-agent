@@ -15,7 +15,11 @@ import pytest
 from app.config import TelegramSettings
 from ui.telegram.inbox import EnqueueResult, InboxJob
 from ui.telegram.webhook import TelegramUpdateWorker, TelegramWebhook
-from ui.telegram.wire import MODEL_FREE_COMMANDS
+from ui.telegram.wire import (
+    MODEL_FREE_COMMANDS,
+    SETTLED_APPROVED,
+    SETTLED_REJECTED,
+)
 
 
 def update(update_id: int = 7, user_id: int = 42) -> dict[str, Any]:
@@ -384,3 +388,33 @@ async def test_waking_does_not_delay_the_durable_hand_off() -> None:
     assert response.status == 200
     assert order.index("write") < order.index("wake finished")
     assert order[-1] == "wake finished" or "spawn" in order
+
+
+async def test_a_settled_status_button_does_not_spend_a_gpu_wake() -> None:
+    """The one callback that is not a decision.
+
+    A button reading `✓ Approved` describes something that already happened.
+    Pressing it out of curiosity must cost nothing, and the front door is where
+    that is decided — by the time an adapter could tell, the wake has been paid
+    for.
+    """
+
+    for data in (SETTLED_APPROVED, SETTLED_REJECTED):
+        warm = Warming()
+        webhook, _, spawned = warming_webhook(warm)
+        raw = {
+            "update_id": 12,
+            "callback_query": {
+                "id": "c2",
+                "data": data,
+                "from": {"id": 42},
+                "message": {"chat": {"id": 99}, "message_id": 500},
+            },
+        }
+
+        response = await webhook.accept(SECRET, body(raw))
+
+        assert response.status == 200
+        assert warm.calls == 0, f"{data} spent a GPU wake"
+        # Still delivered, so the adapter can acknowledge the tap.
+        assert spawned == [12]
