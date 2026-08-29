@@ -1,6 +1,6 @@
 ---
 name: orca-claude-bridge
-description: Run Claude Code as a supervised Orca worker for a large cohesive source-code implementation batch, or when the human explicitly requests Claude, then wait for and verify the result.
+description: After the human explicitly authorizes a large implementation to begin, prepare its bounded brief, run Claude Code as a supervised Orca worker, wait for it, and verify the result.
 ---
 
 # Orca Claude Bridge
@@ -10,10 +10,12 @@ source-code implementation batch to Claude, or when the human explicitly asks
 to pass the current work to Claude, use Claude through Orca, or invoke
 `$orca-claude-bridge`. Keep architecture, planning, canonical documents,
 inspection, review, verification and small localized implementation in Codex
-unless the human says otherwise. One routed task authorizes one bounded
-supervised workflow, including fresh correction Tasks needed to satisfy the
-original brief, but not later or widened work. Tell the human whenever the
-Claude route is used.
+unless the human says otherwise. Routing never authorizes a worker start. Wait
+until the human separately and explicitly says that the large implementation
+may begin; roadmap approval or a request to begin analysis is not that signal.
+After it is given, prepare the brief, acceptance criteria and checks yourself
+and run the bounded `opus / medium` workflow without asking for approval of the
+brief. Tell the human whenever the Claude route is used.
 
 Use the installed `orchestration` and `orca-cli` skills. On this Windows
 workstation, invoke Orca through the packaged CLI at:
@@ -40,6 +42,8 @@ directly. Orca must own the Claude process and Dispatch lifecycle.
 
 ## Preconditions and placement
 
+- Do not start preflight or create Orca runtime resources until the human has
+  explicitly authorized this large implementation to begin.
 - Confirm the Orca runtime is ready and `worktree current --json`, invoked
   through the exact CLI above, resolves to the checkout Codex is using. A
   headless Orca runtime is acceptable.
@@ -67,11 +71,14 @@ start, checks, replies, and acknowledgements as required by the live guide.
 ## Supervised workflow
 
 1. Inspect the repository context needed to write a reliable brief.
-2. Create one Run and one bounded Task. The Task spec must be self-contained:
+2. Confirm that the human explicitly authorized this large implementation to
+   begin. Do not infer that from roadmap approval or a request to begin analysis.
+   Then write the Task spec yourself; show it only when the human asks.
+3. Create one Run and one bounded Task. The Task spec must be self-contained:
    goal, scope, accepted decisions, exclusions, relevant evidence and canonical
    documents, acceptance criteria, and required or skipped checks. Do not copy
    Orca lifecycle commands into it.
-3. Start every fresh Claude worker with the single project configuration
+4. Start every fresh Claude worker with the single project configuration
    `--model opus --effort medium`; do not select a different configuration by
    task complexity:
 
@@ -83,19 +90,20 @@ start, checks, replies, and acknowledgements as required by the live guide.
    model and effort and that `stage` is `input_accepted` before treating the
    worker as started. Do not replace this with a direct Claude invocation or a
    manually launched Claude terminal.
-4. Require a start receipt showing that the task input was accepted. Treat
+5. Require a start receipt showing that the task input was accepted. Treat
    trust, permission, or startup prompt failures as failed starts.
-5. Wait through Orca for `worker_done`, `question`, or `escalation`. Answer
+6. Wait through Orca for `worker_done`, `question`, or `escalation`. Answer
    bounded clarification questions without widening authority. A wait timeout is
    a liveness checkpoint, not task completion.
-6. After accepted `worker_done`, independently inspect the claimed files or diff
+7. After accepted `worker_done`, independently inspect the claimed files or diff
    and run proportionate verification. Compare the result with the brief and
    repository canon, not only with Claude's report.
-7. Release the owned worker, acknowledge the Delivery, and close only the
+8. Release the owned worker, acknowledge the Delivery, and close only the
    coordinator terminal created for this Run.
 
 For review-only work, Claude reports findings and does not edit. If source-code
-corrections are required after implementation, give the defects to a fresh
-supervised Claude Task, repeat review and verification, and keep the work within
-the original authorization. Codex must not silently implement the correction.
-Stop and ask the human if correction requires wider scope or another gate.
+corrections are required after implementation, prepare the defects as a fresh
+supervised Claude Task within the already authorized bounded workflow, then
+repeat review and verification. Codex must not silently implement the
+correction. Stop and ask the human if a correction requires wider scope or
+another gate.

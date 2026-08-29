@@ -4,9 +4,13 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. Queue 1 is closed; queue 2 is next and still
-requires explicit approval. No worker start is authorized; each deploy, sandbox
-or container run is asked for separately.
+**Current approved step:** queue 2, Baseline chat product and live evidence,
+currently limited to analysis and planning. No large source-code implementation
+or Claude worker start is authorized until the human separately and explicitly
+says that the large implementation may begin. After that signal Codex prepares
+the brief and acceptance criteria and runs the approved development workflow
+without another brief-review gate. Live product-runtime runs, deploys, sandboxes
+and containers remain separate gates.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -127,13 +131,27 @@ Verified platform facts and cold-start evidence remain in
    that the assistant answers a capability question correctly, `/can` agrees,
    and ordinary plans and results are readable. This closes the basic chatbot
    experience; serious work on the harness and agent loop belongs to item 4.
+   Read and use `docs/telegram_baseline_chat_product.md` as the working design
+   input for analysis, implementation and acceptance throughout this item. It
+   supplements, but does not override, the roadmap or canonical documents.
+
+   - **2A — Telegram UX baseline.** Use the native command menu for `/new`,
+     `/can`, `/stop` and `/help`; keep `/check` as a diagnostic. Add concise
+     `/start` and `/help` onboarding. Keep ordinary Markdown as canonical model
+     text and render a small useful subset safely in Telegram, with complete
+     plain-text delivery on malformed markup, parser refusal or unsafe message
+     splitting. Preserve the existing structured plan/result and approval UI.
+     Close 2A with small live scenarios for onboarding, formatting, capability
+     truth and an ordinary tool-capable answer.
 
    - Telegram voice recognition quality: the audio decodes, so it is a
      mis-hearing. One clean comparison of the same sentence as Opus and WAV.
-   - Streaming the answer, through Telegram's message drafts
-     (`sendMessageDraft`, Bot API 10.0). The display is the cheap half; the
-     source is not, because `ModelBackend.stream` drops `tool_calls` and
-     `usage`. Worth more after the single-call change in item 5.
+   - **2B — real answer streaming, deferred.** Telegram drafts are only the
+     display half. Do not bypass the agent graph or fake streaming from the
+     adapter: the normal runtime must preserve tool calls, tool results, usage,
+     finish reason, persistence and the same final assistant message. The
+     current `ModelBackend.stream` contract drops `tool_calls` and `usage`, so
+     this remains after the single-call change in item 5 unless reprioritized.
 
 3. **Baseline measurement, metrics and logs.** Make both product behaviour and
    its cost observable before changing the agent loop. Today's 15-17 tok/s

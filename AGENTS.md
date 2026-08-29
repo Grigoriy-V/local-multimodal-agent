@@ -26,22 +26,33 @@ Codex is the primary project agent and Supervisor. It owns architecture,
 planning, canonical documents, repository inspection, review, verification and
 the final report. It also implements small, localized code changes itself.
 
-Delegate a large cohesive source-code implementation batch to Claude through
-Orca by default unless the human says to keep that task in Codex. "Large" means
-the task requires a substantial package of implementation and tests, typically
-across several modules or an architectural boundary; do not delegate merely
-because a task is difficult. Analysis, design, documentation, code review and
-small fixes stay with Codex unless the human asks otherwise. Do not create
-other subagents. The human controls direction and may override this routing for
-any task.
+Route a large cohesive source-code implementation batch to Claude through Orca
+by default unless the human says to keep that task in Codex. "Large" means the
+task requires a substantial package of implementation and tests, typically
+across several modules or an architectural boundary; do not route merely
+because a task is difficult. Routing is a proposal, not start authority. Before
+large implementation begins, the human must separately and explicitly say that
+the large implementation may start. Approval of a roadmap step or a request to
+begin analysis and planning does not substitute for this implementation gate.
+After the human gives that start signal, Codex prepares the bounded brief,
+acceptance criteria and checks itself and proceeds with the intended executor;
+it does not need another approval of the resulting brief unless the human asks
+to review it.
+
+Analysis, design, documentation, code review and small fixes stay with Codex
+unless the human asks otherwise. Do not create other subagents. The human
+controls direction and may override this routing for any task.
 
 ### Claude implementation through Orca
 
-The routing rule above authorizes one supervised Claude development workflow for
-each qualifying bounded implementation task, including fresh Claude correction
-Tasks needed to satisfy the original brief. Tell the human when this routing is
-being used. It does not authorize widened work, product-runtime workers, model
-endpoints, containers, deployments, or other externally consequential actions.
+The routing rule above never authorizes a Claude process by itself. The human's
+explicit signal to begin the large implementation authorizes one bounded
+supervised Claude workflow, including fresh correction Tasks required to meet
+its original acceptance criteria. Codex then prepares the Worker brief and
+starts the workflow without asking the human to approve the brief. Tell the
+human when the Claude route is being used. This authorization does not cover
+widened work, product-runtime workers, model endpoints, containers, deployments,
+or other externally consequential actions.
 
 For that workflow the primary Codex chat becomes the Supervisor. It owns
 inspection, discussion, planning, the Worker brief, review, and the final report,
