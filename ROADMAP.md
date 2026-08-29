@@ -4,9 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** item 4, sub-step 4.0. Its code is written and tested
-offline; the deployed database migration, the deploy and the live check are
-still owed and are each a human gate. Item 3 is closed and moved to Done.
+**Current approved step:** item 4, sub-step 4.0. Migrated and deployed; the live
+check — two messages seconds apart, answered in order — is owed and is the
+human's own to run. Item 3 is closed and moved to Done.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -167,12 +167,11 @@ Verified platform facts and cold-start evidence remain in
    per-sub-step acceptance:
    `reports/2026-08-30_v2_step4_harness_preparation.md`.
 
-   - **4.0 Conversation serialization — written and tested offline, not
-     deployed.** The lease belongs to the conversation, the worker drains it in
-     order, and the migration that adds the column is additive. Owed before it
-     counts: the migration, a deploy, and two messages seconds apart answered in
-     order. Coalescing an image and the question after it is held back — it
-     redefines the turn every recorded number counts.
+   - **4.0 Conversation serialization — migrated and deployed, awaiting its
+     live check.** The lease belongs to the conversation and the worker drains
+     it in order. Owed: two messages sent seconds apart, answered in order.
+     Coalescing an image and the question after it is held back — it redefines
+     the turn every recorded number counts.
      `reports/2026-08-30_v2_conversation_serialization.md`.
    - **4.1 One loop.** Delete the answer/act router and the fixed
      plan/implement/test/evaluate lifecycle. The surviving loop gains step

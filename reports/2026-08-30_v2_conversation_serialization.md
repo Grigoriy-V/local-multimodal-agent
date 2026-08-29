@@ -109,16 +109,45 @@ already promised.
 While editing `docs/PROJECT_MAP.md` a stale line was corrected in passing — it
 still said the run inspector did not exist, which item 3 closed.
 
+## Migrated and deployed, 2026-08-30
+
+Both on the human's explicit permission, live acceptance deliberately left to
+them.
+
+**Migration.** `tools/setup_control_plane.py` against the deployed Neon
+database, exit 0. Confirmed by reading the catalogue back: `telegram_updates`
+now has `attempts, conversation_key, created_at, last_error, lease_token,
+lease_until, payload, run_id, state, update_id, updated_at` and the indexes
+`telegram_updates_conversation` and `telegram_updates_pkey`.
+
+**The claim SQL was planned before it was deployed.** Deploying a statement that
+has never reached a server is how a syntax error becomes a bot that stops
+answering, and the contract suite that would have caught it needs a database
+this environment does not have. `EXPLAIN` without `ANALYZE` plans a statement
+and does not execute it, so both claim paths were planned against the real
+table — with the SQL taken from the real code by driving `claim()` and
+`claim_next()` against a recording stub, so this could not pass against a
+statement the application does not actually send. Both planned:
+
+```text
+SELECT conversation_key FROM "assistant"."telegram_updates"
+  -> Index Scan using telegram_updates_pkey  (cost=0.14..8.16 rows=1 width=32)
+UPDATE "assistant"."telegram_updates" SET state = 'running', ...
+  -> Update on telegram_updates            (cost=16.49..24.52 rows=1 width=90)
+```
+
+Nothing was written by this. It proves the statements are valid against the
+real schema; it does not prove the exclusion or the ordering, which only the
+contract suite or the live check can.
+
+**Deploy.** `assistant-control` in 21.3 s, five functions re-created. No GPU was
+touched.
+
 ## What is owed before this can be called done
 
-1. **The migration**, `tools/setup_control_plane.py`, against the deployed
-   database. Additive, but it is a write to a populated database and its own
-   gate.
-2. **A deploy** of `assistant-control`, so the webhook writes the key and the
-   worker drains.
-3. **Live acceptance**: two messages sent seconds apart, answered in order, with
-   `tools/show_run.py` showing two runs on one thread whose intervals do not
-   overlap. This wakes a GPU and is a separate permission.
+**Live acceptance**: two messages sent seconds apart, answered in order, with
+`tools/show_run.py` showing two runs on one thread whose intervals do not
+overlap. The human runs it; this wakes a GPU and is their own permission to
+spend.
 
-Until all three, the deployed behaviour is the old one — rows without a key are
-claimed one at a time, which is what the previous deployment already did.
+Until then the ordering guarantee is deployed but unproven in the product.
