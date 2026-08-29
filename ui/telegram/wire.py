@@ -13,8 +13,11 @@ setting or a client belongs in `adapter.py`, which imports from here.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any
+
+NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "local-multimodal-agent:telegram")
 
 PHOTO_MEDIA_TYPE = "image/jpeg"
 VOICE_MEDIA_TYPE = "audio/ogg"
@@ -135,6 +138,26 @@ def read_update(update: dict[str, Any]) -> Incoming | None:
         text=str(message.get("text") or message.get("caption") or ""),
         files=tuple(files),
     )
+
+
+def canonical_user_id(telegram_user_id: int) -> str:
+    """The application's own identifier for a Telegram account."""
+
+    return str(uuid.uuid5(NAMESPACE, f"user:{telegram_user_id}"))
+
+
+def conversation_key(incoming: Incoming) -> str:
+    """What a turn must not run concurrently with.
+
+    The person, not the thread. Which conversation a message lands in is the
+    worker's own first read — `current_thread` consults the store — so the front
+    door cannot know it without a query it exists to avoid. A person is in
+    exactly one conversation at a time, so serializing their updates serializes
+    that conversation, and it also closes the check-then-act in `current_thread`
+    that let two workers meeting a new user create two threads for them.
+    """
+
+    return canonical_user_id(incoming.telegram_user_id)
 
 
 def is_cancellation(incoming: Incoming) -> bool:

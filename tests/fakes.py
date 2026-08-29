@@ -20,6 +20,7 @@ from app.models import (
     ToolCall,
     Usage,
 )
+from ui.telegram.inbox import EnqueueResult, InboxJob
 
 
 class ScriptedBackend(ModelBackend):
@@ -106,3 +107,87 @@ def body(message: Message) -> str:
 
 def prompt_text(messages: Sequence[Message]) -> str:
     return "\n".join(body(message) for message in messages)
+
+
+class QueuedInbox:
+    """The durable queue's rules in memory, for tests that are not about SQL.
+
+    The worker's ordering behaviour is worth testing offline; the real queue's
+    is not testable that way, and `tests/test_update_inbox_contract.py` asserts
+    the same rules against PostgreSQL itself. So this holds exactly the two that
+    the worker depends on — one conversation runs one update at a time, and the
+    oldest unfinished one goes first — and models a lease that never expires,
+    because nothing offline moves a clock forward.
+    """
+
+    def __init__(self, queued_ms: int = 0) -> None:
+        self.payloads: dict[int, dict[str, Any]] = {}
+        self.runs: dict[int, str] = {}
+        self.keys: dict[int, str] = {}
+        self.state: dict[int, str] = {}
+        self.completed: list[int] = []
+        self.retried: list[tuple[int, str]] = []
+        self.queued_ms = queued_ms
+
+    async def enqueue(
+        self,
+        update_id: int,
+        payload: dict[str, Any],
+        run_id: str = "",
+        conversation_key: str = "",
+    ) -> "EnqueueResult":
+        if update_id not in self.payloads:
+            self.payloads[update_id] = payload
+            # The stored identity wins, exactly as the real queue's insert does:
+            # a redelivered update is one turn seen twice.
+            self.runs[update_id] = run_id
+            self.keys[update_id] = conversation_key
+            self.state[update_id] = "pending"
+        return EnqueueResult(
+            update_id, self.state[update_id] == "pending", self.runs[update_id]
+        )
+
+    async def claim(self, update_id: int, lease_seconds: int = 900) -> "InboxJob | None":
+        if update_id not in self.payloads:
+            return None
+        key = self.keys.get(update_id, "")
+        if key:
+            return await self.claim_next(key, lease_seconds)
+        # Queued before conversations were part of the queue: one row, alone.
+        return self._lease(update_id) if self.state[update_id] == "pending" else None
+
+    async def claim_next(
+        self, conversation_key: str, lease_seconds: int = 900
+    ) -> "InboxJob | None":
+        if not conversation_key:
+            return None
+        theirs = [
+            update_id
+            for update_id, key in self.keys.items()
+            if key == conversation_key
+        ]
+        if any(self.state[update_id] == "running" for update_id in theirs):
+            return None
+        waiting = sorted(
+            update_id for update_id in theirs if self.state[update_id] == "pending"
+        )
+        return self._lease(waiting[0]) if waiting else None
+
+    def _lease(self, update_id: int) -> "InboxJob":
+        self.state[update_id] = "running"
+        return InboxJob(
+            update_id,
+            self.payloads[update_id],
+            "lease",
+            run_id=self.runs.get(update_id, ""),
+            queued_ms=self.queued_ms,
+            conversation_key=self.keys.get(update_id, ""),
+        )
+
+    async def complete(self, job: "InboxJob") -> None:
+        self.state[job.update_id] = "done"
+        self.completed.append(job.update_id)
+
+    async def retry(self, job: "InboxJob", error: str) -> None:
+        self.state[job.update_id] = "pending"
+        self.retried.append((job.update_id, error))

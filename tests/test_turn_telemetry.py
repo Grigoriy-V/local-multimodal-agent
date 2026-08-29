@@ -25,10 +25,9 @@ from app.models import Completion, Usage
 from app.telemetry import Telemetry, TraceEvent, TurnRun
 from app.telemetry.sqlite import SqliteTelemetry
 from app.tools import Tool, Toolbox
-from tests.fakes import ScriptedBackend, calls, says
+from tests.fakes import QueuedInbox, ScriptedBackend, calls, says
 from ui.telegram.adapter import TelegramAdapter, canonical_user_id
 from ui.telegram.api import TelegramClient
-from ui.telegram.inbox import EnqueueResult, InboxJob
 from ui.telegram.webhook import TelegramUpdateWorker, TelegramWebhook
 
 ALLOWED = 4242
@@ -63,39 +62,11 @@ class FakeTelegram:
         return httpx.Response(200, json={"ok": True, "result": {}})
 
 
-class FakeInbox:
-    """The durable queue, reduced to what a turn's identity needs from it."""
+class FakeInbox(QueuedInbox):
+    """The shared queue fake, with a queue wait every turn here has to report."""
 
     def __init__(self) -> None:
-        self.payloads: dict[int, dict[str, Any]] = {}
-        self.runs: dict[int, str] = {}
-        self.claimed: set[int] = set()
-
-    async def enqueue(
-        self, update_id: int, payload: dict[str, Any], run_id: str = ""
-    ) -> EnqueueResult:
-        created = update_id not in self.payloads
-        self.payloads.setdefault(update_id, payload)
-        self.runs.setdefault(update_id, run_id)
-        return EnqueueResult(update_id, created, self.runs[update_id])
-
-    async def claim(self, update_id: int, lease_seconds: int = 900) -> InboxJob | None:
-        if update_id not in self.payloads or update_id in self.claimed:
-            return None
-        self.claimed.add(update_id)
-        return InboxJob(
-            update_id,
-            self.payloads[update_id],
-            "lease",
-            run_id=self.runs.get(update_id, ""),
-            queued_ms=250,
-        )
-
-    async def complete(self, job: InboxJob) -> None:
-        return None
-
-    async def retry(self, job: InboxJob, error: str) -> None:
-        self.claimed.discard(job.update_id)
+        super().__init__(queued_ms=250)
 
 
 BUILT: list[TelegramAdapter] = []
@@ -270,7 +241,11 @@ async def test_a_redelivered_update_is_one_turn_seen_twice(
     second = await webhook.accept(SECRET, body)
 
     assert first.detail == "accepted"
-    assert second.detail == "already accepted"
+    # Both deliveries ask for a worker, and that is deliberate: while the row is
+    # still pending, the only reason to have seen it twice is that nobody
+    # answered the first one. What must not double is the identity — the second
+    # worker continues the same measured turn rather than opening a second.
+    assert second.detail == "accepted"
     assert len(inbox.runs) == 1
 
 

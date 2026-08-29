@@ -4,10 +4,17 @@ The webhook acknowledges quickly after this inbox owns the update. A worker
 then claims it with a lease, so duplicate Telegram deliveries or duplicate
 spawn attempts cannot run the same update concurrently. PostgreSQL is opened
 per operation because the deployed processes scale to zero between requests.
+
+A lease is held against a conversation, not only against one update. Two
+messages sent seconds apart used to be claimed by two containers and answered
+out of order, because each claim only asked whether *that* update was free. A
+claim now asks for the oldest unfinished update of the conversation the caller
+names, and refuses while another one of its updates is still running.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from dataclasses import dataclass
@@ -15,6 +22,25 @@ from typing import Any, Protocol
 
 
 SCHEMA_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def lock_id(conversation_key: str) -> int:
+    """One conversation's advisory-lock identifier, as a signed 64-bit integer.
+
+    Mutual exclusion cannot come from the claim statement alone. Two workers
+    holding different updates of one conversation both find nothing running and
+    both proceed, because they lock different rows and never meet. A lock keyed
+    by the conversation is what makes them meet, and PostgreSQL's advisory locks
+    give one without a second table: it is held for the transaction and released
+    when it ends, including when the connection dies.
+
+    The number is computed here rather than by `hashtext()` so the value does
+    not depend on a server function whose definition is not part of the SQL
+    contract.
+    """
+
+    digest = hashlib.sha256(conversation_key.encode("utf-8")).digest()[:8]
+    return int.from_bytes(digest, "big", signed=True)
 
 
 @dataclass(frozen=True)
@@ -37,14 +63,26 @@ class InboxJob:
     # plus the worker's own cold start, which is the largest CPU number in the
     # chain and would otherwise fall outside every measurement.
     queued_ms: int = 0
+    # The conversation this update belongs to, carried out of the claim so the
+    # worker can ask for the next one without another lookup. Empty for a row
+    # written before the column existed.
+    conversation_key: str = ""
 
 
 class UpdateInbox(Protocol):
     async def enqueue(
-        self, update_id: int, payload: dict[str, Any], run_id: str = ""
+        self,
+        update_id: int,
+        payload: dict[str, Any],
+        run_id: str = "",
+        conversation_key: str = "",
     ) -> EnqueueResult: ...
 
     async def claim(self, update_id: int, lease_seconds: int = 900) -> InboxJob | None: ...
+
+    async def claim_next(
+        self, conversation_key: str, lease_seconds: int = 900
+    ) -> InboxJob | None: ...
 
     async def complete(self, job: InboxJob) -> None: ...
 
@@ -101,9 +139,27 @@ class PostgresUpdateInbox:
                 await cursor.execute(
                     f"ALTER TABLE {self.table} ADD COLUMN IF NOT EXISTS run_id TEXT"
                 )
+                # Also additive, and a row without it keeps the old behaviour of
+                # being claimed on its own. Nothing is rewritten and nothing is
+                # dropped: an update queued by the previous deployment is still
+                # answered by the next worker that reaches it.
+                await cursor.execute(
+                    f"ALTER TABLE {self.table}"
+                    " ADD COLUMN IF NOT EXISTS conversation_key TEXT"
+                )
+                # The claim's whole query: one conversation's unfinished
+                # updates, oldest first. Without it the lease scans the queue.
+                await cursor.execute(
+                    f'CREATE INDEX IF NOT EXISTS "telegram_updates_conversation"'
+                    f" ON {self.table} (conversation_key, state, update_id)"
+                )
 
     async def enqueue(
-        self, update_id: int, payload: dict[str, Any], run_id: str = ""
+        self,
+        update_id: int,
+        payload: dict[str, Any],
+        run_id: str = "",
+        conversation_key: str = "",
     ) -> EnqueueResult:
         from psycopg.types.json import Jsonb
 
@@ -111,10 +167,11 @@ class PostgresUpdateInbox:
         async with connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
-                    f"INSERT INTO {self.table} (update_id, run_id, payload)"
-                    " VALUES (%s, %s, %s)"
+                    f"INSERT INTO {self.table}"
+                    " (update_id, run_id, conversation_key, payload)"
+                    " VALUES (%s, %s, %s, %s)"
                     " ON CONFLICT (update_id) DO NOTHING RETURNING state",
-                    (update_id, run_id or None, Jsonb(payload)),
+                    (update_id, run_id or None, conversation_key or None, Jsonb(payload)),
                 )
                 inserted = await cursor.fetchone()
                 if inserted is not None:
@@ -133,32 +190,121 @@ class PostgresUpdateInbox:
         # of one update is the same turn seen twice, not two turns.
         return EnqueueResult(update_id, should_spawn, (row or {}).get("run_id") or "")
 
+    # What a claim may take: never a finished update, and never one another
+    # container is still working on. An expired lease is fair game, because the
+    # only thing that leaves one behind is a worker that died.
+    UNFINISHED = (
+        "(state = 'pending' OR (state = 'running' AND lease_until < CURRENT_TIMESTAMP))"
+    )
+
     async def claim(self, update_id: int, lease_seconds: int = 900) -> InboxJob | None:
+        """Claim work for the conversation this update belongs to.
+
+        Not necessarily this update. A worker is started with the id that woke
+        it, but what it owes the person is their oldest unanswered message, and
+        a burst arrives as several ids whose workers race to be first. Reading
+        the key here rather than trusting the caller keeps one writer of it: the
+        front door that queued the row.
+        """
+
         if lease_seconds < 1:
             raise ValueError("lease_seconds must be positive")
-        token = uuid.uuid4().hex
         connection = await self._connection()
         async with connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
-                    f"UPDATE {self.table} SET state = 'running', lease_token = %s,"
-                    " lease_until = CURRENT_TIMESTAMP + (%s * INTERVAL '1 second'),"
-                    " attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP"
-                    " WHERE update_id = %s AND (state = 'pending' OR"
-                    " (state = 'running' AND lease_until < CURRENT_TIMESTAMP))"
-                    " RETURNING payload, run_id,"
-                    " EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) AS waited",
-                    (token, lease_seconds, update_id),
+                    f"SELECT conversation_key FROM {self.table} WHERE update_id = %s",
+                    (update_id,),
                 )
                 row = await cursor.fetchone()
+                if row is None:
+                    return None
+                key = row["conversation_key"] or ""
+                if key:
+                    return await self._claim_conversation(connection, key, lease_seconds)
+                # Queued before the column existed. One row, on its own, exactly
+                # as it was accepted.
+                return await self._lease(
+                    connection,
+                    f"WHERE update_id = %s AND {self.UNFINISHED}",
+                    (update_id,),
+                    lease_seconds,
+                )
+
+    async def claim_next(
+        self, conversation_key: str, lease_seconds: int = 900
+    ) -> InboxJob | None:
+        """The next update this conversation is owed, if it is owed one.
+
+        Called by a worker that has just finished one, so a burst is answered in
+        order by the container that is already warm instead of by a race.
+        """
+
+        if lease_seconds < 1:
+            raise ValueError("lease_seconds must be positive")
+        if not conversation_key:
+            return None
+        connection = await self._connection()
+        async with connection:
+            return await self._claim_conversation(
+                connection, conversation_key, lease_seconds
+            )
+
+    async def _claim_conversation(
+        self, connection: Any, conversation_key: str, lease_seconds: int
+    ) -> InboxJob | None:
+        """Take one conversation's oldest unfinished update, or nothing.
+
+        The advisory lock and the claim are one transaction: two workers holding
+        different updates of the same conversation would otherwise both find
+        nothing running and both start.
+        """
+
+        async with connection.transaction():
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT pg_advisory_xact_lock(%s)", (lock_id(conversation_key),)
+                )
+            return await self._lease(
+                connection,
+                "WHERE update_id = (SELECT update_id"
+                f" FROM {self.table} WHERE conversation_key = %s AND {self.UNFINISHED}"
+                " ORDER BY update_id LIMIT 1)"
+                f" AND NOT EXISTS (SELECT 1 FROM {self.table} AS busy"
+                " WHERE busy.conversation_key = %s AND busy.state = 'running'"
+                " AND busy.lease_until >= CURRENT_TIMESTAMP)",
+                (conversation_key, conversation_key),
+                lease_seconds,
+            )
+
+    async def _lease(
+        self,
+        connection: Any,
+        where: str,
+        values: tuple[Any, ...],
+        lease_seconds: int,
+    ) -> InboxJob | None:
+        token = uuid.uuid4().hex
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                f"UPDATE {self.table} SET state = 'running', lease_token = %s,"
+                " lease_until = CURRENT_TIMESTAMP + (%s * INTERVAL '1 second'),"
+                " attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP"
+                f" {where}"
+                " RETURNING update_id, payload, run_id, conversation_key,"
+                " EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) AS waited",
+                (token, lease_seconds, *values),
+            )
+            row = await cursor.fetchone()
         if row is None:
             return None
         return InboxJob(
-            update_id,
+            int(row["update_id"]),
             dict(row["payload"]),
             token,
             run_id=row["run_id"] or "",
             queued_ms=max(0, int(float(row["waited"] or 0.0) * 1000)),
+            conversation_key=row["conversation_key"] or "",
         )
 
     async def complete(self, job: InboxJob) -> None:

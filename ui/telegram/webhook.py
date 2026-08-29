@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -19,11 +20,24 @@ from app.config import TelegramSettings
 from app.telemetry.base import TraceEvent, TurnRun
 from app.telemetry.trace import NO_TRACE, Telemetry, TurnTrace, log_event
 from ui.telegram.inbox import InboxJob, UpdateInbox
-from ui.telegram.wire import is_cancellation, needs_model, read_update
+from ui.telegram.wire import (
+    Incoming,
+    conversation_key,
+    is_cancellation,
+    needs_model,
+    read_update,
+)
 
 
 MAX_UPDATE_BYTES = 1024 * 1024
 SECRET_HEADER = "x-telegram-bot-api-secret-token"
+
+# How long a worker keeps taking the next update of its conversation before
+# handing the rest to a fresh one. Chosen against the two limits it sits
+# between: the deployed worker is killed at 600 s, and a single turn may spend
+# up to 300 s, so the check has to happen before starting a turn and with a
+# whole turn's worth of room left. Four minutes leaves that room.
+DRAIN_SECONDS = 240.0
 
 
 @dataclass(frozen=True)
@@ -89,8 +103,8 @@ class TelegramWebhook:
         # — awaiting it first added about a second to every message, which is
         # what the deployed execution times showed.
         if self.warm is None or not needs_model(incoming):
-            return await self._admit(update)
-        _, response = await asyncio.gather(self._wake(), self._admit(update))
+            return await self._admit(update, incoming)
+        _, response = await asyncio.gather(self._wake(), self._admit(update, incoming))
         return response
 
     async def _wake(self) -> None:
@@ -102,7 +116,7 @@ class TelegramWebhook:
         except Exception:  # noqa: BLE001 - an optimization cannot lose a message
             pass
 
-    async def _admit(self, update: dict[str, Any]) -> WebhookResponse:
+    async def _admit(self, update: dict[str, Any], incoming: Incoming) -> WebhookResponse:
         """Persist the update, then ask for a worker. Order is the durability.
 
         The turn's identity is generated here, where the person's message
@@ -110,10 +124,18 @@ class TelegramWebhook:
         measurement costs this path no round trip, and the wait before a worker
         exists is inside the turn rather than before it. It is derived from
         nothing: not from the text, the account or the update id.
+
+        The conversation the update belongs to is written by the same insert,
+        and this is the only place that decides it. It is what a worker's lease
+        is taken against, so a second message arriving while the first is being
+        answered waits for it instead of racing it.
         """
 
         queued = await self.inbox.enqueue(
-            update["update_id"], update, run_id=uuid.uuid4().hex
+            update["update_id"],
+            update,
+            run_id=uuid.uuid4().hex,
+            conversation_key=conversation_key(incoming),
         )
         # One line, so the webhook's own logs join the rest of the turn. The
         # durable record is the worker's; this is correlation, and free.
@@ -135,13 +157,18 @@ class TelegramWebhook:
 
 
 class TelegramUpdateWorker:
-    """Claim one persisted update and run it through the existing adapter.
+    """Claim a conversation's oldest unanswered update and work through them.
 
     This is also where a turn begins to be measured, because this is where the
     update stops waiting and starts being worked on. What the person eventually
     received is decided deeper, in the adapter, so the outcome is set there and
     this only closes a turn nobody else closed — which is exactly what a crash
     looks like.
+
+    A worker keeps its conversation until the conversation has nothing left. A
+    burst is therefore answered in order by one warm container, and the workers
+    spawned for the other updates of that burst find the lease taken and exit —
+    which is the whole point, since they are what answered out of order before.
     """
 
     def __init__(
@@ -149,10 +176,17 @@ class TelegramUpdateWorker:
         inbox: UpdateInbox,
         handler: UpdateHandler,
         telemetry: Telemetry | None = None,
+        *,
+        spawn: Callable[[int], Awaitable[None]] | None = None,
+        drain_seconds: float = DRAIN_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.inbox = inbox
         self.handler = handler
         self.telemetry = telemetry or Telemetry(None)
+        self.spawn = spawn
+        self.drain_seconds = drain_seconds
+        self.clock = clock
 
     def _open_trace(self, job: InboxJob) -> TurnTrace:
         """Start measuring, unless this update is answered without a model.
@@ -176,6 +210,25 @@ class TelegramUpdateWorker:
         job = await self.inbox.claim(update_id)
         if job is None:
             return False
+        deadline = self.clock() + self.drain_seconds
+        while True:
+            await self._answer(job)
+            if not job.conversation_key:
+                return True
+            if self.clock() >= deadline:
+                # Long enough. The container has a timeout of its own and a
+                # turn can take minutes, so the rest of the conversation is
+                # handed to a fresh worker rather than gambling on being killed
+                # mid-turn. Any id of this conversation will do: the next claim
+                # reads the key from the row and takes the oldest unfinished one.
+                await self._hand_off(job)
+                return True
+            following = await self.inbox.claim_next(job.conversation_key)
+            if following is None:
+                return True
+            job = following
+
+    async def _answer(self, job: InboxJob) -> None:
         trace = self._open_trace(job)
         try:
             await self.handler.handle_update(job.payload, trace)
@@ -188,5 +241,21 @@ class TelegramUpdateWorker:
             trace.finish("failed", error_type="incomplete")
             self.telemetry.release(job.run_id)
         await self.inbox.complete(job)
-        return True
+
+    async def _hand_off(self, job: InboxJob) -> None:
+        """Ask for another worker. Never raises: the queue keeps the update."""
+
+        if self.spawn is None:
+            return
+        try:
+            await self.spawn(job.update_id)
+        except Exception:  # noqa: BLE001 - the row stays pending either way
+            log_event(
+                TraceEvent(
+                    run_id=job.run_id,
+                    seq=0,
+                    type="drain_handoff_failed",
+                    data={"update_id": job.update_id},
+                )
+            )
 

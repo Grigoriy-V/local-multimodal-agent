@@ -188,7 +188,12 @@ async def process_telegram_update(update_id: int) -> bool:
     # container answers it.
     await workspaces.reload.aio()
     try:
-        return await TelegramUpdateWorker(inbox, adapter, telemetry).run(update_id)
+        # `_spawn` again, for the same reason the webhook has it: a conversation
+        # with more messages than one worker's drain window continues in a fresh
+        # container instead of being cut off by this one's timeout.
+        return await TelegramUpdateWorker(
+            inbox, adapter, telemetry, spawn=_spawn
+        ).run(update_id)
     finally:
         await workspaces.commit.aio()
         await adapter.aclose()

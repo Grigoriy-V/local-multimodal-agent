@@ -231,11 +231,12 @@ app/tools/presentation.py
 ### Telegram ownership is intentionally split
 
 ```text
-wire.py       raw Telegram JSON -> minimal Incoming; model-free predicate
+wire.py       raw Telegram JSON -> minimal Incoming; model-free predicate;
+              canonical identity and the conversation a turn is serialized by
 markdown.py   ordinary Markdown -> safe Telegram HTML/plain blocks
 api.py        Bot API network calls + Telegram presentation primitives
 adapter.py    Incoming <-> application + chat presentation/activity state
-inbox.py      durable deployed update queue/lease
+inbox.py      durable deployed update queue, leased per conversation
 webhook.py    validate/admit/spawn/worker core
 run.py        local long-poll driver
 ```
@@ -407,9 +408,9 @@ If it is resumable in-flight LangGraph state, start in `app/checkpoints.py` and 
 
 `view_pages`, `inspect_page` and `view_web_page` can return images to the model. The user receives only content explicitly marked outbound by presentation logic.
 
-### Local and deployed concurrency differ today
+### Both profiles serialize a conversation, by different means
 
-`ui/telegram/run.py` serializes same-chat updates locally. `PostgresUpdateInbox` leases individual deployed update ids. Do not assume the deployed path has the local lock semantics.
+`ui/telegram/run.py` holds a per-chat lock in one process. `PostgresUpdateInbox` leases a conversation in the database, which is where it has to be: the deployed workers are separate containers with nothing in common but the database. Change the claim in `_claim_conversation` and you are changing the ordering guarantee, not an implementation detail.
 
 ### Chainlit and Telegram attachment paths differ today
 

@@ -17,7 +17,10 @@ from typing import TYPE_CHECKING
 # One entry per exported name: the module it actually lives in.
 _HOMES = {
     "TelegramAdapter": "ui.telegram.adapter",
-    "canonical_user_id": "ui.telegram.adapter",
+    # Its home is the wire module now, and asking for it must not pull the
+    # adapter in behind it: the webhook needs this name to serialize a
+    # conversation, and the whole point of that module is what it does not load.
+    "canonical_user_id": "ui.telegram.wire",
     "current_thread": "ui.telegram.adapter",
     "TelegramClient": "ui.telegram.api",
     "TelegramError": "ui.telegram.api",
@@ -27,11 +30,11 @@ _HOMES = {
 
 if TYPE_CHECKING:  # The lazy path is invisible to a type checker, so name them.
     from ui.telegram.adapter import TelegramAdapter as TelegramAdapter
-    from ui.telegram.adapter import canonical_user_id as canonical_user_id
     from ui.telegram.adapter import current_thread as current_thread
     from ui.telegram.api import TelegramClient as TelegramClient
     from ui.telegram.api import TelegramError as TelegramError
     from ui.telegram.api import split_message as split_message
+    from ui.telegram.wire import canonical_user_id as canonical_user_id
     from ui.telegram.wire import read_update as read_update
 
 

@@ -4,10 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. Item 3 is closed and moved to Done, and the
-three defects its live run exposed are fixed and deployed. Item 4 is prepared
-and ordered into sub-steps; 4.0 is next and needs approval. Every live
-product-runtime run remains a separate human gate.
+**Current approved step:** item 4, sub-step 4.0. Its code is written and tested
+offline; the deployed database migration, the deploy and the live check are
+still owed and are each a human gate. Item 3 is closed and moved to Done.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -168,12 +167,13 @@ Verified platform facts and cold-start evidence remain in
    per-sub-step acceptance:
    `reports/2026-08-30_v2_step4_harness_preparation.md`.
 
-   - **4.0 Conversation serialization.** The known live race: a screenshot and a
-     question sent seconds apart ran in two containers and were answered out of
-     order. A lease on the canonical conversation, drained by ascending
-     `update_id`, in the database both profiles share. Coalescing the two into
-     one intent is held back: it redefines the turn every recorded number
-     counts.
+   - **4.0 Conversation serialization — written and tested offline, not
+     deployed.** The lease belongs to the conversation, the worker drains it in
+     order, and the migration that adds the column is additive. Owed before it
+     counts: the migration, a deploy, and two messages seconds apart answered in
+     order. Coalescing an image and the question after it is held back — it
+     redefines the turn every recorded number counts.
+     `reports/2026-08-30_v2_conversation_serialization.md`.
    - **4.1 One loop.** Delete the answer/act router and the fixed
      plan/implement/test/evaluate lifecycle. The surviving loop gains step
      boundaries, its own spend budget — today only the task path has one — and

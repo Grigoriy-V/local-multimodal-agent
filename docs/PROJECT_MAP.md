@@ -315,9 +315,11 @@ return HTTP 200
 
 The model wake is requested in parallel with durable admission for updates that need the model.
 
-`ui/telegram/inbox.py` owns the PostgreSQL leased inbox. It deduplicates and leases by Telegram `update_id`.
+`ui/telegram/inbox.py` owns the PostgreSQL leased inbox. It deduplicates by Telegram `update_id` and leases by conversation: a claim takes the oldest unfinished update of the conversation that woke it, and refuses while another of that conversation's updates is still running. A per-conversation advisory lock makes the refusal hold across containers. The conversation is named by the webhook when the row is written; a row queued before the column existed is still claimed on its own.
 
-**Known current correctness debt:** distinct updates belonging to the same deployed conversation are not yet serialized by this inbox. The local polling path does serialize a chat. `ROADMAP.md` owns the planned correction.
+The update worker keeps its conversation until nothing is left, so a burst is answered in order by one warm container. Past a drain window it hands the rest to a fresh worker rather than risk its own timeout.
+
+Not yet decided: whether an image and the question that follows it are one intent. Coalescing would change what a turn is, and every recorded number counts turns. `ROADMAP.md` 4.0 owns it.
 
 ### Chainlit
 
@@ -431,8 +433,8 @@ These are facts useful when reading the code; `ROADMAP.md` decides whether/when 
 
 - `GeneralHarness` currently spends a separate structured model call to choose `answer` versus `act`.
 - The bounded task implementation/validation toolbox is narrower than the ordinary assistant toolbox.
-- The deployed Telegram inbox leases by `update_id`, not by conversation, so same-thread concurrency is not yet solved.
-- Every turn that reaches the model carries one `run_id` from ingress to delivery, and its model calls, tool calls, tokens, first token, first visible response and outcome are recorded. What is missing is the reading half: there is no `show run <run_id>` inspector yet, and no GPU-time or derived-cost attribution.
+- The deployed Telegram inbox leases by conversation. The code is written and tested offline; the column it needs is created by `tools/setup_control_plane.py`, so the deployed behaviour is the old one until that has run.
+- Every turn that reaches the model carries one `run_id` from ingress to delivery, and its model calls, tool calls, tokens, first token, first visible response and outcome are recorded. `tools/show_run.py` reads one back, lists failed and unfinished turns, and derives GPU time and cost at read time.
 - The bounded task path reports the model calls it spends through a wrapped backend rather than per stage, so an act turn's totals are honest while its internal stage detail is still coarse.
 - Chainlit document-upload admission is not yet the same as Telegram document admission.
 - `Capability.build` currently receives a local `Path`; remote execution/sandbox abstraction is not yet a first-class provider boundary.

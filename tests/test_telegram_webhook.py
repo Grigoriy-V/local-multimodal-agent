@@ -13,12 +13,14 @@ from typing import Any
 import pytest
 
 from app.config import TelegramSettings
-from ui.telegram.inbox import EnqueueResult, InboxJob
+from tests.fakes import QueuedInbox
+from ui.telegram.inbox import InboxJob
 from ui.telegram.webhook import TelegramUpdateWorker, TelegramWebhook
 from ui.telegram.wire import (
     MODEL_FREE_COMMANDS,
     SETTLED_APPROVED,
     SETTLED_REJECTED,
+    canonical_user_id,
 )
 
 
@@ -33,44 +35,7 @@ def update(update_id: int = 7, user_id: int = 42) -> dict[str, Any]:
     }
 
 
-class FakeInbox:
-    def __init__(self) -> None:
-        self.payloads: dict[int, dict[str, Any]] = {}
-        self.runs: dict[int, str] = {}
-        self.claimed: set[int] = set()
-        self.completed: list[int] = []
-        self.retried: list[tuple[int, str]] = []
-
-    async def enqueue(
-        self, update_id: int, payload: dict[str, Any], run_id: str = ""
-    ) -> EnqueueResult:
-        created = update_id not in self.payloads
-        self.payloads.setdefault(update_id, payload)
-        # The stored identity wins, exactly as the real queue's insert does: a
-        # redelivered update is one turn seen twice.
-        self.runs.setdefault(update_id, run_id)
-        should_spawn = created or (
-            update_id not in self.claimed and update_id not in self.completed
-        )
-        return EnqueueResult(update_id, should_spawn, self.runs[update_id])
-
-    async def claim(self, update_id: int, lease_seconds: int = 900) -> InboxJob | None:
-        if update_id not in self.payloads or update_id in self.claimed:
-            return None
-        self.claimed.add(update_id)
-        return InboxJob(
-            update_id,
-            self.payloads[update_id],
-            "lease",
-            run_id=self.runs.get(update_id, ""),
-        )
-
-    async def complete(self, job: InboxJob) -> None:
-        self.completed.append(job.update_id)
-
-    async def retry(self, job: InboxJob, error: str) -> None:
-        self.retried.append((job.update_id, error))
-        self.claimed.remove(job.update_id)
+FakeInbox = QueuedInbox
 
 
 def settings() -> TelegramSettings:
@@ -93,10 +58,13 @@ async def test_valid_update_is_persisted_before_spawn() -> None:
     original_enqueue = inbox.enqueue
 
     async def enqueue(
-        update_id: int, payload: dict[str, Any], run_id: str = ""
+        update_id: int,
+        payload: dict[str, Any],
+        run_id: str = "",
+        conversation_key: str = "",
     ) -> EnqueueResult:
         order.append("persist")
-        return await original_enqueue(update_id, payload, run_id)
+        return await original_enqueue(update_id, payload, run_id, conversation_key)
 
     inbox.enqueue = enqueue  # type: ignore[method-assign]
 
@@ -207,6 +175,130 @@ async def test_worker_releases_failed_update_for_a_later_retry() -> None:
     assert inbox.retried == [(7, "RuntimeError: failed turn")]
 
 
+# --- one conversation at a time, in order ------------------------------------
+#
+# The live defect these are about: a screenshot and the question after it were
+# sent seconds apart, ran in two containers, and were answered out of order.
+
+
+def update_ids(handler: Handler) -> list[int]:
+    return [payload["update_id"] for payload in handler.seen]
+
+
+async def queued(inbox: FakeInbox, *update_ids: int, user_id: int = 42) -> None:
+    for update_id in update_ids:
+        await inbox.enqueue(
+            update_id,
+            update(update_id, user_id),
+            run_id=f"run-{update_id}",
+            conversation_key=f"person-{user_id}",
+        )
+
+
+async def test_a_second_message_waits_for_the_first_instead_of_racing_it() -> None:
+    inbox = FakeInbox()
+    await queued(inbox, 5, 7)
+    held = Handler()
+    first = TelegramUpdateWorker(inbox, held)
+    second = TelegramUpdateWorker(inbox, Handler())
+
+    # The first worker has claimed the conversation and has not finished; the
+    # worker spawned for the other update finds nothing it may take.
+    claimed = await inbox.claim(5)
+    assert claimed is not None
+    assert await second.run(7) is False
+
+    await inbox.complete(claimed)
+    assert await first.run(7) is True
+
+
+async def test_a_worker_answers_the_oldest_message_first_whichever_woke_it() -> None:
+    """Order is the queue's, not the race between two spawns."""
+
+    inbox = FakeInbox()
+    await queued(inbox, 5, 7)
+    handler = Handler()
+
+    ran = await TelegramUpdateWorker(inbox, handler).run(7)
+
+    assert ran is True
+    assert update_ids(handler) == [5, 7]
+    assert inbox.completed == [5, 7]
+
+
+async def test_two_people_do_not_wait_for_each_other() -> None:
+    inbox = FakeInbox()
+    await queued(inbox, 5, user_id=42)
+    await queued(inbox, 6, user_id=99)
+    mine = await inbox.claim(5)
+    assert mine is not None
+    theirs = Handler()
+
+    assert await TelegramUpdateWorker(inbox, theirs).run(6) is True
+    assert update_ids(theirs) == [6]
+
+
+async def test_a_long_burst_is_handed_to_a_fresh_worker_rather_than_cut_off() -> None:
+    """A container is killed at a timeout; the conversation is not lost to it."""
+
+    inbox = FakeInbox()
+    await queued(inbox, 5, 7)
+    handler = Handler()
+    spawned: list[int] = []
+    ticks = iter([0.0, 999.0])
+
+    async def spawn(update_id: int) -> None:
+        spawned.append(update_id)
+
+    worker = TelegramUpdateWorker(
+        inbox, handler, spawn=spawn, drain_seconds=10.0, clock=lambda: next(ticks)
+    )
+
+    assert await worker.run(5) is True
+    assert update_ids(handler) == [5]
+    assert spawned == [5]
+    # Still owed, and still claimable by whoever answers the hand-off.
+    assert inbox.state[7] == "pending"
+
+
+async def test_a_hand_off_nobody_can_answer_leaves_the_update_queued() -> None:
+    """The local profile has no second container to spawn."""
+
+    inbox = FakeInbox()
+    await queued(inbox, 5, 7)
+    handler = Handler()
+    ticks = iter([0.0, 999.0])
+
+    worker = TelegramUpdateWorker(
+        inbox, handler, drain_seconds=10.0, clock=lambda: next(ticks)
+    )
+
+    assert await worker.run(5) is True
+    assert inbox.state[7] == "pending"
+
+
+async def test_a_update_queued_before_conversations_existed_is_still_answered() -> None:
+    """The column is additive, so a row from the previous deployment has none."""
+
+    inbox = FakeInbox()
+    await inbox.enqueue(7, update())
+    handler = Handler()
+
+    assert await TelegramUpdateWorker(inbox, handler).run(7) is True
+    assert update_ids(handler) == [7]
+
+
+async def test_the_front_door_names_the_conversation_it_queues() -> None:
+    inbox = FakeInbox()
+
+    async def spawn(_update_id: int) -> None:
+        return None
+
+    await TelegramWebhook(settings(), inbox, spawn).accept(SECRET, body(update()))
+
+    assert inbox.keys[7] == canonical_user_id(42)
+
+
 def test_accepting_an_update_does_not_load_the_agent_stack() -> None:
     """The webhook's import cost is a product decision, so it is a test.
 
@@ -259,7 +351,10 @@ def test_the_wire_format_module_imports_nothing_from_the_application() -> None:
         for alias in node.names
     }
 
-    assert imported <= {"__future__", "dataclasses", "typing"}
+    # `uuid` earns its place: the canonical identity of a Telegram account is
+    # derived here so the webhook can name the conversation it is queueing
+    # without importing the adapter to ask.
+    assert imported <= {"__future__", "dataclasses", "typing", "uuid"}
 
 
 # --- waking the model before the worker exists --------------------------------
@@ -385,11 +480,14 @@ async def test_waking_does_not_delay_the_durable_hand_off() -> None:
     original = inbox.enqueue
 
     async def enqueue(
-        update_id: int, payload: dict[str, Any], run_id: str = ""
+        update_id: int,
+        payload: dict[str, Any],
+        run_id: str = "",
+        conversation_key: str = "",
     ) -> EnqueueResult:
         await started.wait()
         order.append("write")
-        return await original(update_id, payload, run_id)
+        return await original(update_id, payload, run_id, conversation_key)
 
     inbox.enqueue = enqueue  # type: ignore[method-assign]
 

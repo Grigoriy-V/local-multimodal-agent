@@ -53,13 +53,10 @@ from ui.telegram.wire import (
     CHATS_CLOSE,
     SETTLED_CALLBACK_PREFIX,
     Incoming,
+    canonical_user_id,
     needs_model,
     read_update,
 )
-
-# A fixed namespace so a chat maps to the same canonical identity on every run
-# and on every machine. Changing it orphans every existing conversation.
-NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "local-multimodal-agent:telegram")
 
 REFUSAL = (
     "This assistant is private and your account is not on its allowed list. "
@@ -305,12 +302,6 @@ class AnswerPreview:
         self.message_id = None
         self._edited_at = 0.0
         self._stood_aside = False
-
-
-def canonical_user_id(telegram_user_id: int) -> str:
-    """The application's own identifier for a Telegram account."""
-
-    return str(uuid.uuid5(NAMESPACE, f"user:{telegram_user_id}"))
 
 
 def current_thread(store: ConversationStore, user_id: str) -> str:

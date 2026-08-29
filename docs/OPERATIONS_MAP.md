@@ -133,6 +133,13 @@ new, and the inbox gains a nullable `run_id` column whose existing rows stay
 valid as updates that were never measured. Telemetry keeps its own version row
 (`telemetry_version`, currently **1**) rather than sharing the store's.
 
+The inbox also gains a nullable `conversation_key` column and an index over
+`(conversation_key, state, update_id)`. That column is what makes a lease belong
+to a conversation instead of to one update, so **a deployment that skips this
+step keeps answering a person's messages out of order**: rows without the key
+are claimed one at a time, exactly as before. Nothing is rewritten and no row is
+dropped.
+
 The normal runtime intentionally does not run these migrations on each request.
 
 Store schema version is **2** in both implementations (`PRAGMA user_version` for
@@ -251,7 +258,7 @@ The webhook deliberately uses `control_image`, not `agent_image`, so it does not
 
 #### `process_telegram_update`
 
-Purpose: claim one durable update and run the full application turn.
+Purpose: claim a conversation and run its unanswered updates as full application turns.
 
 Current resource shape:
 
@@ -265,6 +272,12 @@ timeout: 600 s
 ```
 
 It mounts the persistent workspace Volume, reloads before a turn and commits after the turn.
+
+It keeps taking the next update of its conversation for `DRAIN_SECONDS`
+(`ui/telegram/webhook.py`, 240 s) and then spawns a fresh worker for the rest.
+That window is chosen against the two limits around it: a turn may spend up to
+300 s, and this function is killed at 600 s. Raising the timeout or the turn
+budget without revisiting it is how a container gets killed mid-turn.
 
 #### `render_web_page`
 
@@ -399,7 +412,7 @@ Exact defaults live in `AgentSettings` and `.env.example`.
 Neon/PostgreSQL
   ├─ conversations/messages/summaries/facts
   ├─ LangGraph checkpoint tables
-  ├─ telegram_updates durable inbox (carries each turn's run_id)
+  ├─ telegram_updates durable inbox (turn run_id, conversation lease)
   └─ turn_runs / trace_events turn telemetry
 
 Modal Volume assistant-workspaces
