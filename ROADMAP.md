@@ -141,7 +141,10 @@ Verified platform facts and cold-start evidence remain in
    normal runtime must preserve tool calls, tool results, usage, finish reason,
    persistence and the same final assistant message. The current
    `ModelBackend.stream` contract drops `tool_calls` and `usage`, so this remains
-   after the single-call change in item 5 unless reprioritized.
+   after the single-call change in item 5 unless reprioritized. Prepared, not
+   approved: `docs/telegram_real_answer_streaming.md` is the task input and
+   `reports/2026-08-29_v2_answer_streaming_preparation.md` holds the live stream
+   probe and the proposed plan. Implementation needs its own start signal.
 
 3. **Baseline measurement, metrics and logs.** Make both product behaviour and
    its cost observable before changing the agent loop. Today's 15-17 tok/s
