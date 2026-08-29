@@ -144,8 +144,6 @@ Verified platform facts and cold-start evidence remain in
      Close 2A with small live scenarios for onboarding, formatting, capability
      truth and an ordinary tool-capable answer.
 
-   - Telegram voice recognition quality: the audio decodes, so it is a
-     mis-hearing. One clean comparison of the same sentence as Opus and WAV.
    - **2B — real answer streaming, deferred.** Telegram drafts are only the
      display half. Do not bypass the agent graph or fake streaming from the
      adapter: the normal runtime must preserve tool calls, tool results, usage,
