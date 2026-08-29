@@ -177,6 +177,12 @@ Verified platform facts and cold-start evidence remain in
      boundaries, its own spend budget — today only the task path has one — and
      progress a person can watch. Removing the router's second full-context
      request per message moves here from item 6.
+
+     Also here: **a control signal travels out of band.** 4.0 put `/stop` in the
+     same lane as the turn it exists to stop, and the storage-answered commands
+     behind whatever is running. Both profiles need control delivered past the
+     conversation lease, and a running turn that looks for a cancellation —
+     today `/stop` only stops a task paused at an approval.
    - **4.2 Tool execution seam.** One `pre_execute → execute → post_execute`
      path for every tool, holding consent policy, validation and telemetry.
      Where autonomy inside the workspace is implemented; `DECISIONS.md`

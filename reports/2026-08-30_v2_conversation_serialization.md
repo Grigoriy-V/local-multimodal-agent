@@ -195,3 +195,33 @@ which is the persistence outlier already noted in item 3. It is not caused by
 anything here — it is Neon, after the answer was already delivered.
 
 4.0 is done.
+
+## The cost this guarantee has, named on the human's correction
+
+Serializing a conversation serializes **everything** a person sends it,
+including the updates whose whole purpose is to interrupt or to be answered
+instantly. `/stop` is now queued behind the turn it exists to stop, and reaches
+the worker only once that turn has ended — where it finds nothing running and
+says so. `/new`, `/chats`, `/can` and `/check` are answered from storage in
+milliseconds and now wait behind a task that may spend minutes.
+
+Two separate things are wrong, and only the first is about the queue.
+
+- **Delivery.** A control signal must not travel in the turn lane. The front
+  door already knows which updates these are — `is_cancellation()` and the
+  model-free predicates in `wire.py` — so it can route them past the
+  conversation lease rather than into it.
+- **Effect.** Even delivered instantly, `/stop` does not interrupt a turn that
+  is actually executing, and it never did: `TaskRuntime.cancel` writes a
+  durable outcome into the checkpoint, which a graph running in another
+  container does not read. It reliably stops a task that is *paused* at an
+  approval, not one mid-flight. Interrupting a running turn needs the loop to
+  look for a cancellation, which is the loop's own business.
+
+The local profile has had the same flaw all along — `ui/telegram/run.py` holds
+its per-chat lock around every update, `/stop` included — so this is one
+behaviour to fix in both profiles rather than a deployed-only regression.
+
+**Not reopened here.** Sub-step 4.1 owns it, because the second half is a
+property of the loop and fixing the first half alone would deliver a signal
+nothing acts on.
