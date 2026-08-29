@@ -18,16 +18,12 @@ Telegram chat. Read
 This is the only source for current product direction, state, order and approved
 work. The human approves one step before implementation.
 
-`AGENTS.md` holds the product and execution rules; they are not repeated here.
-`docs/BACKLOG.md` is the source of truth for deferred and possible later
-direction, and is not used for current development unless the human promotes an
-item into this file. `DECISIONS.md` preserves architectural rationale and is read
-only when this roadmap links a decision or one is being reconsidered; this
-roadmap wins any conflict. `README.md` and `chainlit.md` are display documents.
-
-One product invariant is not in `AGENTS.md`: messages preserve the supplied
-order of text, image and audio parts, and unsupported or oversized input is
-refused before a model request.
+`docs/PRODUCT.md` is the stable product contract; `docs/PROJECT_MAP.md`,
+`docs/CODEMAP.md` and `docs/OPERATIONS_MAP.md` describe the current system,
+ownership and operations. `AGENTS.md` holds execution rules. `DECISIONS.md`
+preserves approved durable choices and their rationale. This file alone owns
+current work, order and authorization. `README.md` and `chainlit.md` are display
+documents.
 
 ## Current state
 
@@ -66,10 +62,11 @@ refused before a model request.
 assistant over Telegram, deployed serverless so that no GPU runs while idle,
 while remaining fully usable as a local agent on the human's own machine.
 
-Direction and rationale: `docs/personal_assistant_direction.md`. Durable
-architectural choices: `DECISIONS.md`. Verified platform facts for the deployed
-profile: `docs/modal_platform_notes.md`. Cold-start technical rationale:
-`docs/modal_vllm_cold_start.md` and `docs/control_plane_cold_start_notes.md`.
+The canonical product and current system are described by `docs/PRODUCT.md` and
+`docs/PROJECT_MAP.md`; operational ownership is in `docs/OPERATIONS_MAP.md`.
+Verified platform facts and cold-start evidence remain in
+`docs/modal_platform_notes.md`, `docs/modal_vllm_cold_start.md` and
+`docs/control_plane_cold_start_notes.md`.
 
 ### Done
 
@@ -214,10 +211,11 @@ assistant is idle — and the same `app/` still serves the local profile.
 ## Out of scope
 
 Fine-tuning, multi-agent orchestration, a vector database before text retrieval
-works, and Open WebUI as the main UI. The earlier Version 2 — a policy-governed
-tool platform with an MCP surface — is superseded; its detail is in
-`docs/BACKLOG.md`. Changing scope requires an edit here, and a `DECISIONS.md`
-entry when the change is architecturally durable.
+works, Open WebUI as the main UI, and the superseded policy-platform/MCP version
+of Version 2. A separate 64k/128k context and VRAM experiment remains deferred
+unless explicit GPU approval and a concrete product trigger make it current.
+Changing scope requires an edit here, and a `DECISIONS.md` entry when the change
+is architecturally durable.
 
 ## How this file is kept
 

@@ -2,49 +2,11 @@
 
 ## Project
 
-This repository builds a **personal multimodal assistant with an autonomous
-harness**, not a collection of demo workflows or buttons that manually invoke
-individual tools. It runs locally on the human's own machine and deploys as a
-serverless application for a small number of people. It is both a working
-product and a project for learning how a real agent harness is designed;
-learning benchmarks must never become the production architecture.
-
-- One natural-language entry point serves direct conversation and autonomous
-  work. The harness decides whether to answer or to continue through
-  `plan -> act -> validate -> repair/finalize`.
-- The agent chooses among capabilities permitted by policy and the user's
-  grants. The user approves scope and consequential actions, not an operating
-  mode or an individual tool.
-- There is no user-selected `Conversation` / `Agent` mode. Filesystem access,
-  browser inspection, screenshots, editing and validation are agent
-  capabilities, not separate user workflows.
-- `ModelBackend` is the only model-facing application interface. The default
-  model is Gemma 4 12B IT behind an OpenAI-compatible endpoint, local or
-  remote; replacing either must not require an agent rewrite.
-- The deployment target is a configuration axis, never a fork. The local and
-  deployed profiles run the same `app/`; a capability that works in only one of
-  them is unfinished.
-- LangGraph owns orchestration. Conversations and memory live outside the model
-  behind one persistence contract, implemented on SQLite locally and on a
-  networked database when deployed. Conversations, summaries and memory are
-  scoped by user.
-- Interfaces are replaceable thin adapters. An adapter maps its own transport
-  and identity onto the application's canonical identity; product behavior lives
-  in `app/` and never in an adapter callback.
-- The workspace is the permission boundary, not a path-format restriction and
-  not a fixed location: it may be a local directory or an ephemeral remote
-  sandbox. Each user gets their own, because a boundary shared by several people
-  is not one. Safe relative and absolute paths inside it are accepted; ambiguous
-  filenames are clarified and escaping paths are refused.
-- Plans derive task-specific acceptance criteria and validation from the task.
-  A Snake task or another scenario may be an evaluation, never a production
-  branch or sufficient product acceptance by itself.
-
-Durable exclusions are fine-tuning, multi-agent orchestration, a vector database
-before text retrieval works, Open WebUI as the main UI, business logic inside an
-interface adapter, silent context truncation, unrestricted filesystem access,
-and treating model-generated facts as trusted memory without an explicit save
-decision.
+This repository builds a personal multimodal assistant with an autonomous
+harness. The stable product contract is `docs/PRODUCT.md`; do not duplicate or
+silently reinterpret it here. Use `docs/PROJECT_MAP.md` for the current system
+shape, `docs/CODEMAP.md` to find code ownership, and `docs/OPERATIONS_MAP.md`
+for configuration, deployment and runtime operations.
 
 ## Primary principle
 
@@ -89,17 +51,25 @@ time.
 ## Context
 
 - Always read `AGENTS.md` and `ROADMAP.md`.
+- Read `docs/PRODUCT.md` when product behavior, product acceptance or scope is
+  involved.
+- Use `docs/CODEMAP.md` to locate the existing owner before broad exploration
+  or adding a new implementation.
+- Read `docs/PROJECT_MAP.md` when work crosses components, state owners, trust
+  boundaries or local/deployed profiles.
+- Read `docs/OPERATIONS_MAP.md` for configuration, secrets, migrations,
+  deployment, workers, storage or diagnostics.
 - Read a named report when the task names it or `ROADMAP.md` links it as
   evidence.
-- Read only the relevant part of `DECISIONS.md` when `ROADMAP.md` links that
-  decision or the corresponding architecture is explicitly reconsidered.
-- Do not use `README.md`, `chainlit.md`, `docs/BACKLOG.md`, JSONL journals or Git
-  history as current development instructions. Read the backlog only when the
-  human explicitly asks to work with it.
+- Read the relevant entry in `DECISIONS.md` when a canonical document links it,
+  when the reason for a durable boundary matters, or when that choice is being
+  reconsidered. It is rationale and history, not a current-state map or plan.
+- Do not use `README.md`, `chainlit.md`, JSONL journals or Git history as current
+  development instructions.
 
-Mandatory information belongs here, in `ROADMAP.md`, in the task, or in evidence
-explicitly linked by one of them. Do not assume another useful file will be
-discovered automatically.
+When canonical documents disagree, stop and resolve the documentation conflict
+before building on it. Code and evidence can reveal drift, but do not silently
+pick a preferred document.
 
 ## Human gates
 
@@ -144,10 +114,9 @@ change code, configuration, commands or safety need no test suite.
 ## Records
 
 `ROADMAP.md` is the only source for current direction, state, order and approved
-work. `DECISIONS.md` preserves only durable architecture or scope rationale and
-never overrides the roadmap. `docs/BACKLOG.md` is the source of truth for
-detailed deferred and possible later direction; it is not a contract, current
-plan or authorization.
+work. The four documents under `docs/` are the canonical product, system, code
+and operations maps. `DECISIONS.md` preserves approved durable choices and why
+they were made; it does not replace any map and never authorizes work.
 
 **A decision you reached is a draft until the human approves it in words.** This
 covers anything architectural, and anything that materially changes later
