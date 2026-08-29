@@ -48,9 +48,16 @@ start, checks, replies, and acknowledgements as required by the live guide.
    goal, scope, accepted decisions, exclusions, relevant evidence and canonical
    documents, acceptance criteria, and required or skipped checks. Do not copy
    Orca lifecycle commands into it.
-3. Start a fresh Claude worker with `--worktree current`. Honor an explicitly
-   requested model and effort; do not silently downgrade substantive work to a
-   cheap smoke-test configuration.
+3. Start every fresh Claude worker with the single project configuration
+   `--model opus --effort medium`; do not select a different configuration by
+   task complexity:
+
+   ```powershell
+   orca orchestration worker-start --task <task_id> --worktree current --agent claude --model opus --effort medium --json
+   ```
+
+   Confirm in the start receipt that `launch.effective` matches the requested
+   model and effort before treating the worker as started.
 4. Require a start receipt showing that the task input was accepted. Treat
    trust, permission, or startup prompt failures as failed starts.
 5. Wait through Orca for `worker_done`, `question`, or `escalation`. Answer
