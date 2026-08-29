@@ -15,15 +15,34 @@ supervised workflow, including fresh correction Tasks needed to satisfy the
 original brief, but not later or widened work. Tell the human whenever the
 Claude route is used.
 
-Use the installed `orchestration` and `orca-cli` skills. Before issuing Orca
-commands, load the version-matched live guide with
-`orca skills get orchestration`; do not rely on cached command syntax when the
-live guide differs.
+Use the installed `orchestration` and `orca-cli` skills. On this Windows
+workstation, invoke Orca through the packaged CLI at:
+
+```text
+C:\Users\user\AppData\Local\Programs\orca\resources\bin\orca.exe
+```
+
+Do not use bare `orca` from Codex App: its PowerShell process may not inherit
+the Orca PATH entry. Use this same executable for every command in one
+workflow. If it is absent, stop and report the installation drift instead of
+guessing another Orca build.
+
+Before other Orca commands, load the version-matched live guide with:
+
+```powershell
+& 'C:\Users\user\AppData\Local\Programs\orca\resources\bin\orca.exe' skills get orchestration
+```
+
+The installed Claude launcher is
+`C:\Users\user\AppData\Roaming\npm\claude.cmd`. It may be checked with
+`--version` during preflight, but never use it to run the delegated task
+directly. Orca must own the Claude process and Dispatch lifecycle.
 
 ## Preconditions and placement
 
-- Confirm the Orca runtime is ready and `orca worktree current --json` resolves
-  to the checkout Codex is using. A headless `orca serve` runtime is acceptable.
+- Confirm the Orca runtime is ready and `worktree current --json`, invoked
+  through the exact CLI above, resolves to the checkout Codex is using. A
+  headless Orca runtime is acceptable.
 - Use `current` so Claude sees modified and untracked files. Create another
   worktree only when the human requests it or a concrete filesystem conflict
   requires it.
@@ -39,7 +58,7 @@ A Codex App shell is not itself an Orca-managed agent terminal. Create one quiet
 coordinator terminal in the current worktree and retain its handle for the Run:
 
 ```powershell
-orca terminal create --worktree current --title "Codex App Orca coordinator" --command "powershell -NoLogo -NoExit" --json
+& 'C:\Users\user\AppData\Local\Programs\orca\resources\bin\orca.exe' terminal create --worktree current --title "Codex App Orca coordinator" --command "powershell -NoLogo -NoExit" --json
 ```
 
 Use that handle as the explicit coordinator identity for Run, Task, worker
@@ -57,11 +76,13 @@ start, checks, replies, and acknowledgements as required by the live guide.
    task complexity:
 
    ```powershell
-   orca orchestration worker-start --task <task_id> --worktree current --agent claude --model opus --effort medium --json
+   & 'C:\Users\user\AppData\Local\Programs\orca\resources\bin\orca.exe' orchestration worker-start --task <task_id> --worktree current --agent claude --model opus --effort medium --json
    ```
 
    Confirm in the start receipt that `launch.effective` matches the requested
-   model and effort before treating the worker as started.
+   model and effort and that `stage` is `input_accepted` before treating the
+   worker as started. Do not replace this with a direct Claude invocation or a
+   manually launched Claude terminal.
 4. Require a start receipt showing that the task input was accepted. Treat
    trust, permission, or startup prompt failures as failed starts.
 5. Wait through Orca for `worker_done`, `question`, or `escalation`. Answer
