@@ -492,7 +492,14 @@ python tools/show_run.py <run_id>
 --last N        the most recent runs, newest first
 --failed        runs that failed or never finished at all
 --user <id>     one person's runs
+--summary       the primary metric over those runs
 ```
+
+`--summary` reports **GPU active seconds per successful turn**, plus derived
+cost per turn and per user, model and tool calls per successful turn, and
+failures by type. Successful means the outcome was an answer, an approval or a
+task result; a turn that burned GPU and failed stays in the numerator and
+leaves the denominator, which is the point.
 
 It reads the same database the application writes: the local SQLite file by
 default, and the deployed one when `AGENT_DATABASE_URL` is set in the shell. It

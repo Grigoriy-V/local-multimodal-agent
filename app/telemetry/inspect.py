@@ -136,15 +136,23 @@ def tool_calls(events: Sequence[TraceEvent]) -> list[dict[str, object]]:
 
 
 def stages(events: Sequence[TraceEvent]) -> list[tuple[str, int | None, object]]:
-    """Every bounded stage of the task path that reported a duration."""
+    """Every bounded stage of the task path that reported a duration.
+
+    A stage is recognised by carrying one, not by its event name: `task_finished`
+    is the task's own summary and `task_planning` is the runtime's outer bracket,
+    and reading either as a stage put rows in this section that no stage
+    produced. Live, that printed a stage called "finished".
+    """
 
     found = []
     for event in events:
-        if event.type.startswith("task_") and event.type.endswith(
-            ("_finished", "_failed")
+        stage = event.data.get("stage")
+        if (
+            stage
+            and event.type.startswith("task_")
+            and event.type.endswith(("_finished", "_failed"))
         ):
-            name = event.type[len("task_") :].rsplit("_", 1)[0]
-            found.append((name, event.duration_ms, event.data.get("iteration")))
+            found.append((str(stage), event.duration_ms, event.data.get("iteration")))
     return found
 
 
@@ -314,6 +322,68 @@ def render_run(
         ),
     ]
     return "\n".join(parts)
+
+
+def render_summary(
+    measured: Sequence[tuple[TurnRun, Sequence[TraceEvent]]],
+    *,
+    idle_window_seconds: float = IDLE_WINDOW_SECONDS,
+    rate_per_second: float = A10_USD_PER_SECOND,
+) -> str:
+    """The primary metric, over a window of turns.
+
+    Item 3 names GPU active seconds per *successful* user turn as the number to
+    watch, deliberately not total spend and deliberately not per turn: a turn
+    that burned a minute and crashed must make this worse, not disappear from
+    the denominator.
+    """
+
+    if not measured:
+        return "(no runs)"
+    successful = [run for run, _ in measured if run.successful]
+    unsuccessful = [
+        run for run, _ in measured if not run.successful and run.outcome != "cancelled"
+    ]
+    gpu_ms = 0.0
+    cost = 0.0
+    for _run, events in measured:
+        estimate = gpu_cost(
+            events,
+            idle_window_seconds=idle_window_seconds,
+            rate_per_second=rate_per_second,
+        )
+        if estimate is not None:
+            gpu_ms += estimate.estimated_active_ms
+            cost += estimate.derived_usd
+    users = {run.user_id for run, _ in measured if run.user_id}
+    wins = len(successful) or 1
+    lines = [
+        f"{len(measured)} turns, {len(successful)} successful,"
+        f" {len(unsuccessful)} failed or unfinished",
+        f"  {measured[-1][0].started_at[:19].replace('T', ' ')}"
+        f" to {measured[0][0].started_at[:19].replace('T', ' ')}"
+        f", {len(users)} distinct users",
+        "",
+        "Per successful turn",
+        f"  GPU active        {gpu_ms / wins / 1000:7.2f}s   derived, upper bound",
+        f"  derived cost      ${cost / wins:.4f}",
+        f"  model calls       {sum(run.model_calls for run in successful) / wins:7.2f}",
+        f"  tool calls        {sum(run.tool_calls for run in successful) / wins:7.2f}",
+        f"  input tokens      {sum(run.input_tokens for run in successful) / wins:7.0f}",
+        f"  output tokens     {sum(run.output_tokens for run in successful) / wins:7.0f}",
+        "",
+        f"Derived cost over the window ${cost:.4f}"
+        f", ${cost / max(1, len(users)):.4f} a user",
+    ]
+    failures: dict[str, int] = {}
+    for run in unsuccessful:
+        failures[run.error_type or "unfinished"] = (
+            failures.get(run.error_type or "unfinished", 0) + 1
+        )
+    if failures:
+        lines += ["", "Failures by type"]
+        lines += [f"  {name:<28}{count}" for name, count in sorted(failures.items())]
+    return "\n".join(lines)
 
 
 def render_listing(runs: Iterable[TurnRun]) -> str:

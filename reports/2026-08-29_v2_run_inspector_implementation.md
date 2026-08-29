@@ -136,9 +136,88 @@ Changed: `app/telemetry/base.py`, `app/telemetry/sqlite.py`,
 No schema change, no migration, no new configuration. `docs/PRODUCT.md` is
 unchanged: nothing here alters what a user sees.
 
-## Gates ahead
+## Deployed and accepted live, 2026-08-29
 
-Deploying `assistant-control` so the deployed worker records stage detail, and
-one live autonomous task turn read back with the inspector alone — the
-acceptance this step claims but has not yet earned. That turn wakes the GPU and
-is a separate permission.
+`assistant-control` deployed in 22.1 s, five functions re-created. The human then
+asked the real chat for a small autonomous task — create `prices.csv` and a
+`readme.md` describing it — approved the grant, and the task completed. Both
+turns were read back out of the deployed database with `tools/show_run.py`
+alone. **No Modal log was opened**, which is acceptance criterion 5.
+
+The planning turn (`c00580bb`, `approval_requested`, 19.87 s) shows the router
+at 5.14 s for 1,730 tokens and the plan stage at 6.11 s for 217 → 265, with
+6.45 s of queue wait before either.
+
+The execution turn (`660c1728`, `task_result_delivered`, 22.75 s) is the one
+that was invisible before this step:
+
+```text
+Model calls   3 in implement (2.06 s, 3.91 s, 2.06 s), 5 in validate
+Tool calls    list_files [implement 1]
+              write_file [implement 1]  prices.csv
+              write_file [implement 1]  readme.md
+              list_files [validate 1]   .
+              read_file  [validate 1]   prices.csv
+              read_file  [validate 1]   readme.md
+Stages        implement attempt 1  8.04 s
+              validate  attempt 1  9.79 s
+Totals        8 model calls, 6 tool calls, 6,518 in / 685 out
+GPU           17.55 s measured model time, 30.0 s derived active, $0.0092 derived
+```
+
+Every claim the step made is visible in that output: one identity across both
+turns, each tool with its stage, attempt and path, per-stage durations, budget
+spent (6) equal to calls executed (6) with no double count, and no message text
+anywhere. Validation cost more than implementation — 9.79 s against 8.04 s, five
+model calls against three — which is the first fact about this agent's loop that
+the old summary line could not have produced.
+
+## Three defects the live run exposed, and fixed
+
+All three were found by reading real output, not by the suite.
+
+- **A stage called "finished".** The inspector recognised a stage by its event
+  name, so `task_finished` — the task's own summary — became a stage row, and
+  the runtime's outer `task_planning` bracket was listed beside the `plan` stage
+  inside it. A stage is now recognised by carrying one.
+- **An approval turn reported no visible response at all.** `first_visible_ms`
+  was empty on the planning turn, though the chat had said "Planning…" within a
+  second and shown the plan at 19.6 s. Only the streamed answer marked
+  visibility. The task branches now mark theirs: `planning_started`,
+  `plan_sent`, `task_started`.
+- **A task execution turn had the same hole**, reporting first visibility at
+  22.75 s — the final message — when "Starting…" had appeared at about 3 s.
+
+Each has a test. The suite is **768 passed, 1 skipped**.
+
+These fixes are not deployed: the acceptance above was produced by the code as
+deployed, and redeploying is a separate gate.
+
+## The primary metric, closing item 3
+
+Item 3 names GPU active seconds per successful user turn as the number to
+watch, and the per-turn ingredients existed without anything aggregating them.
+`tools/show_run.py --summary` now does, over whatever window `--last`, `--user`
+and `--failed` select. A failed turn's GPU stays in the numerator and leaves the
+denominator; a cancelled one is neither a success nor a failure and is counted
+as neither.
+
+Over the six live turns recorded so far:
+
+```text
+6 turns, 6 successful, 0 failed or unfinished
+Per successful turn
+  GPU active          21.22s   derived, upper bound
+  derived cost      $0.0065
+  model calls          3.00
+  tool calls           1.00
+  input tokens         5616
+  output tokens         282
+Derived cost over the window $0.0390
+```
+
+Three model calls a turn is the harness counted honestly: the router, the
+answer, and everything an autonomous task spends. That is the baseline item 4's
+loop changes get compared against.
+
+Suite after this addition: **771 passed, 1 skipped**.

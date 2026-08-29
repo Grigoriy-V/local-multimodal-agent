@@ -395,6 +395,48 @@ async def test_a_turn_that_stops_to_ask_is_successful_not_failed(
     assert "approval_requested" in types
 
 
+async def test_a_turn_that_plans_a_task_reports_when_it_became_visible(
+    tmp_path: Path, telemetry: Telemetry
+) -> None:
+    """Found live: a turn that ended in an approval reported no visible response.
+
+    It had written "Planning…" into the chat within a second and then shown the
+    plan, so the person had waited for none of the twenty seconds the row
+    implied. First visibility belongs to every branch that says something, not
+    only to the streamed answer.
+    """
+
+    telegram, inbox = FakeTelegram(), FakeInbox()
+    plan = Completion(
+        text=json.dumps(
+            {
+                "summary": "Create the file",
+                "steps": ["write notes.txt"],
+                "acceptance_criteria": ["notes.txt exists"],
+                "validation_strategy": [
+                    {
+                        "criterion": "notes.txt exists",
+                        "evidence": "read notes.txt",
+                        "capabilities": ["filesystem.read"],
+                    }
+                ],
+            }
+        ),
+        finish_reason="stop",
+    )
+    backend = ScriptedBackend(route(task="create notes.txt"), plan)
+    adapter = build(telegram, tmp_path, backend, telemetry)
+
+    await deliver(adapter, inbox, telemetry, text_update("create notes.txt"))
+
+    run = stored_run(telemetry, the_run_id(inbox))
+    assert run.outcome == "approval_requested"
+    assert run.first_visible_ms is not None
+    types = [event.type for event in stored_events(telemetry, run.run_id)]
+    assert "telegram_planning_started" in types
+    assert "telegram_plan_sent" in types
+
+
 async def test_a_failed_turn_closes_its_own_row(
     tmp_path: Path, telemetry: Telemetry
 ) -> None:

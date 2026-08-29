@@ -17,7 +17,7 @@ import sys
 
 from app.config import AgentSettings
 from app.telemetry.cost import A10_USD_PER_SECOND, IDLE_WINDOW_SECONDS
-from app.telemetry.inspect import render_listing, render_run
+from app.telemetry.inspect import render_listing, render_run, render_summary
 from app.telemetry.open import open_telemetry
 
 
@@ -31,6 +31,11 @@ def parse(argv: list[str]) -> argparse.Namespace:
         help="only runs that failed or never finished at all",
     )
     parser.add_argument("--user", default=None, help="restrict the listing to one user")
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="GPU seconds and cost per successful turn over the runs listed",
+    )
     parser.add_argument(
         "--idle-window",
         type=float,
@@ -68,15 +73,19 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
-        print(
-            render_listing(
-                store.recent_runs(
-                    limit=options.last,
-                    user_id=options.user,
-                    unsuccessful=options.failed,
+        runs = store.recent_runs(
+            limit=options.last, user_id=options.user, unsuccessful=options.failed
+        )
+        if options.summary:
+            print(
+                render_summary(
+                    [(run, store.events(run.run_id)) for run in runs],
+                    idle_window_seconds=options.idle_window,
+                    rate_per_second=options.gpu_rate,
                 )
             )
-        )
+            return 0
+        print(render_listing(runs))
         return 0
     finally:
         telemetry.close()

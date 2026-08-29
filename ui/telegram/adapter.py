@@ -894,6 +894,10 @@ class TelegramAdapter:
         trace: TurnTrace = NO_TRACE,
     ) -> None:
         await self.client.send_message(chat_id, "Planning…")
+        # The person now has something to read, which is what first visibility
+        # means. Live, a turn that ended in an approval reported no visible
+        # response at all, though it had answered in under a second.
+        trace.visible("planning_started")
         view = await harness.start_task(thread_id, original, task, trace)
         if view.interrupt is not None:
             await self.client.send_message(
@@ -901,6 +905,7 @@ class TelegramAdapter:
                 task_plan_text(view, harness.tasks.workspace),
                 approval_keyboard("task:yes", "task:no"),
             )
+            trace.visible("plan_sent")
             trace.finish("approval_requested")
             return
         await self._finish_task(harness, chat_id, thread_id, view, trace)
@@ -924,6 +929,7 @@ class TelegramAdapter:
         # say is that the press arrived: an "Approved" written here would
         # outlive a transition that never took place.
         sent = await self.client.send_message(chat_id, "Starting…")
+        trace.visible("task_started")
         message_id = int(sent["message_id"]) if sent else None
         lines: list[str] = []
         settled = False

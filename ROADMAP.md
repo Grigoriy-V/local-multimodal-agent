@@ -4,10 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** finishing item 3. The model and GPU baseline (3C) is
-measured; the run inspector and task-stage detail (3B) are built and green
-offline and still need a deploy and one live autonomous task turn. Every live
-product-runtime run remains a separate human gate.
+**Current approved step:** none. Item 3 is closed and moved to Done. Three
+inspector and visibility defects the live run exposed are fixed offline and
+await a deploy. Item 4, the agent harness and loop, is next and needs approval.
+Every live product-runtime run remains a separate human gate.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -144,47 +144,20 @@ Verified platform facts and cold-start evidence remain in
   deployed, not yet exercised live.
   `reports/2026-08-29_v2_answer_streaming_preparation.md`,
   `reports/2026-08-29_v2_answer_streaming_implementation.md`.
+- **3. Baseline measurement, metrics and logs, closed.** A turn is one `run_id`
+  from ingress to delivery, with its stages, model calls, tool calls and paths
+  in `turn_runs`/`trace_events` and no message text. `tools/show_run.py` reads
+  one run, lists failed and unfinished ones, and reports the primary metric —
+  GPU active seconds per successful turn, derived and labelled as derived; over
+  the first six live turns, 21.2 s and $0.0065 a turn. A real autonomous task
+  was reconstructed from the trace without opening a Modal log. The engine
+  baseline is measured: decode 21-24 ms per output token, prefill dominant and
+  superlinear, prefix caching confirmed at 98% on a repeated prefix.
+  `reports/2026-08-29_v2_turn_telemetry_implementation.md`,
+  `reports/2026-08-29_v2_run_inspector_implementation.md`,
+  `reports/2026-08-29_v2_gpu_baseline_measured.md`.
 
 ### Queue
-
-3. **Baseline measurement, metrics and logs.** Make both product behaviour and
-   its cost observable before changing the agent loop. The task input is
-   `docs/baseline_measurement_metrics_logs.md`; the designs are in
-   `reports/2026-08-29_v2_turn_telemetry_preparation.md` and
-   `reports/2026-08-29_v2_run_inspector_and_gpu_baseline_preparation.md`. What
-   remains is the live half: a deploy and one live autonomous task turn, read
-   back with the inspector alone.
-
-   - **Application telemetry, accepted live.** One `run_id` per turn from
-     ingress to delivery; `turn_runs` and `trace_events` hold outcome, route,
-     model and tool calls, tokens, first model token and first visible response,
-     in SQLite locally and PostgreSQL deployed, with no message text. Four real
-     turns were measured and read back out of the deployed database. First
-     baseline: routing costs about a third of a turn's input tokens, and
-     provider TTFT is 140-2293 ms while first visible response is 2.2-14.6 s.
-     `reports/2026-08-29_v2_turn_telemetry_implementation.md`.
-   - **Inspectable agent trace, offline only.** `tools/show_run.py` renders one
-     run or lists recent and unsuccessful ones, and the bounded task path now
-     records its stages, its attempt numbers and every tool call it executes,
-     refuses or skips past the budget, with the path but no content. No schema
-     change. Not deployed and not accepted live: that needs a deploy and one
-     live task turn, which is a GPU gate.
-     `reports/2026-08-29_v2_run_inspector_implementation.md`.
-   - **Model and GPU baseline, measured.** `tools/vllm_baseline.py` reads the
-     engine's own counters and was run twice under permission. Decode is 21-24
-     ms per output token, about 45 tok/s, not the 15-17 that conflated network,
-     prefill and decode. Prefill is what long turns cost: 4.69 s at 9,773 input
-     tokens against 0.64 s of decode, and superlinear. Prefix caching is
-     confirmed active — 98% of a repeated 3,277-token prefix served from cache,
-     prefill 1,370 to 82 ms. GPU seconds and cost per turn are derived when a
-     run is read, never stored.
-     `reports/2026-08-29_v2_gpu_baseline_implementation.md`,
-     `reports/2026-08-29_v2_gpu_baseline_measured.md`.
-   - **GPU active seconds per successful user turn** is the primary metric, not
-     total spend. "Successful" needs a definition a failed turn cannot satisfy.
-   - Cost per turn and per user, counting the harness's two model calls
-     honestly. Modal bills by App in hourly buckets, so per-turn cost is derived
-     and must be labelled as derived.
 
 4. **Agent harness and loop: from a functional assistant to a strong autonomous
    agent.** This is the real agent-development phase, after baseline tools, the

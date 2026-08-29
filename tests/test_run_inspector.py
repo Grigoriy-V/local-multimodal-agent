@@ -9,7 +9,7 @@ assert both halves of that.
 from __future__ import annotations
 
 from app.telemetry.base import TraceEvent, TurnRun
-from app.telemetry.inspect import render_listing, render_run
+from app.telemetry.inspect import render_listing, render_run, render_summary
 
 
 def event(seq: int, type: str, at: str, duration_ms: int | None = None, **data: object) -> TraceEvent:
@@ -196,6 +196,29 @@ def test_a_task_stage_reports_its_own_duration() -> None:
     assert "22.30s" in text
 
 
+def test_only_events_that_name_a_stage_are_stages() -> None:
+    """`task_finished` is the task's summary, not a stage it went through.
+
+    Live, matching on the event name alone printed a stage called "finished"
+    and listed the runtime's outer bracket beside the stage inside it.
+    """
+
+    trace = [
+        event(1, "turn_started", "2026-08-29T10:00:00.000+00:00"),
+        event(2, "task_planning_started", "2026-08-29T10:00:00.100+00:00"),
+        event(3, "task_plan_started", "2026-08-29T10:00:00.200+00:00", stage="plan"),
+        event(4, "task_plan_finished", "2026-08-29T10:00:06.300+00:00", 6100, stage="plan"),
+        event(5, "task_planning_finished", "2026-08-29T10:00:06.500+00:00", 6400),
+        event(6, "task_finished", "2026-08-29T10:00:07.000+00:00", status="completed"),
+    ]
+
+    section = render_run(finished_run(), trace).split("Stages")[1].split("Timeline")[0]
+
+    assert "plan" in section
+    assert "planning" not in section
+    assert "finished" not in section
+
+
 def test_the_listing_orders_and_summarizes_runs() -> None:
     first, second = finished_run(), finished_run()
     second.run_id = "r2"
@@ -212,3 +235,46 @@ def test_the_listing_orders_and_summarizes_runs() -> None:
 
 def test_an_empty_listing_says_nothing_happened() -> None:
     assert "(no runs)" in render_listing([])
+
+
+# --- the primary metric ------------------------------------------------------
+
+
+def failed_run() -> TurnRun:
+    run = finished_run()
+    run.run_id = "r2"
+    run.status = "failed"
+    run.outcome = "failed"
+    run.error_type = "BackendError"
+    return run
+
+
+def test_gpu_seconds_are_reported_per_successful_turn() -> None:
+    """A turn that burned GPU and crashed must make this worse, not vanish.
+
+    Item 3 names GPU active seconds per successful turn as the metric to watch,
+    so the failed turn's cost stays in the numerator while only successes count
+    in the denominator.
+    """
+
+    both = [(finished_run(), full_trace()), (failed_run(), full_trace())]
+
+    text = render_summary(both)
+
+    assert "2 turns, 1 successful, 1 failed or unfinished" in text
+    # Each trace spans 5.44 s from the first request to the last, plus a 12 s
+    # window: 17.44 s twice, over one success.
+    assert "34.88s" in text
+    assert "BackendError" in text
+
+
+def test_the_summary_counts_calls_and_tokens_per_successful_turn() -> None:
+    text = render_summary([(finished_run(), full_trace())])
+
+    assert "model calls          2.00" in text
+    assert "tool calls           1.00" in text
+    assert "input tokens         6292" in text
+
+
+def test_a_window_with_no_turns_says_so() -> None:
+    assert render_summary([]) == "(no runs)"
