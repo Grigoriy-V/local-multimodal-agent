@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Annotated, Any
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -32,12 +33,24 @@ from app.models import (
     ToolCall,
     Usage,
 )
-from app.tools import Toolbox
+from app.telemetry import NO_TRACE, Telemetry, TurnTrace
+from app.tools import Toolbox, tool_failed
 
 # The key a text delta travels under on LangGraph's custom stream channel. The
 # channel carries anything, so the runtime and the graph have to agree on one
 # name; nothing else in this project writes to it.
 ASSISTANT_DELTA = "assistant_delta"
+
+# The turn identity travels beside `thread_id` in LangGraph's own configurable
+# dictionary. A string, never the recorder itself: this value is carried in
+# checkpoint metadata and log lines, and neither may hold a live object.
+RUN_ID = "run_id"
+
+
+def run_id_of(config: RunnableConfig | None) -> str | None:
+    if not config:
+        return None
+    return (config.get("configurable") or {}).get(RUN_ID)
 
 
 def extend(current: list[Message], incoming: list[Message]) -> list[Message]:
@@ -141,6 +154,7 @@ def build_agent(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     checkpointer: BaseCheckpointSaver | None = None,
     stream_answers: bool = True,
+    telemetry: Telemetry | None = None,
 ) -> CompiledStateGraph:
     """Compile the graph. The loop's only exit is an answer without tool calls.
 
@@ -156,6 +170,17 @@ def build_agent(
     policy = policy or ContextPolicy()
     schemas = toolbox.schemas() or None
 
+    def trace_of(config: RunnableConfig | None) -> TurnTrace:
+        """The recorder for the turn this invocation belongs to, if any.
+
+        Looked up rather than captured: the graph is compiled once per thread
+        and reused, while a trace belongs to one turn.
+        """
+
+        if telemetry is None:
+            return NO_TRACE
+        return telemetry.trace(run_id_of(config))
+
     def assemble_context(state: AgentState) -> Context:
         query = latest_text(state.messages)
         return load_turn_context(
@@ -170,7 +195,9 @@ def build_agent(
     def load(state: AgentState) -> dict[str, Context]:
         return {"context": assemble_context(state)}
 
-    async def complete(prompt: list[Message], writer: StreamWriter) -> Completion:
+    async def complete(
+        prompt: list[Message], writer: StreamWriter, trace: TurnTrace
+    ) -> Completion:
         """One model call, streamed or not, with the same result either way.
 
         Streaming is how the answer becomes visible while it is being written;
@@ -179,22 +206,37 @@ def build_agent(
         stream and the rest of this node cannot tell which path it took.
         """
 
-        if not stream_answers:
-            return await backend.invoke(prompt, tools=schemas)
-        completion: Completion | None = None
-        async for event in backend.stream(prompt, tools=schemas):
-            if isinstance(event, TextDelta):
-                # Presentation only. Nothing on this channel is ever persisted.
-                writer({ASSISTANT_DELTA: event.text})
-            else:
-                completion = event.completion
-        if completion is None:
-            raise BackendError("the model stream ended without a completion")
-        return completion
+        with trace.model("answer") as measured:
+            if not stream_answers:
+                # No first-token boundary exists on this path, and inventing one
+                # would report a TTFT equal to the whole call.
+                completion = await backend.invoke(prompt, tools=schemas)
+                measured.done(completion)
+                return completion
+            completion = None
+            seen_text = False
+            async for event in backend.stream(prompt, tools=schemas):
+                if isinstance(event, TextDelta):
+                    if not seen_text:
+                        seen_text = True
+                        measured.first_token()
+                    # Presentation only. Nothing on this channel is ever persisted.
+                    writer({ASSISTANT_DELTA: event.text})
+                else:
+                    completion = event.completion
+            if completion is None:
+                raise BackendError("the model stream ended without a completion")
+            measured.done(completion)
+            return completion
 
-    async def call_model(state: AgentState, writer: StreamWriter) -> dict[str, Any]:
+    async def call_model(
+        state: AgentState, config: RunnableConfig, writer: StreamWriter
+    ) -> dict[str, Any]:
+        trace = trace_of(config)
         try:
-            completion = await complete(state.context.prompt(state.messages), writer)
+            completion = await complete(
+                state.context.prompt(state.messages), writer, trace
+            )
         except ContextOverflowError:
             try:
                 folded = await fold_older_messages(
@@ -207,7 +249,9 @@ def build_agent(
 
             recovered = assemble_context(state)
             try:
-                completion = await complete(recovered.prompt(state.messages), writer)
+                completion = await complete(
+                    recovered.prompt(state.messages), writer, trace
+                )
             except ContextOverflowError:
                 return {
                     "context": recovered,
@@ -221,7 +265,10 @@ def build_agent(
             }
         return {"messages": [assistant_message(completion)], "usage": completion.usage}
 
-    async def run_tools(state: AgentState) -> dict[str, list[Message]]:
+    async def run_tools(
+        state: AgentState, config: RunnableConfig
+    ) -> dict[str, list[Message]]:
+        trace = trace_of(config)
         calls = state.messages[-1].tool_calls
         # Invalid calls go straight back to the model as tool errors. Asking a
         # user to approve a call that cannot run is both noisy and misleading.
@@ -237,20 +284,33 @@ def build_agent(
             # One question for the whole batch, asked before any tool has run:
             # resuming restarts this node from the top, and a tool that ran
             # before the pause would run a second time.
+            trace.event("approval_requested", calls=[call.name for call in risky])
             answers = interrupt([describe_call(call) for call in risky])
             allowed.update({call.id: bool(answers.get(call.id)) for call in risky})
+            trace.event(
+                "approval_resumed",
+                approved=[call.name for call in risky if allowed[call.id]],
+            )
         messages = []
         for call in calls:
-            messages.append(
-                await toolbox.run_async(call) if allowed[call.id] else declined(call)
-            )
+            if not allowed[call.id]:
+                # Never run, so never counted as a tool call the turn spent.
+                trace.event("tool_failed", tool=call.name, status="declined")
+                messages.append(declined(call))
+                continue
+            with trace.tool(call.name) as measured:
+                result = await toolbox.run_async(call)
+                if tool_failed(result):
+                    measured.failed()
+            messages.append(result)
         return {"messages": messages}
 
-    async def persist(state: AgentState) -> None:
-        store.append(state.thread_id, state.messages, user_id)
-        await fold_older_messages(
-            backend, store, state.thread_id, policy, state.usage.input_tokens
-        )
+    async def persist(state: AgentState, config: RunnableConfig) -> None:
+        with trace_of(config).step("persist"):
+            store.append(state.thread_id, state.messages, user_id)
+            await fold_older_messages(
+                backend, store, state.thread_id, policy, state.usage.input_tokens
+            )
 
     def has_tool_calls(state: AgentState) -> str:
         return "tools" if state.messages[-1].tool_calls else "persist"

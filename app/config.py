@@ -178,6 +178,16 @@ class AgentSettings(BaseSettings):
     # number are one number and one lie waiting to happen. The headroom is what
     # lets the fold react to a measured overshoot instead of guessing ahead.
     context_fraction: float = 0.6
+    # Record what each turn cost and where its time went. On by default because
+    # a turn nobody measured is a turn nobody can improve, and off is a
+    # redeployed setting rather than a reverted release. When it is off the
+    # application still runs every code path; it simply records nothing.
+    telemetry: bool = True
+    # Where the local profile keeps that record. Its own file, like the
+    # checkpoints: telemetry is disposable in a way a conversation is not, so
+    # deleting it has to cost nothing. The deployed profile uses `database_url`
+    # instead, in tables of its own.
+    telemetry_database: str = "data/telemetry.sqlite3"
     # Ask the model for its answer as it is written, so an interface can show it
     # growing. Off, the conversational turn is one complete request again. It is
     # a switch rather than a constant because the visible half of a turn is the

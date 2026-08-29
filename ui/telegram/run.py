@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import uuid
 from typing import Any
 
 from app.config import AgentSettings, TelegramSettings
+from app.telemetry import NO_TRACE, TurnRun, TurnTrace, open_telemetry
 from ui.telegram.adapter import TelegramAdapter
 from ui.telegram.api import TelegramClient, TelegramError
+from ui.telegram.wire import is_cancellation, needs_model, read_update
 
 # How long to wait after a transport failure before polling again, so a bot
 # pointed at an unreachable network does not spin.
@@ -47,12 +50,36 @@ class PollingBot:
         message = update.get("message") or (update.get("callback_query") or {}).get("message") or {}
         return int((message.get("chat") or {}).get("id", 0))
 
+    def _trace(self, update: dict[str, Any]) -> TurnTrace:
+        """Start measuring here, because locally there is no webhook to do it.
+
+        The deployed profile generates the turn's identity at its front door and
+        keeps it with the durable queue row. Polling has neither, so the moment
+        an update comes off `getUpdates` is the earliest honest start.
+        """
+
+        incoming = read_update(update)
+        if incoming is None or not (needs_model(incoming) or is_cancellation(incoming)):
+            return NO_TRACE
+        return self.adapter.telemetry.start(
+            TurnRun(
+                run_id=uuid.uuid4().hex,
+                source="telegram-polling",
+                source_update_id=str(update.get("update_id", "")),
+            )
+        )
+
     async def _guarded(self, update: dict[str, Any]) -> None:
         async with self._lock(self._chat_of(update)):
+            trace = self._trace(update)
             try:
-                await self.adapter.handle_update(update)
+                await self.adapter.handle_update(update, trace)
             except TelegramError as error:
+                trace.finish("failed", error_type="TelegramError")
                 print(f"telegram delivery failed: {error}", flush=True)
+            finally:
+                trace.finish("failed", error_type="incomplete")
+                self.adapter.telemetry.release(trace.run.run_id)
 
     def dispatch(self, update: dict[str, Any]) -> None:
         task = asyncio.create_task(self._guarded(update))
@@ -86,6 +113,7 @@ class PollingBot:
                 await task
         await self.adapter.aclose()
         await self.client.aclose()
+        self.adapter.telemetry.close()
 
 
 async def main() -> None:
@@ -99,7 +127,15 @@ async def main() -> None:
             "id, or set TELEGRAM_OPEN_ACCESS=true to admit everyone."
         )
     client = TelegramClient(settings)
-    bot = PollingBot(TelegramAdapter(client, settings, AgentSettings()))
+    agent_settings = AgentSettings()
+    bot = PollingBot(
+        TelegramAdapter(
+            client,
+            settings,
+            agent_settings,
+            telemetry=open_telemetry(agent_settings),
+        )
+    )
     if settings.open_access:
         # Loud at the point of use, not only in documentation: this is the one
         # setting whose cost is paid by the owner and not by whoever turned it on.

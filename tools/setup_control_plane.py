@@ -8,11 +8,17 @@ from app.checkpoints import setup_postgres_checkpoints
 from app.config import AgentSettings
 from app.memory import ConversationStore
 from app.memory.open import open_store
+from app.telemetry.postgres import PostgresTelemetry
 from ui.telegram.inbox import PostgresUpdateInbox
 
 
 async def setup_control_plane(settings: AgentSettings | None = None) -> None:
-    """Create or migrate conversations, checkpoints and the Telegram inbox."""
+    """Create or migrate conversations, checkpoints, the inbox and telemetry.
+
+    Every step is additive against a populated database: the telemetry tables
+    did not exist before, and the inbox gains a nullable `run_id` column whose
+    existing rows stay valid as updates that were never measured.
+    """
 
     settings = settings or AgentSettings()
     if not settings.database_url:
@@ -28,6 +34,11 @@ async def setup_control_plane(settings: AgentSettings | None = None) -> None:
             settings.database_url,
             settings.database_schema,
         ).setup()
+        PostgresTelemetry(
+            settings.database_url,
+            settings.database_schema,
+            migrate_schema=True,
+        ).close()
     finally:
         store.close()
 

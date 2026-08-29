@@ -44,6 +44,9 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change system prompt/context replay | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT`, `Context`, `ContextPolicy` |
 | Change context folding/summary | `app/context/summary.py`, `app/context/persistence.py` | `fold_older_messages`, `load_turn_context` |
 | Change conversation/memory contract | `app/memory/base.py` | `ConversationStore`, `TurnContextRecords` |
+| Measure a turn: identity, timings, counts, outcome | `app/telemetry/` | `TurnTrace`, `Telemetry`, `TurnRun`, `TraceEvent`, `NO_TRACE`, `RUN_ID` |
+| Change where turn telemetry is stored | `app/telemetry/open.py` | `open_telemetry`, `SqliteTelemetry`, `PostgresTelemetry` |
+| Count model calls the task path spends | `app/telemetry/backend.py` | `TracedBackend`, `TaskRuntime._measuring` |
 | Change SQLite persistence | `app/memory/store.py` | `SqliteStore` |
 | Change deployed PostgreSQL persistence | `app/memory/postgres.py` | `PostgresStore`, `turn_context`, `append` |
 | Change store selection | `app/memory/open.py` | `open_store` |
@@ -90,6 +93,7 @@ app/                 application domain and runtime
   agent/             agent graphs, harness, bounded task runtime
   context/           prompt context and compaction
   memory/            conversation/fact store contract + implementations
+  telemetry/         turn records, traces and the recorder handed to the app
   models/            model contract + OpenAI-compatible adapter
   tools/             tool/capability implementations
   api/               currently empty stub
@@ -360,6 +364,22 @@ capability: web.view           -> tool: view_web_page
 ```
 
 Do not tell the model to call capability names.
+
+### Telemetry is not conversation persistence
+
+`app/telemetry/` is a separate contract with separate tables on purpose.
+Conversations are the product's content and belong to the person; telemetry is
+operational evidence about the machine, holds no message text, and can be
+deleted without a user noticing. Do not add telemetry methods to
+`ConversationStore`, and do not put conversation content into a trace.
+
+A turn's identity is a `run_id` string generated at ingress and carried in
+LangGraph's `configurable` beside `thread_id`; the live recorder is looked up
+from it through `Telemetry.trace()`. Never put the recorder itself into graph
+state or configuration — it is not serializable and a checkpoint would try.
+
+Code that asks for an unknown run gets `NO_TRACE`, which records nothing, so
+every path without telemetry keeps working unchanged.
 
 ### Conversation store is not checkpoint state
 

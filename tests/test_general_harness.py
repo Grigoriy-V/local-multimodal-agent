@@ -59,7 +59,11 @@ class StubTasks:
         self.view = TaskView(".", None, None, None, None, None)
 
     async def start(
-        self, thread_id: str, task: str, subdirectory: str | None = None
+        self,
+        thread_id: str,
+        task: str,
+        subdirectory: str | None = None,
+        trace: object = None,
     ) -> TaskView:
         self.started = (thread_id, task, subdirectory)
         return self.view

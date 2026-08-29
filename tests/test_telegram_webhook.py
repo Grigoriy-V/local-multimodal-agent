@@ -36,23 +36,34 @@ def update(update_id: int = 7, user_id: int = 42) -> dict[str, Any]:
 class FakeInbox:
     def __init__(self) -> None:
         self.payloads: dict[int, dict[str, Any]] = {}
+        self.runs: dict[int, str] = {}
         self.claimed: set[int] = set()
         self.completed: list[int] = []
         self.retried: list[tuple[int, str]] = []
 
-    async def enqueue(self, update_id: int, payload: dict[str, Any]) -> EnqueueResult:
+    async def enqueue(
+        self, update_id: int, payload: dict[str, Any], run_id: str = ""
+    ) -> EnqueueResult:
         created = update_id not in self.payloads
         self.payloads.setdefault(update_id, payload)
+        # The stored identity wins, exactly as the real queue's insert does: a
+        # redelivered update is one turn seen twice.
+        self.runs.setdefault(update_id, run_id)
         should_spawn = created or (
             update_id not in self.claimed and update_id not in self.completed
         )
-        return EnqueueResult(update_id, should_spawn)
+        return EnqueueResult(update_id, should_spawn, self.runs[update_id])
 
     async def claim(self, update_id: int, lease_seconds: int = 900) -> InboxJob | None:
         if update_id not in self.payloads or update_id in self.claimed:
             return None
         self.claimed.add(update_id)
-        return InboxJob(update_id, self.payloads[update_id], "lease")
+        return InboxJob(
+            update_id,
+            self.payloads[update_id],
+            "lease",
+            run_id=self.runs.get(update_id, ""),
+        )
 
     async def complete(self, job: InboxJob) -> None:
         self.completed.append(job.update_id)
@@ -81,9 +92,11 @@ async def test_valid_update_is_persisted_before_spawn() -> None:
 
     original_enqueue = inbox.enqueue
 
-    async def enqueue(update_id: int, payload: dict[str, Any]) -> EnqueueResult:
+    async def enqueue(
+        update_id: int, payload: dict[str, Any], run_id: str = ""
+    ) -> EnqueueResult:
         order.append("persist")
-        return await original_enqueue(update_id, payload)
+        return await original_enqueue(update_id, payload, run_id)
 
     inbox.enqueue = enqueue  # type: ignore[method-assign]
 
@@ -163,7 +176,7 @@ class Handler:
         self.error = error
         self.seen: list[dict[str, Any]] = []
 
-    async def handle_update(self, payload: dict[str, Any]) -> None:
+    async def handle_update(self, payload: dict[str, Any], trace: Any = None) -> None:
         self.seen.append(payload)
         if self.error:
             raise self.error
@@ -371,10 +384,12 @@ async def test_waking_does_not_delay_the_durable_hand_off() -> None:
     inbox = FakeInbox()
     original = inbox.enqueue
 
-    async def enqueue(update_id: int, payload: dict[str, Any]) -> EnqueueResult:
+    async def enqueue(
+        update_id: int, payload: dict[str, Any], run_id: str = ""
+    ) -> EnqueueResult:
         await started.wait()
         order.append("write")
-        return await original(update_id, payload)
+        return await original(update_id, payload, run_id)
 
     inbox.enqueue = enqueue  # type: ignore[method-assign]
 

@@ -4,9 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. Real answer streaming is deployed and accepted
-live, so item 3 is next and still needs approval. Every live product-runtime run
-remains a separate human gate.
+**Current approved step:** item 3, turn telemetry (3A). Implemented and proven
+offline; the deployed database migration, the deploy and any live turn are each
+still their own human gate. Every live product-runtime run remains one.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -149,19 +149,23 @@ Verified platform facts and cold-start evidence remain in
 3. **Baseline measurement, metrics and logs.** Make both product behaviour and
    its cost observable before changing the agent loop. Today's 15-17 tok/s
    conflates network, prefill and decode; there is no prefill measurement on the
-   A10, and prefix caching has never been read out of a startup log.
+   A10, and prefix caching has never been read out of a startup log. The task
+   input is `docs/baseline_measurement_metrics_logs.md`; the design for its
+   first part is prepared and not yet authorized to build:
+   `reports/2026-08-29_v2_turn_telemetry_preparation.md`.
 
-   - **Application telemetry first.** The worker emits nothing, so a turn's
-     shape is invisible and what exists is Modal's dashboard, which the local
-     profile does not have. One record per turn written to the shared store,
-     with the boundaries `docs/control_plane_cold_start_notes.md` names, plus
-     token counts and success. Timings and counts only — no message text, no
-     attachments, nothing about a person beyond the owner id.
-   - **Inspectable agent trace.** Persist enough structured detail to reconstruct
-     and read the agent's internal work: model steps, tool calls, tool results,
-     errors and stage transitions. The failed live PDF task reported only that
-     20 calls were spent; item 3 must make those calls inspectable before the
-     loop is redesigned.
+   - **Application telemetry — implemented offline, not yet deployed.** One
+     `run_id` is generated at ingress and carried to delivery; `turn_runs` and
+     `trace_events` hold the turn's outcome, route, model and tool calls,
+     tokens, first model token and first visible response, in SQLite locally and
+     PostgreSQL deployed. Timings and counts only. Remaining gates: the additive
+     migration on the populated database, the deploy, and one live turn.
+     `reports/2026-08-29_v2_turn_telemetry_implementation.md`.
+   - **Inspectable agent trace.** The structured detail is now recorded; what is
+     missing is the reading half — a `show run <run_id>` inspector and a list of
+     recent failed runs — and finer stage detail inside the bounded task path.
+     The failed live PDF task reported only that 20 calls were spent; item 3
+     must make those calls readable before the loop is redesigned.
    - One long-output run separating prefill from decode, and the same for input
      size, as a baseline to beat.
    - **GPU active seconds per successful user turn** is the primary metric, not

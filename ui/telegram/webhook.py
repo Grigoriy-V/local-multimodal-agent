@@ -10,13 +10,16 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.config import TelegramSettings
-from ui.telegram.inbox import UpdateInbox
-from ui.telegram.wire import needs_model, read_update
+from app.telemetry.base import TraceEvent, TurnRun
+from app.telemetry.trace import NO_TRACE, Telemetry, TurnTrace, log_event
+from ui.telegram.inbox import InboxJob, UpdateInbox
+from ui.telegram.wire import is_cancellation, needs_model, read_update
 
 
 MAX_UPDATE_BYTES = 1024 * 1024
@@ -30,7 +33,9 @@ class WebhookResponse:
 
 
 class UpdateHandler(Protocol):
-    async def handle_update(self, update: dict[str, Any]) -> None: ...
+    async def handle_update(
+        self, update: dict[str, Any], trace: TurnTrace = NO_TRACE
+    ) -> None: ...
 
 
 class TelegramWebhook:
@@ -98,9 +103,28 @@ class TelegramWebhook:
             pass
 
     async def _admit(self, update: dict[str, Any]) -> WebhookResponse:
-        """Persist the update, then ask for a worker. Order is the durability."""
+        """Persist the update, then ask for a worker. Order is the durability.
 
-        queued = await self.inbox.enqueue(update["update_id"], update)
+        The turn's identity is generated here, where the person's message
+        actually arrives, and written by the insert that already happens — so
+        measurement costs this path no round trip, and the wait before a worker
+        exists is inside the turn rather than before it. It is derived from
+        nothing: not from the text, the account or the update id.
+        """
+
+        queued = await self.inbox.enqueue(
+            update["update_id"], update, run_id=uuid.uuid4().hex
+        )
+        # One line, so the webhook's own logs join the rest of the turn. The
+        # durable record is the worker's; this is correlation, and free.
+        log_event(
+            TraceEvent(
+                run_id=queued.run_id,
+                seq=0,
+                type="update_enqueued",
+                data={"update_id": queued.update_id, "spawning": queued.should_spawn},
+            )
+        )
         if not queued.should_spawn:
             return WebhookResponse(200, "already accepted")
         try:
@@ -111,21 +135,58 @@ class TelegramWebhook:
 
 
 class TelegramUpdateWorker:
-    """Claim one persisted update and run it through the existing adapter."""
+    """Claim one persisted update and run it through the existing adapter.
 
-    def __init__(self, inbox: UpdateInbox, handler: UpdateHandler) -> None:
+    This is also where a turn begins to be measured, because this is where the
+    update stops waiting and starts being worked on. What the person eventually
+    received is decided deeper, in the adapter, so the outcome is set there and
+    this only closes a turn nobody else closed — which is exactly what a crash
+    looks like.
+    """
+
+    def __init__(
+        self,
+        inbox: UpdateInbox,
+        handler: UpdateHandler,
+        telemetry: Telemetry | None = None,
+    ) -> None:
         self.inbox = inbox
         self.handler = handler
+        self.telemetry = telemetry or Telemetry(None)
+
+    def _open_trace(self, job: InboxJob) -> TurnTrace:
+        """Start measuring, unless this update is answered without a model.
+
+        `/new`, `/chats` and the conversation buttons cost nothing, take
+        milliseconds and would outnumber the turns worth measuring. `/stop` is
+        the exception: it spends nothing itself but ends something that does.
+        """
+
+        incoming = read_update(job.payload)
+        if incoming is None or not (needs_model(incoming) or is_cancellation(incoming)):
+            return NO_TRACE
+        run = TurnRun(
+            run_id=job.run_id,
+            source="telegram",
+            source_update_id=str(job.update_id),
+        )
+        return self.telemetry.start(run, offset_ms=job.queued_ms)
 
     async def run(self, update_id: int) -> bool:
         job = await self.inbox.claim(update_id)
         if job is None:
             return False
+        trace = self._open_trace(job)
         try:
-            await self.handler.handle_update(job.payload)
+            await self.handler.handle_update(job.payload, trace)
         except Exception as error:
+            trace.finish("failed", error_type=type(error).__name__)
             await self.inbox.retry(job, f"{type(error).__name__}: {error}")
             raise
+        finally:
+            # A turn the adapter did not close is one that ended some other way.
+            trace.finish("failed", error_type="incomplete")
+            self.telemetry.release(job.run_id)
         await self.inbox.complete(job)
         return True
 

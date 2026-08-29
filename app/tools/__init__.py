@@ -1,4 +1,4 @@
-from app.tools.base import Tool, Toolbox, ToolError
+from app.tools.base import ERROR_PREFIX, Tool, Toolbox, ToolError, tool_failed
 from app.tools.browser import browser_tools, find_chromium_browser, inspect_local_page
 from app.tools.capabilities import (
     BROWSER_INSPECT,
@@ -22,6 +22,7 @@ from app.tools.web import web_fetch_tools, web_search_tools, web_tools, web_view
 
 __all__ = [
     "BROWSER_INSPECT",
+    "ERROR_PREFIX",
     "DEFAULT_CAPABILITIES",
     "DOCUMENTS_READ",
     "FILESYSTEM_READ",
@@ -44,6 +45,7 @@ __all__ = [
     "memory_tools",
     "presentation_tools",
     "send_file",
+    "tool_failed",
     "web_fetch_tools",
     "web_search_tools",
     "web_tools",

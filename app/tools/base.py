@@ -21,6 +21,19 @@ class ToolError(RuntimeError):
     """
 
 
+# How a tool result says it went wrong. A failing tool is a message the model
+# reads rather than an exception, so this prefix is the only signal there is —
+# which is why the answer to "did that tool fail" lives here, with the code that
+# writes it, instead of being a string literal somewhere else.
+ERROR_PREFIX = "error: "
+
+
+def tool_failed(message: Message) -> bool:
+    """Whether this tool result reports a failure rather than a result."""
+
+    return any((part.text or "").startswith(ERROR_PREFIX) for part in message.content)
+
+
 @dataclass(frozen=True)
 class Tool:
     """`destructive` marks a tool that changes something outside the agent.

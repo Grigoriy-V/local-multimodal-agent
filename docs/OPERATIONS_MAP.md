@@ -48,7 +48,7 @@ All normal application environment configuration belongs to one of these setting
 | Prefix | Class | Purpose |
 |---|---|---|
 | `MODEL_` | `ModelSettings` | model endpoint, model name, auth, timeouts/generation |
-| `AGENT_` | `AgentSettings` | DB/store, checkpoints, workspace, context policy, answer streaming |
+| `AGENT_` | `AgentSettings` | DB/store, checkpoints, workspace, context policy, answer streaming, turn telemetry |
 | `TELEGRAM_` | `TelegramSettings` | Bot API, webhook secret, access policy |
 | `WEB_` | `WebSettings` | search, direct fetch, renderer/browser configuration |
 
@@ -59,6 +59,19 @@ streamed, and Telegram shows the answer in one message while it is written.
 Setting it to `false` and redeploying returns the turn to a single complete
 request, without reverting code. It changes what is shown, never what is stored:
 only finished messages reach the store either way.
+
+`AGENT_TELEMETRY` is on by default: every turn that reaches the model gets one
+`run_id` at ingress, a `turn_runs` row and an ordered `trace_events` trace.
+Setting it to `false` and redeploying leaves every code path in place and
+records nothing. `AGENT_TELEMETRY_DATABASE` is the local profile's own SQLite
+file for that record; the deployed profile uses `AGENT_DATABASE_URL` with tables
+of its own. Telemetry holds timings, counts and technical metadata only — never
+message text, attachments, prompts, tool results or streamed deltas — and it can
+never fail a turn: every recorder call swallows its own errors.
+
+`.env.example` does not yet document `AGENT_TELEMETRY` or
+`AGENT_TELEMETRY_DATABASE`; editing it was refused in the session that added
+them. Both default to a working configuration, so nothing depends on it.
 
 Application code should not invent a second environment-loading path when the value belongs in one of these classes.
 
@@ -112,7 +125,13 @@ It prepares:
 ConversationStore/PostgresStore schema
 LangGraph PostgreSQL checkpoint tables
 Telegram `telegram_updates` inbox table
+Telemetry `turn_runs` and `trace_events` tables
 ```
+
+Every step is additive against a populated database. The telemetry tables are
+new, and the inbox gains a nullable `run_id` column whose existing rows stay
+valid as updates that were never measured. Telemetry keeps its own version row
+(`telemetry_version`, currently **1**) rather than sharing the store's.
 
 The normal runtime intentionally does not run these migrations on each request.
 
@@ -365,8 +384,12 @@ Important behavior: a later `model_app.py` deploy resets the setting to the `SCA
 conversation/memory        AGENT_DATABASE -> SQLite file
 ordinary checkpoints       AGENT_CHECKPOINTS -> SQLite file
 task checkpoints           AGENT_TASK_CHECKPOINTS/default task checkpoint file
+turn telemetry             AGENT_TELEMETRY_DATABASE -> SQLite file
 workspace                  AGENT_WORKSPACE -> local directory
 ```
+
+Telemetry is deliberately its own file: it is disposable in a way a conversation
+is not, so deleting it costs nothing.
 
 Exact defaults live in `AgentSettings` and `.env.example`.
 
@@ -376,7 +399,8 @@ Exact defaults live in `AgentSettings` and `.env.example`.
 Neon/PostgreSQL
   ├─ conversations/messages/summaries/facts
   ├─ LangGraph checkpoint tables
-  └─ telegram_updates durable inbox
+  ├─ telegram_updates durable inbox (carries each turn's run_id)
+  └─ turn_runs / trace_events turn telemetry
 
 Modal Volume assistant-workspaces
   └─ /workspaces/<canonical-user>/...
@@ -439,6 +463,26 @@ ui/telegram/adapter.py
 ```
 
 Deployed `self_test` in `control_app.py` exists for the same question inside the actual container and can optionally include GPU/provider-credit checks.
+
+### Reading what a turn cost
+
+Every measured turn writes two things that share one `run_id`: an immediate
+structured log line per event — visible in Modal's log view while the turn is
+still running, and on the terminal in the local profile — and a durable record
+in `turn_runs` / `trace_events`, written as one row at claim and bounded batches
+afterwards (about every 25 events, and at the end).
+
+```text
+turn_runs      one row per turn: outcome, status, route, model/tool counts,
+               tokens, first model token, first visible response, total time
+trace_events   the ordered detail: turn, router, model, tool, approval,
+               persistence and Telegram delivery boundaries
+```
+
+A turn that ends without an outcome is closed as `failed`/`incomplete` by the
+worker, so a container that died leaves a finished row rather than a `running`
+one. There is no inspection command yet; querying the two tables is the current
+interface, and `show run <run_id>` belongs to the next part of item 3.
 
 ### Local doctor
 

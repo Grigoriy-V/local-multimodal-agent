@@ -394,6 +394,9 @@ The application and model deployment have no Python import dependency on each ot
 | In-flight conversational graph | LangGraph checkpointer | resumable |
 | In-flight bounded task | task LangGraph checkpointer | resumable |
 | Telegram accepted update / retry lease | PostgreSQL Telegram inbox | yes |
+| Turn identity (`run_id`), generated at ingress | Telegram inbox row / polling loop | yes |
+| Turn summary and trace | `TelemetryStore` (`turn_runs`, `trace_events`) | yes |
+| In-flight turn recorder | `Telemetry` in the worker process | no |
 | User files / document previews / web screenshots (deployed) | per-user dir on `assistant-workspaces` Volume | yes |
 | Model weights | Modal HF cache Volume | yes |
 | vLLM compile/cache | Modal vLLM cache Volume | yes |
@@ -429,7 +432,8 @@ These are facts useful when reading the code; `ROADMAP.md` decides whether/when 
 - `GeneralHarness` currently spends a separate structured model call to choose `answer` versus `act`.
 - The bounded task implementation/validation toolbox is narrower than the ordinary assistant toolbox.
 - The deployed Telegram inbox leases by `update_id`, not by conversation, so same-thread concurrency is not yet solved.
-- A full inspectable durable model/tool/stage trace is not yet implemented; current messages/checkpoints expose parts of the trajectory but not one canonical execution log.
+- Every turn that reaches the model carries one `run_id` from ingress to delivery, and its model calls, tool calls, tokens, first token, first visible response and outcome are recorded. What is missing is the reading half: there is no `show run <run_id>` inspector yet, and no GPU-time or derived-cost attribution.
+- The bounded task path reports the model calls it spends through a wrapped backend rather than per stage, so an act turn's totals are honest while its internal stage detail is still coarse.
 - Chainlit document-upload admission is not yet the same as Telegram document admission.
 - `Capability.build` currently receives a local `Path`; remote execution/sandbox abstraction is not yet a first-class provider boundary.
 - `app/api/` exists as an empty stub; no separately hosted application API is currently used.

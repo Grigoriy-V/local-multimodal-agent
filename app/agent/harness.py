@@ -16,6 +16,7 @@ from typing import Literal
 from app.agent.runtime import Agent
 from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
 from app.models import BackendError, ContentPart, Message
+from app.telemetry import NO_TRACE, TurnTrace
 
 ROUTE_RESPONSE_FORMAT = {
     "type": "json_schema",
@@ -115,34 +116,49 @@ class GeneralHarness:
         self.agent = agent
         self.tasks = tasks
 
-    async def decide(self, thread_id: str, message: Message) -> HarnessDecision:
+    async def decide(
+        self, thread_id: str, message: Message, trace: TurnTrace = NO_TRACE
+    ) -> HarnessDecision:
+        """Choose the route. Measured, because it is a full model request.
+
+        It runs before the answer the person is waiting for, so leaving it out
+        of a turn's token count would understate every message by one request
+        over the whole conversation.
+        """
+
         try:
-            completion = await self.agent.backend.invoke(
-                self.agent.context_prompt(thread_id, [message], ROUTER_SYSTEM_PROMPT),
-                response_format=ROUTE_RESPONSE_FORMAT,
-            )
-            return parse_decision(completion.text)
+            with trace.model("router") as measured:
+                completion = await self.agent.backend.invoke(
+                    self.agent.context_prompt(thread_id, [message], ROUTER_SYSTEM_PROMPT),
+                    response_format=ROUTE_RESPONSE_FORMAT,
+                )
+                measured.done(completion)
+            decision = parse_decision(completion.text)
         except (BackendError, json.JSONDecodeError, ValueError, TypeError):
             # Routing must never make a usable conversational request fail. The
             # normal agent can still answer, clarify, or select its governed tools.
-            return HarnessDecision("answer")
+            decision = HarnessDecision("answer")
+        trace.route(decision.route)
+        return decision
 
     async def start_task(
-        self, thread_id: str, original: Message, task: str
+        self, thread_id: str, original: Message, task: str, trace: TurnTrace = NO_TRACE
     ) -> TaskView:
         self.agent.record(thread_id, [original])
-        return await self.tasks.start(thread_id, task, subdirectory=".")
+        return await self.tasks.start(thread_id, task, subdirectory=".", trace=trace)
 
     async def task_view(self, thread_id: str) -> TaskView:
         return await self.tasks.view(thread_id)
 
-    async def resume_task(self, thread_id: str, approved: bool) -> TaskView:
-        return await self.tasks.resume(thread_id, approved)
+    async def resume_task(
+        self, thread_id: str, approved: bool, trace: TurnTrace = NO_TRACE
+    ) -> TaskView:
+        return await self.tasks.resume(thread_id, approved, trace=trace)
 
     def resume_task_with_progress(
-        self, thread_id: str, approved: bool
+        self, thread_id: str, approved: bool, trace: TurnTrace = NO_TRACE
     ) -> AsyncIterator[TaskProgress]:
-        return self.tasks.resume_with_progress(thread_id, approved)
+        return self.tasks.resume_with_progress(thread_id, approved, trace=trace)
 
     async def cancel_task(self, thread_id: str) -> Message | None:
         view = await self.tasks.cancel(thread_id)

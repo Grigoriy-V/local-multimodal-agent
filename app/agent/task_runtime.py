@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -31,6 +32,8 @@ from app.agent.task_graph import (
 )
 from app.agent.task_worker import build_model_task_graph
 from app.models import ModelBackend
+from app.telemetry import NO_TRACE, TurnTrace
+from app.telemetry.backend import TracedBackend
 
 
 @dataclass(frozen=True)
@@ -74,7 +77,13 @@ class TaskRuntime:
         self.backend = backend
         self.workspace = Path(workspace).resolve()
         self.checkpoints = Path(checkpoints)
-        self.tester = tester or ModelTaskValidator(backend, self.workspace)
+        # One task lane at a time is this class's existing invariant, which is
+        # what makes a current turn a well-defined thing to ask about. The
+        # planner, implementer and validator all reach the model through this
+        # wrapper, so an autonomous task reports what it actually spent.
+        self._trace: TurnTrace = NO_TRACE
+        self._measured = TracedBackend(backend, lambda: self._trace)
+        self.tester = tester or ModelTaskValidator(self._measured, self.workspace)
         self.budget = budget or TaskBudget(max_seconds=300.0)
         if not self.workspace.is_dir():
             raise ValueError(f"task workspace {self.workspace} is not a directory")
@@ -95,11 +104,22 @@ class TaskRuntime:
     def _config(thread_id: str) -> dict[str, dict[str, str]]:
         return {"configurable": {"thread_id": f"task:{thread_id}"}}
 
+    @contextmanager
+    def _measuring(self, trace: TurnTrace) -> Iterator[None]:
+        """Attribute this lane's model calls to the turn that asked for them."""
+
+        previous = self._trace
+        self._trace = trace
+        try:
+            yield
+        finally:
+            self._trace = previous
+
     async def _compiled(self) -> CompiledStateGraph:
         if self._graph is None:
             self._saver = await self._checkpoint_handle.open()
             self._graph = build_model_task_graph(
-                self.backend,
+                self._measured,
                 self.workspace,
                 self.tester,
                 budget=self.budget,
@@ -108,34 +128,48 @@ class TaskRuntime:
         return self._graph
 
     async def start(
-        self, thread_id: str, task: str, subdirectory: str | None = None
+        self,
+        thread_id: str,
+        task: str,
+        subdirectory: str | None = None,
+        trace: TurnTrace = NO_TRACE,
     ) -> TaskView:
         graph = await self._compiled()
-        await graph.ainvoke(
-            {"task": task, "subdirectory": subdirectory or self.subdirectory(thread_id)},
-            config=self._config(thread_id),
-        )
+        with self._measuring(trace), trace.step("task_planning"):
+            await graph.ainvoke(
+                {
+                    "task": task,
+                    "subdirectory": subdirectory or self.subdirectory(thread_id),
+                },
+                config=self._config(thread_id),
+            )
         return await self.view(thread_id)
 
-    async def resume(self, thread_id: str, approved: bool) -> TaskView:
-        async for _progress in self.resume_with_progress(thread_id, approved):
+    async def resume(
+        self, thread_id: str, approved: bool, trace: TurnTrace = NO_TRACE
+    ) -> TaskView:
+        async for _progress in self.resume_with_progress(thread_id, approved, trace):
             pass
         return await self.view(thread_id)
 
     async def resume_with_progress(
-        self, thread_id: str, approved: bool
+        self, thread_id: str, approved: bool, trace: TurnTrace = NO_TRACE
     ) -> AsyncIterator[TaskProgress]:
         """Resume an approved task and expose real graph progress as it commits."""
 
         graph = await self._compiled()
-        async for update in graph.astream(
-            Command(resume=approved),
-            config=self._config(thread_id),
-            stream_mode="updates",
-        ):
-            progress = self._progress(update)
-            if progress is not None:
-                yield progress
+        with self._measuring(trace):
+            async for update in graph.astream(
+                Command(resume=approved),
+                config=self._config(thread_id),
+                stream_mode="updates",
+            ):
+                progress = self._progress(update)
+                if progress is not None:
+                    # The stage a person sees is the stage the trace records, so
+                    # a run read afterwards matches what the chat showed.
+                    trace.event("task_stage", stage=progress.stage)
+                    yield progress
 
     @staticmethod
     def _progress(update: object) -> TaskProgress | None:

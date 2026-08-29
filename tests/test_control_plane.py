@@ -47,8 +47,19 @@ async def test_setup_runs_every_migration_and_closes_the_store(monkeypatch: Any)
         async def setup(self) -> None:
             events.append("inbox.setup")
 
+    class FakeTelemetry:
+        def __init__(self, url: str, schema: str, *, migrate_schema: bool) -> None:
+            assert url == "postgresql://example/control"
+            assert schema == "assistant"
+            assert migrate_schema is True
+            events.append("telemetry.setup")
+
+        def close(self) -> None:
+            events.append("telemetry.close")
+
     monkeypatch.setattr("tools.setup_control_plane.setup_postgres_checkpoints", checkpoints)
     monkeypatch.setattr("tools.setup_control_plane.PostgresUpdateInbox", FakeInbox)
+    monkeypatch.setattr("tools.setup_control_plane.PostgresTelemetry", FakeTelemetry)
 
     await setup_control_plane(
         AgentSettings(
@@ -61,6 +72,8 @@ async def test_setup_runs_every_migration_and_closes_the_store(monkeypatch: Any)
         "store.setup",
         "checkpoints.setup",
         "inbox.setup",
+        "telemetry.setup",
+        "telemetry.close",
         "store.close",
     ]
 

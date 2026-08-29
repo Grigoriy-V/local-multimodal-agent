@@ -17,7 +17,7 @@ from typing import Any
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
-from app.agent.graph import ASSISTANT_DELTA, build_agent, latest_text
+from app.agent.graph import ASSISTANT_DELTA, RUN_ID, build_agent, latest_text
 from app.checkpoints import CheckpointHandle
 from app.capabilities import (
     CHAT_DELIVERY,
@@ -30,6 +30,7 @@ from app.context import ContextPolicy, load_turn_context
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import LOCAL_USER_ID, ConversationStore, Thread, open_store
 from app.models import ContentPart, Message, ModelBackend, Usage
+from app.telemetry import NO_TRACE, Telemetry, TurnTrace
 from app.preflight import Probe, backend_probe, report, run, store_probes, tool_probes
 from app.models.openai_compatible import OpenAICompatibleBackend
 from app.tools import (
@@ -122,9 +123,13 @@ class Agent:
         user_id: str = LOCAL_USER_ID,
         delivery: Delivery = CHAT_DELIVERY,
         stream_answers: bool = True,
+        telemetry: Telemetry | None = None,
     ) -> None:
         self.backend = backend
         self.stream_answers = stream_answers
+        # One recorder for every thread this agent serves. What varies per turn
+        # is the run identity, which travels with the invocation.
+        self.telemetry = telemetry or Telemetry(None)
         self.store = store
         self.user_id = user_id
         self.workspace = Path(workspace).resolve()
@@ -249,10 +254,13 @@ class Agent:
                 prompt,
                 await self._checkpointer(),
                 self.stream_answers,
+                self.telemetry,
             )
         return self._graphs[thread_id]
 
-    async def _run(self, thread_id: str, command: Any) -> AsyncIterator[AgentEvent]:
+    async def _run(
+        self, thread_id: str, command: Any, trace: TurnTrace = NO_TRACE
+    ) -> AsyncIterator[AgentEvent]:
         """Drive the graph and report what the turn produced, as it happens.
 
         Two kinds of thing come out, and the difference is the whole point:
@@ -267,7 +275,11 @@ class Agent:
         """
 
         graph = await self._graph(thread_id)
-        config = {"configurable": {"thread_id": thread_id}}
+        # The run identity rides beside the thread, so a node can find the
+        # recorder for the turn it is part of without the graph holding one.
+        config = {
+            "configurable": {"thread_id": thread_id, RUN_ID: trace.run.run_id or None}
+        }
         stream = graph.astream(command, config=config, stream_mode=["updates", "custom"])
         async for mode, payload in stream:
             if mode == "custom":
@@ -284,18 +296,21 @@ class Agent:
                 for produced in patch.get("messages") or []:
                     yield MessageProduced(produced)
 
-    async def events(self, thread_id: str, message: Message) -> AsyncIterator[AgentEvent]:
+    async def events(
+        self, thread_id: str, message: Message, trace: TurnTrace = NO_TRACE
+    ) -> AsyncIterator[AgentEvent]:
         """Run one turn, reporting deltas and finished messages as they occur."""
 
-        async for event in self._run(thread_id, {"thread_id": thread_id, "messages": [message]}):
+        command = {"thread_id": thread_id, "messages": [message]}
+        async for event in self._run(thread_id, command, trace):
             yield event
 
     async def resume_events(
-        self, thread_id: str, answers: dict[str, bool]
+        self, thread_id: str, answers: dict[str, bool], trace: TurnTrace = NO_TRACE
     ) -> AsyncIterator[AgentEvent]:
         """Answer the pending question and carry on, reporting the same events."""
 
-        async for event in self._run(thread_id, Command(resume=answers)):
+        async for event in self._run(thread_id, Command(resume=answers), trace):
             yield event
 
     async def steps(self, thread_id: str, message: Message) -> AsyncIterator[Message]:
@@ -410,12 +425,17 @@ def create_agent(
     agent_settings: AgentSettings | None = None,
     user_id: str = LOCAL_USER_ID,
     delivery: Delivery = CHAT_DELIVERY,
+    telemetry: Telemetry | None = None,
 ) -> Agent:
     """Build the default agent from configuration.
 
     `delivery` is the caller's statement of what its interface can put in front
     of a person. It controls whether the explicit presentation capability is
     wired at all; observation tools never infer delivery from their own output.
+
+    `telemetry` is passed in rather than opened here: one interface serves
+    several people, and each of them gets an agent, but they all belong to one
+    process that should hold one connection and one set of active turns.
     """
 
     agent_settings = agent_settings or AgentSettings()
@@ -441,4 +461,5 @@ def create_agent(
         user_id=user_id,
         delivery=delivery,
         stream_answers=agent_settings.stream_answers,
+        telemetry=telemetry,
     )

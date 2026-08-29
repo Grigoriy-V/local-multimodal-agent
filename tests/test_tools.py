@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.models import ToolCall
-from app.tools import Tool, Toolbox, ToolError, filesystem_tools
+from app.tools import Tool, Toolbox, ToolError, filesystem_tools, tool_failed
 
 
 @pytest.fixture
@@ -293,3 +293,45 @@ def test_a_programming_error_is_not_hidden_as_a_tool_result() -> None:
 
     with pytest.raises(ValueError, match="bug"):
         box.run(ToolCall(id="call_1", name="broken", arguments={}))
+
+
+def test_every_way_a_call_can_fail_is_recognisable_as_a_failure() -> None:
+    """Telemetry asks the toolbox whether a result went wrong, not a string.
+
+    A tool failure is a message the model reads rather than an exception, so
+    `tool_failed` is the only signal there is. If a failure path ever stops
+    matching it, a failing tool starts being counted as a successful one.
+    """
+
+    def denied() -> str:
+        raise PermissionError(13, "permission denied")
+
+    def refused() -> str:
+        raise ToolError("that path is outside the workspace")
+
+    box = Toolbox(
+        [
+            Tool(name="blocked", description="", parameters={}, run=denied),
+            Tool(name="refuses", description="", parameters={}, run=refused),
+            Tool(
+                name="strict",
+                description="",
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+                run=lambda path: path,
+            ),
+            Tool(name="fine", description="", parameters={}, run=lambda: "all good"),
+        ]
+    )
+    failures = [
+        ToolCall(id="c1", name="blocked", arguments={}),
+        ToolCall(id="c2", name="refuses", arguments={}),
+        ToolCall(id="c3", name="strict", arguments={}),  # missing argument
+        ToolCall(id="c4", name="absent", arguments={}),  # unknown tool
+    ]
+
+    assert all(tool_failed(box.run(call)) for call in failures)
+    assert not tool_failed(box.run(ToolCall(id="c5", name="fine", arguments={})))

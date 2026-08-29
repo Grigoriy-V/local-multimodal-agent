@@ -166,6 +166,7 @@ def _settings() -> tuple[object, object]:
 async def process_telegram_update(update_id: int) -> bool:
     """Claim and process one durable update in a separate CPU worker."""
 
+    from app.telemetry import open_telemetry
     from ui.telegram.adapter import TelegramAdapter
     from ui.telegram.api import TelegramClient
     from ui.telegram.inbox import PostgresUpdateInbox
@@ -173,7 +174,11 @@ async def process_telegram_update(update_id: int) -> bool:
 
     telegram, agent = _settings()
     client = TelegramClient(telegram)
-    adapter = TelegramAdapter(client, telegram, agent)
+    # One recorder for the container, shared by the worker that opens the turn
+    # and the adapter that decides how it ended. Its tables are migrated by
+    # `tools/setup_control_plane.py`, never by a worker starting up.
+    telemetry = open_telemetry(agent)
+    adapter = TelegramAdapter(client, telegram, agent, telemetry=telemetry)
     inbox = PostgresUpdateInbox(agent.database_url, agent.database_schema)
     # Around the turn, not around the process. A container is reused for as long
     # as its idle window holds, so a container that has been alive since before
@@ -183,11 +188,14 @@ async def process_telegram_update(update_id: int) -> bool:
     # container answers it.
     await workspaces.reload.aio()
     try:
-        return await TelegramUpdateWorker(inbox, adapter).run(update_id)
+        return await TelegramUpdateWorker(inbox, adapter, telemetry).run(update_id)
     finally:
         await workspaces.commit.aio()
         await adapter.aclose()
         await client.aclose()
+        # Flushes anything a turn left behind before the container can be
+        # scaled away with it still in memory.
+        telemetry.close()
 
 
 @app.function(

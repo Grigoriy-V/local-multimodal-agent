@@ -137,6 +137,17 @@ def read_update(update: dict[str, Any]) -> Incoming | None:
     )
 
 
+def is_cancellation(incoming: Incoming) -> bool:
+    """Is this the one model-free command that ends work already running?
+
+    It costs no model call, so it is not `needs_model`, but it is the only free
+    command that changes what an expensive turn does — which is why it is worth
+    a measured turn of its own while `/chats` and `/can` are not.
+    """
+
+    return incoming.callback_data is None and incoming.text.strip().lower() == "/stop"
+
+
 def needs_model(incoming: Incoming) -> bool:
     """Will answering this update reach the model?
 
