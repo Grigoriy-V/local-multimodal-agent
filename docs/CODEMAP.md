@@ -49,6 +49,10 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Count model calls the task path spends | `app/telemetry/backend.py` | `TracedBackend`, `TaskRuntime._measuring` |
 | Read a measured turn back | `app/telemetry/inspect.py`, `tools/show_run.py` | `render_run`, `render_listing`, `recent_runs` |
 | Mark which stage of a task is spending | `app/telemetry/trace.py` | `TurnTrace.staged`, `resolve` |
+| Read the model server's engine metrics | `app/telemetry/vllm.py` | `parse_metrics`, `discover`, `restarted`, `summarize` |
+| Measure prefill, decode and prefix cache | `tools/vllm_baseline.py` | `plan`, `measure`, `report` |
+| Estimate GPU seconds and cost of a turn | `app/telemetry/cost.py` | `gpu_cost`, `IDLE_WINDOW_SECONDS`, `A10_USD_PER_SECOND` |
+| Reach the model endpoint's auth headers | `app/models/openai_compatible.py` | `auth_headers` |
 | Change SQLite persistence | `app/memory/store.py` | `SqliteStore` |
 | Change deployed PostgreSQL persistence | `app/memory/postgres.py` | `PostgresStore`, `turn_context`, `append` |
 | Change store selection | `app/memory/open.py` | `open_store` |

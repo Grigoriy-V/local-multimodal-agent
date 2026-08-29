@@ -4,10 +4,11 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** the run inspector and task-stage detail (3B), built
-and green offline, awaiting a deploy and one live task turn. The vLLM baseline
-(3C) is not approved. Every live product-runtime run remains a separate human
-gate.
+**Current approved step:** the model and GPU baseline (3C). Its probe and the
+derived cost view are built and green offline; the measuring run itself has not
+happened. 3B is likewise built offline and waits for the same live window.
+Every live product-runtime run remains a separate human gate, including reading
+the engine's `/metrics`.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -171,8 +172,14 @@ Verified platform facts and cold-start evidence remain in
      change. Not deployed and not accepted live: that needs a deploy and one
      live task turn, which is a GPU gate.
      `reports/2026-08-29_v2_run_inspector_implementation.md`.
-   - One long-output run separating prefill from decode, and the same for input
-     size, as a baseline to beat.
+   - **Model and GPU baseline, offline half built.** `tools/vllm_baseline.py`
+     reads the engine's own metrics, discovers which names the deployed vLLM
+     publishes rather than copying them, refuses a delta across an engine
+     restart, and runs short-in/long-out, four input sizes and a repeated
+     prefix in one continuous pass. GPU seconds and cost per turn are derived
+     when a run is read, never stored. **Nothing has been measured yet**: the
+     run needs a GPU wake, which is its own permission.
+     `reports/2026-08-29_v2_gpu_baseline_implementation.md`.
    - **GPU active seconds per successful user turn** is the primary metric, not
      total spend. "Successful" needs a definition a failed turn cannot satisfy.
    - Cost per turn and per user, counting the harness's two model calls

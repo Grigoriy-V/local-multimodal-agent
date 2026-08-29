@@ -13,9 +13,14 @@ text to leak here because none was ever written.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from datetime import datetime
 
-from app.telemetry.base import TraceEvent, TurnRun
+from app.telemetry.base import TraceEvent, TurnRun, moment
+from app.telemetry.cost import (
+    A10_USD_PER_SECOND,
+    IDLE_WINDOW_SECONDS,
+    gpu_cost,
+    render_cost,
+)
 
 # Events whose duration is already reported in their own section, so the summary
 # of everything else does not repeat them.
@@ -27,13 +32,6 @@ TOOL_EVENTS = frozenset({"tool_started", "tool_finished", "tool_failed", "tool_s
 
 def seconds(milliseconds: float | None) -> str:
     return "     -  " if milliseconds is None else f"{milliseconds / 1000:7.2f}s"
-
-
-def moment(timestamp: str) -> datetime | None:
-    try:
-        return datetime.fromisoformat(timestamp)
-    except (TypeError, ValueError):
-        return None
 
 
 def offsets(run: TurnRun, events: Sequence[TraceEvent]) -> dict[int, float]:
@@ -292,7 +290,13 @@ def totals(run: TurnRun, events: Sequence[TraceEvent]) -> list[str]:
     return lines
 
 
-def render_run(run: TurnRun, events: Sequence[TraceEvent]) -> str:
+def render_run(
+    run: TurnRun,
+    events: Sequence[TraceEvent],
+    *,
+    idle_window_seconds: float = IDLE_WINDOW_SECONDS,
+    rate_per_second: float = A10_USD_PER_SECOND,
+) -> str:
     parts = [
         *summary(run, events),
         *timings(run, events),
@@ -301,6 +305,13 @@ def render_run(run: TurnRun, events: Sequence[TraceEvent]) -> str:
         *stage_section(events),
         *timeline(run, events),
         *totals(run, events),
+        *render_cost(
+            gpu_cost(
+                events,
+                idle_window_seconds=idle_window_seconds,
+                rate_per_second=rate_per_second,
+            )
+        ),
     ]
     return "\n".join(parts)
 

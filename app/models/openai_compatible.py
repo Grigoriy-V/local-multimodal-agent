@@ -302,6 +302,33 @@ class StreamedCompletion:
         )
 
 
+def auth_headers(settings: ModelSettings) -> dict[str, str]:
+    """How this deployment proves it may talk to the model server.
+
+    Its own function because the chat endpoint is not the only thing behind that
+    door: the engine's `/metrics` is served by the same process behind the same
+    proxy auth, and a second copy of this logic would be a second thing to keep
+    true when the credential shape changes.
+    """
+
+    headers = {"Content-Type": "application/json"}
+    if settings.api_key:
+        if settings.auth_style == "bearer":
+            headers["Authorization"] = f"Bearer {settings.api_key}"
+        else:
+            key, separator, secret = settings.api_key.partition(".")
+            if not separator or not key.startswith("wk-") or not secret.startswith("ws-"):
+                raise ValueError(
+                    "MODEL_API_KEY must be '<wk-token-id>.<ws-token-secret>' "
+                    "when MODEL_AUTH_STYLE=modal_proxy"
+                )
+            headers["Modal-Key"] = key
+            headers["Modal-Secret"] = secret
+    elif settings.auth_style == "modal_proxy":
+        raise ValueError("MODEL_API_KEY is required when MODEL_AUTH_STYLE=modal_proxy")
+    return headers
+
+
 class OpenAICompatibleBackend(ModelBackend):
     """Talks to a chat-completions endpoint over plain HTTP."""
 
@@ -311,21 +338,7 @@ class OpenAICompatibleBackend(ModelBackend):
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.settings = settings or ModelSettings()
-        headers = {"Content-Type": "application/json"}
-        if self.settings.api_key:
-            if self.settings.auth_style == "bearer":
-                headers["Authorization"] = f"Bearer {self.settings.api_key}"
-            else:
-                key, separator, secret = self.settings.api_key.partition(".")
-                if not separator or not key.startswith("wk-") or not secret.startswith("ws-"):
-                    raise ValueError(
-                        "MODEL_API_KEY must be '<wk-token-id>.<ws-token-secret>' "
-                        "when MODEL_AUTH_STYLE=modal_proxy"
-                    )
-                headers["Modal-Key"] = key
-                headers["Modal-Secret"] = secret
-        elif self.settings.auth_style == "modal_proxy":
-            raise ValueError("MODEL_API_KEY is required when MODEL_AUTH_STYLE=modal_proxy")
+        headers = auth_headers(self.settings)
         self._client = httpx.AsyncClient(
             base_url=self.settings.endpoint.rstrip("/"),
             timeout=self.settings.timeout,

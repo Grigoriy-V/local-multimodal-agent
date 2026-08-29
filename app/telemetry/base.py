@@ -45,6 +45,20 @@ def stamp() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds")
 
 
+def moment(timestamp: str) -> datetime | None:
+    """`stamp` read back. Unparseable input is unknown, never an exception.
+
+    Anything reading a trace is reading rows that may have been written by an
+    older version of this code, and one odd timestamp must not stop a run from
+    being inspected.
+    """
+
+    try:
+        return datetime.fromisoformat(timestamp)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class TurnRun:
     """The summary row for one user turn.

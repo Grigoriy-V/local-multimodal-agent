@@ -501,8 +501,50 @@ is read-only — no migration, and nothing started. Rendering lives in
 
 A rendered run shows the queue wait, first model token and first visible
 response, then model calls with their tokens, tool calls with stage and path,
-task stages with their durations, the full event timeline at its offsets, and
-the totals including time no measured step claimed.
+task stages with their durations, the full event timeline at its offsets, the
+totals including time no measured step claimed, and a derived GPU section.
+
+### GPU seconds and cost per turn
+
+Derived when a run is read, never stored, so a better formula improves every
+past run instead of leaving a frozen number in a column.
+
+```text
+model request time       measured: the engine was working
+estimated active         derived:  first request to last, plus the idle window
+derived cost             derived:  active seconds x the configured GPU rate
+platform billed time     not visible here; Modal aggregates per App
+```
+
+It is an **upper bound per turn**: the idle window is charged in full to the
+turn that opened it, while a following turn inside that window shares the same
+awake container. Do not sum these and call the result the bill; compare
+aggregates against `modal billing` instead. `--idle-window` and `--gpu-rate`
+override both inputs. `IDLE_WINDOW_SECONDS` mirrors `SCALEDOWN_WINDOW` in
+`deploy/modal/model_app.py` and a test keeps them equal.
+
+### Model server baseline
+
+`python tools/vllm_baseline.py` prints the plan and contacts nothing. `--run`
+sends it.
+
+**`--run` wakes the GPU and needs explicit permission for that run**, including
+`--discover`, which only reads `/metrics` — the metrics endpoint is served by
+the same scale-to-zero container as the model.
+
+```text
+--discover     read /metrics once, publish which names this vLLM actually has
+--run          the whole suite: short-in/long-out, four input sizes, repeated prefix
+--from-file    re-render saved readings; touches nothing
+```
+
+Raw readings are saved to `reports/vllm_baseline_<stamp>.json` before anything
+is analysed, so a run is never repeated to recover a number. Metric names are
+discovered rather than copied between vLLM releases, an absent counter is
+reported as absent rather than as zero, and a delta spanning an engine restart
+is refused instead of published. Every prompt except the repeated-prefix pair
+starts with a marker unique to the run, so prefix caching cannot silently
+answer the prefill question.
 
 ### Local doctor
 

@@ -16,6 +16,7 @@ import argparse
 import sys
 
 from app.config import AgentSettings
+from app.telemetry.cost import A10_USD_PER_SECOND, IDLE_WINDOW_SECONDS
 from app.telemetry.inspect import render_listing, render_run
 from app.telemetry.open import open_telemetry
 
@@ -30,6 +31,18 @@ def parse(argv: list[str]) -> argparse.Namespace:
         help="only runs that failed or never finished at all",
     )
     parser.add_argument("--user", default=None, help="restrict the listing to one user")
+    parser.add_argument(
+        "--idle-window",
+        type=float,
+        default=IDLE_WINDOW_SECONDS,
+        help="seconds the GPU stays warm after a request, for the cost estimate",
+    )
+    parser.add_argument(
+        "--gpu-rate",
+        type=float,
+        default=A10_USD_PER_SECOND,
+        help="dollars per GPU second, for the cost estimate",
+    )
     return parser.parse_args(argv)
 
 
@@ -46,7 +59,14 @@ def main(argv: list[str] | None = None) -> int:
             if run is None:
                 print(f"no run {options.run_id}")
                 return 1
-            print(render_run(run, store.events(options.run_id)))
+            print(
+                render_run(
+                    run,
+                    store.events(options.run_id),
+                    idle_window_seconds=options.idle_window,
+                    rate_per_second=options.gpu_rate,
+                )
+            )
             return 0
         print(
             render_listing(
