@@ -143,11 +143,55 @@ contract suite or the live check can.
 **Deploy.** `assistant-control` in 21.3 s, five functions re-created. No GPU was
 touched.
 
-## What is owed before this can be called done
+## Accepted live, 2026-08-30
 
-**Live acceptance**: two messages sent seconds apart, answered in order, with
-`tools/show_run.py` showing two runs on one thread whose intervals do not
-overlap. The human runs it; this wakes a GPU and is their own permission to
-spend.
+The human sent two messages into the real chat. Both were answered, in order.
 
-Until then the ordering guarantee is deployed but unproven in the product.
+The two updates arrived **323 ms apart** — `814912946` at 22:53:52.406 and
+`814912947` at 22:53:52.729 by the database's own clock — which is a sharper
+race than the one that produced the original defect. Both rows carry a
+conversation key, so this was the new claim path and not the legacy fallback,
+and both have `attempts = 1`: each was successfully claimed exactly once.
+
+| | first message | second message |
+|---|---|---|
+| arrived | 22:53:52.406 | 22:53:52.729 |
+| claimed | 22:53:58.5 | 22:54:12.4 |
+| finished | 22:54:12.3 | 22:54:23.8 |
+| queue wait | 6.05 s | 19.67 s |
+| total | 19.64 s | 30.79 s |
+
+The second message was claimed **about a tenth of a second after the first one's
+row went `done`**. That is both halves of the guarantee in one line: it could
+not start while the first was running, and it did not wait for anything else
+once the first had finished — the same warm container took it straight out of
+the drain.
+
+That it was the same warm container is visible in what the second turn cost:
+its router took 0.70 s against the first turn's 6.55 s, and its first token
+arrived in 0.25 s against 2.82 s. The first message paid for the GPU wake and
+the worker's cold start; the second paid for neither.
+
+The 19.67 s the second person's message spent queued is the price of the
+guarantee, and it is honest: 6 s of it was the cold start the first message was
+already paying, and the rest is the first answer being written. Before this
+change both turns would have run at once, and the second — with a warm GPU and
+no wake to pay for — would very likely have answered first. That is exactly the
+defect.
+
+Derived cost of the acceptance: $0.0074 + $0.0054 = **$0.0128** over two turns.
+No Modal log was opened.
+
+**One reading trap, recorded because it cost time here.** A run's `started_at`
+is when the worker *claimed* it, while every offset in the rendered timeline is
+measured from *arrival* — they differ by the queue wait, by design. Comparing
+two runs by their rendered offsets therefore invents a gap that does not exist;
+comparing `started_at + total_ms`, or reading the queue's own timestamps, gives
+the truth. The first reading of this acceptance had the two turns fourteen
+seconds apart for that reason.
+
+**Unrelated, and still present:** the second turn spent 5.21 s in `persist`,
+which is the persistence outlier already noted in item 3. It is not caused by
+anything here — it is Neon, after the answer was already delivered.
+
+4.0 is done.
