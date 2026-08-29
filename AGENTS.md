@@ -22,8 +22,43 @@ smaller implementation that preserves the product rather than a smaller product.
 
 ## Execution
 
-Work directly as one project agent. Do not delegate or create subagents. The
-human controls direction.
+Work directly as one project agent by default. Do not delegate or create
+subagents unless the human explicitly asks to pass the current work to Claude,
+use Claude through Orca, or invokes `$orca-claude-bridge`. The human controls
+direction.
+
+### Optional Claude implementation through Orca
+
+An explicit request to pass work to Claude authorizes one supervised development
+workflow for that bounded task, including fresh Claude correction Tasks needed
+to satisfy the original brief. It does not authorize later or widened work,
+product-runtime workers, model endpoints, containers, deployments, or other
+externally consequential actions.
+
+For that workflow the primary Codex chat becomes the Supervisor. It owns
+inspection, discussion, planning, the Worker brief, review, and the final report,
+but does not implement or correct source code while the delegated task is
+active. Use `$orca-claude-bridge` and a supervised Orca Task in the current
+checkout. Codex and Claude must never edit that checkout concurrently.
+
+Every delegation brief must be self-contained. Include the goal, bounded scope,
+accepted decisions, exclusions, relevant evidence and canonical documents,
+acceptance criteria, and required or intentionally skipped checks. Do not assume
+Claude received the preceding chat history. Keep task-specific content in the
+brief and let Orca inject its own lifecycle protocol.
+
+Claude is the sole Worker and owns the delegated implementation loop:
+
+`inspect -> implement -> test -> diagnose -> fix -> evaluate -> record -> report`
+
+Delegation depth is one: `Codex Supervisor -> Claude Worker`. Claude must not
+spawn agents or invoke Orca recursively. The Supervisor waits for `worker_done`,
+then independently reviews the claimed files or diff and verifies the result in
+proportion to risk. If source-code corrections are needed, the Supervisor
+returns them through a fresh supervised Claude Task within the authorized
+workflow; it does not silently take over implementation. Stop and ask the human
+if a correction would widen scope or cross another gate. Review-only
+delegations do not authorize edits.
 
 Before selecting or changing work, read `ROADMAP.md`. It is the only current
 plan. Work on one approved step at a time and do not create a competing plan.
@@ -44,9 +79,9 @@ A user-facing capability is complete only after a short end-to-end check of the
 actual app experience. Technical presence is not product acceptance. Never
 describe planned work as implemented or make a claim stronger than the evidence.
 
-The repository may be used from different agent applications. Do not rely on
-application-specific behavior, and assume only one application works in it at a
-time.
+The repository may be used from different agent applications. Outside the
+explicit Claude-through-Orca workflow, do not rely on application-specific
+behavior and assume only one application works in it at a time.
 
 ## Context
 
@@ -79,14 +114,16 @@ remote, pushing, publishing, deploying, and any destructive or externally
 mutating action. In the local profile, starting or stopping the vLLM server is
 allowed only after the human has permitted it.
 
-**Any action that starts a worker requires explicit permission every single
-time.** This covers a request that wakes a scaled-to-zero endpoint, a remote
+**Any action that starts a product-runtime or infrastructure worker requires
+explicit permission every single time.** This covers a request that wakes a
+scaled-to-zero endpoint, a remote
 function or sandbox run, a container started to measure or debug something, and
 a deploy that causes any of these. Permission is per action, never per session,
 never implied by approval of the surrounding step, and never inferred from an
 earlier yes. A cheap worker and a CPU worker are still workers. When evidence
 could come from a log, a document or the human instead, ask for it rather than
-starting anything.
+starting anything. The separately authorized Claude development workflow above
+does not authorize any of these product or infrastructure actions.
 
 Before a human-run command, state what it does, expected duration, VRAM cost and
 the exact command. Never expand work into another repository.

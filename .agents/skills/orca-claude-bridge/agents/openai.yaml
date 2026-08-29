@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orca Claude Bridge"
+  short_description: "Supervise explicit Claude work through Orca"
+  default_prompt: "Use $orca-claude-bridge to pass this bounded task to Claude through Orca, wait for completion, and verify the result."
