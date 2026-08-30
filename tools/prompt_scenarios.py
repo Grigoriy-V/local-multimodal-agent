@@ -1,0 +1,448 @@
+"""Run the same natural requests through the agent twice and compare what it did.
+
+    python tools/prompt_scenarios.py --dry-run
+    python tools/prompt_scenarios.py --label baseline --prompt-file <variant>.txt
+    python tools/prompt_scenarios.py --label current --only castle
+
+The live 4.3 acceptance was two chat messages, one per prompt version, and that
+is not enough to attribute a behaviour change to a prompt. This runs a fixed
+list of requests through the same `Agent` the bot uses — no Telegram, no queue,
+one variable — and records what the agent *did*: which tools it called, in what
+order, how many model calls it spent, and the whole answer.
+
+Nothing here judges an answer. The machine-checkable part is the shape of the
+turn; whether the answer is good is read by a person, which is why the report
+carries the full text.
+
+**Every run wakes the GPU.** It is a product-runtime worker and its own human
+gate, every time. `--dry-run` composes everything and calls nothing, so the
+scenarios and the assembled prompt can be checked for free.
+
+The run is sealed off from real work: its own workspace, its own SQLite store,
+its own telemetry file, and never the deployed database, whatever the
+environment says.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import hashlib
+import shutil
+import subprocess
+import sys
+import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+
+from app.agent.runtime import Agent, MessageProduced, create_agent, text_message
+from app.capabilities import capability_brief
+from app.config import AgentSettings, ModelSettings
+from app.context import DEFAULT_SYSTEM_PROMPT
+from app.telemetry.base import TurnRun
+from app.telemetry.cost import A10_USD_PER_SECOND, IDLE_WINDOW_SECONDS, gpu_cost
+from app.telemetry.inspect import tool_calls
+from app.telemetry.sqlite import SqliteTelemetry
+from app.telemetry.trace import Telemetry
+
+RUNS = Path("reports/prompt_runs")
+
+# The scenario user is not a real one. It gets its own workspace under the run
+# directory, so nothing here can read or overwrite what a person keeps.
+SCENARIO_USER = "prompt-scenarios"
+
+
+@dataclass(frozen=True)
+class Scenario:
+    """One natural request, and what a person should look at in the answer.
+
+    `expected_tools` is the only thing compared automatically, and it is a
+    statement about the turn's shape rather than about its quality: these tools
+    should appear somewhere. An empty tuple is a real expectation — a
+    conversational question that spends a tool call has regressed in cost.
+    """
+
+    name: str
+    request: str
+    expected_tools: tuple[str, ...] = ()
+    seed: tuple[tuple[str, str], ...] = ()
+    look_for: str = ""
+    external: bool = False
+
+
+BROKEN_PAGE = """<!doctype html>
+<title>Прайс</title>
+<style>body{font-family:sans-serif} .price{color:#fff;background:#fff}</style>
+<h1>Тарифы</h1>
+<p class="price">1990 рублей в месяц</p>
+<script>document.querySelector('h1').textContnet = 'Тарифы 2026'</script>
+"""
+
+SCENARIOS: tuple[Scenario, ...] = (
+    Scenario(
+        name="chat",
+        request="Привет. В двух предложениях: чем отличается префиксный кеш от кеша ответов?",
+        look_for="один ход модели, ноль инструментов. Это антирегрессия по стоимости.",
+    ),
+    Scenario(
+        name="capabilities",
+        request="Что ты умеешь? Коротко.",
+        look_for=(
+            "перечисляет только то, что действительно подключено, "
+            "и не отрицает способность, которая у него есть"
+        ),
+    ),
+    Scenario(
+        name="note",
+        request="Запиши в notes.txt три дела на завтра.",
+        expected_tools=("write_file",),
+        look_for="простая запись не должна порождать проверочный проход",
+    ),
+    Scenario(
+        name="castle",
+        request="Создай HTML с средневековым замком.",
+        expected_tools=("write_file", "inspect_page"),
+        look_for=(
+            "сама регрессия: сделал ли он файл вместо кода в чате, "
+            "осмотрел ли результат сам, спросил ли разрешения"
+        ),
+    ),
+    Scenario(
+        name="broken_page",
+        request="Посмотри price.html и скажи, что с ним не так.",
+        seed=(("price.html", BROKEN_PAGE),),
+        expected_tools=("inspect_page",),
+        look_for=(
+            "белый текст на белом фоне и опечатка в textContnet видны только "
+            "тому, кто действительно открыл страницу"
+        ),
+    ),
+    Scenario(
+        name="web",
+        request="Когда вышла Gemma 3? Скажи, откуда взял.",
+        expected_tools=("search_web",),
+        look_for="называет страницу, а не пересказывает сниппет",
+        external=True,
+    ),
+)
+
+
+@dataclass
+class Result:
+    """What one scenario's turn actually did."""
+
+    scenario: Scenario
+    run_id: str
+    model_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_ms: int | None = None
+    tools: list[dict[str, object]] = field(default_factory=list)
+    answer: str = ""
+    outcome: str = ""
+    error: str = ""
+    derived_usd: float = 0.0
+
+    @property
+    def names(self) -> list[str]:
+        return [str(call["tool"]) for call in self.tools]
+
+    @property
+    def met(self) -> bool:
+        """Whether the expected tools appeared. Not whether the answer is good."""
+
+        seen = set(self.names)
+        if not self.scenario.expected_tools:
+            return not seen
+        return set(self.scenario.expected_tools) <= seen
+
+
+def select(only: Sequence[str] = (), external: bool = False) -> list[Scenario]:
+    """The scenarios a run will actually take.
+
+    A scenario that spends a third-party service is left out unless it is asked
+    for: waking the GPU is one gate the person gives, and sending a query to a
+    search provider is a different one they may not have meant to give.
+    """
+
+    return [
+        scenario
+        for scenario in SCENARIOS
+        if (not only or scenario.name in only) and (external or not scenario.external)
+    ]
+
+
+def revision() -> str:
+    try:
+        found = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return found.stdout.strip() or "unknown"
+
+
+def identity(prompt: str) -> str:
+    """A short stable name for one exact prompt, so two runs can be told apart."""
+
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
+
+
+def assembled(agent: Agent, prompt: str, thread_id: str) -> str:
+    """The whole system message, the way the graph builds it.
+
+    The capability brief is generated from the wired toolbox, so it is part of
+    what a comparison is comparing even when only the core changed.
+    """
+
+    return f"{prompt}\n\n{capability_brief(agent.toolbox(thread_id), agent.delivery)}"
+
+
+def sealed(root: Path) -> AgentSettings:
+    """Settings that cannot reach anything real.
+
+    `database_url` is cleared explicitly rather than left to the environment:
+    the deployed database is one variable away, and a scenario run writing into
+    it would put synthetic conversations beside a person's own.
+    """
+
+    return AgentSettings(
+        database=str(root / "memory.sqlite3"),
+        database_url="",
+        alt_database_url="",
+        checkpoints=str(root / "checkpoints.sqlite3"),
+        workspace=str(root / "workspaces"),
+        telemetry=True,
+        telemetry_database=str(root / "telemetry.sqlite3"),
+    )
+
+
+def plant(workspace: Path, scenario: Scenario) -> None:
+    """Give the scenario the workspace it assumes, and nothing else.
+
+    Emptied first: a run where `castle` can see the file `note` wrote is not
+    the same run twice, and the point of this instrument is that it is.
+    """
+
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    workspace.mkdir(parents=True, exist_ok=True)
+    for name, content in scenario.seed:
+        (workspace / name).write_text(content, encoding="utf-8")
+
+
+async def run_one(
+    agent: Agent,
+    telemetry: Telemetry,
+    scenario: Scenario,
+    *,
+    idle_window: float,
+    rate: float,
+) -> Result:
+    thread_id = f"{scenario.name}-{uuid.uuid4().hex[:8]}"
+    plant(agent.workspace, scenario)
+    run = TurnRun(
+        run_id=uuid.uuid4().hex,
+        user_id=SCENARIO_USER,
+        thread_id=thread_id,
+        source="scenario",
+        source_update_id=scenario.name,
+    )
+    trace = telemetry.start(run)
+    result = Result(scenario=scenario, run_id=run.run_id)
+    answers: list[str] = []
+    try:
+        async for event in agent.events(thread_id, text_message(scenario.request), trace):
+            if not isinstance(event, MessageProduced):
+                continue
+            message = event.message
+            if message.role != "assistant":
+                continue
+            spoken = " ".join(part.text or "" for part in message.content).strip()
+            if spoken:
+                answers.append(spoken)
+    except Exception as error:  # noqa: BLE001 - one broken scenario is a row, not the end
+        result.error = f"{type(error).__name__}: {error}"
+        trace.finish("failed", error_type=type(error).__name__)
+    else:
+        pending = await agent.pending(thread_id)
+        trace.finish("approval_requested" if pending else "answer_delivered")
+    # The counters are the trace's own, filled in as the turn ran.
+    result.model_calls = run.model_calls
+    result.input_tokens = run.input_tokens
+    result.output_tokens = run.output_tokens
+    result.total_ms = run.total_ms
+    result.outcome = run.outcome or "failed"
+    # The last thing it said is the answer; anything before it was narration on
+    # the way to a tool call, which the interface does not keep either.
+    result.answer = answers[-1] if answers else ""
+    store = telemetry.store
+    if store is not None:
+        events = store.events(run.run_id)
+        result.tools = tool_calls(events)
+        cost = gpu_cost(events, idle_window_seconds=idle_window, rate_per_second=rate)
+        result.derived_usd = cost.derived_usd if cost else 0.0
+    telemetry.release(run.run_id)
+    return result
+
+
+def render(header: dict[str, str], results: list[Result]) -> str:
+    """The comparison document. One file per run, diffed against another run."""
+
+    lines = [
+        f"# Prompt scenarios — {header['label']}",
+        "",
+        *(f"**{key}:** {value}  " for key, value in header.items() if key != "label"),
+        "",
+        "Tool expectations are the only automatic check, and they are about the "
+        "shape of the turn, not the quality of the answer. Read the answers.",
+        "",
+        "| scenario | shape | model | tools | tokens in/out | seconds | derived $ |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for result in results:
+        seconds = "-" if result.total_ms is None else f"{result.total_ms / 1000:.1f}"
+        names = ", ".join(result.names) or "none"
+        lines.append(
+            f"| {result.scenario.name} | {'ok' if result.met else 'off'} "
+            f"| {result.model_calls} | {names} "
+            f"| {result.input_tokens}/{result.output_tokens} | {seconds} "
+            f"| {result.derived_usd:.4f} |"
+        )
+    total = sum(result.derived_usd for result in results)
+    lines += ["", f"Derived GPU cost for the whole run, upper bound: ${total:.4f}.", ""]
+
+    for result in results:
+        scenario = result.scenario
+        lines += [
+            f"## {scenario.name}",
+            "",
+            f"**Request:** {scenario.request}",
+            "",
+            f"**Expected tools:** {', '.join(scenario.expected_tools) or 'none'}  ",
+            f"**Called:** {', '.join(result.names) or 'none'}  ",
+            f"**Outcome:** {result.outcome}",
+            "",
+        ]
+        if scenario.look_for:
+            lines += [f"**Look for:** {scenario.look_for}", ""]
+        if result.tools:
+            lines += ["```text"]
+            for call in result.tools:
+                path = call.get("path")
+                where = f" {path}" if path else ""
+                milliseconds = call.get("duration_ms")
+                took = "" if milliseconds is None else f" {int(milliseconds)}ms"
+                lines.append(f"{call['tool']}{where} {call['status']}{took}")
+            lines += ["```", ""]
+        if result.error:
+            lines += [f"**Failed:** {result.error}", ""]
+        lines += ["```text", result.answer or "(no text)", "```", ""]
+    return "\n".join(lines)
+
+
+async def measure(options: argparse.Namespace) -> int:
+    prompt = DEFAULT_SYSTEM_PROMPT
+    source = "app.context.window.DEFAULT_SYSTEM_PROMPT"
+    if options.prompt_file:
+        prompt = Path(options.prompt_file).read_text(encoding="utf-8").strip()
+        source = options.prompt_file
+
+    chosen = select(options.only, options.external)
+    if not chosen:
+        print("no scenarios selected")
+        return 2
+
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M")
+    root = Path(options.out or RUNS / f"{stamp}_{options.label}")
+    root.mkdir(parents=True, exist_ok=True)
+    settings = sealed(root)
+    telemetry = Telemetry(SqliteTelemetry(settings.telemetry_database))
+    model_settings = ModelSettings()
+    agent = create_agent(
+        model_settings=model_settings,
+        agent_settings=settings,
+        user_id=SCENARIO_USER,
+        telemetry=telemetry,
+        system_prompt=prompt,
+    )
+    whole = assembled(agent, prompt, "preview")
+    header = {
+        "label": options.label,
+        "date": datetime.now(UTC).isoformat(timespec="seconds"),
+        "revision": revision(),
+        "prompt": f"`{identity(whole)}` from {source}, {len(whole)} characters",
+        "model": f"{model_settings.name} at {model_settings.endpoint}",
+        "sampling": f"temperature {model_settings.temperature}, "
+        f"max_tokens {model_settings.max_tokens}",
+    }
+
+    if options.dry_run:
+        print("\n".join(f"{key}: {value}" for key, value in header.items()))
+        print(f"\nscenarios: {', '.join(scenario.name for scenario in chosen)}")
+        print(f"\n--- assembled system message ---\n{whole}")
+        await agent.aclose()
+        telemetry.close()
+        return 0
+
+    results = []
+    try:
+        for scenario in chosen:
+            print(f"running {scenario.name} ...", flush=True)
+            results.append(
+                await run_one(
+                    agent,
+                    telemetry,
+                    scenario,
+                    idle_window=options.idle_window,
+                    rate=options.gpu_rate,
+                )
+            )
+    finally:
+        await agent.aclose()
+        telemetry.close()
+
+    report = root / "report.md"
+    report.write_text(render(header, results), encoding="utf-8")
+    # The exact prompt that produced these answers, beside them. A comparison
+    # against a prompt nobody can reconstruct is not a comparison.
+    (root / "system_prompt.txt").write_text(whole, encoding="utf-8")
+    print(f"\n{report}")
+    for result in results:
+        print(f"  {result.scenario.name}: {'ok' if result.met else 'off'} "
+              f"{result.model_calls}m {len(result.tools)}t {', '.join(result.names) or 'no tools'}")
+    return 0
+
+
+def parse(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--label", default="run", help="names the run directory")
+    parser.add_argument("--prompt-file", default="", help="a prompt variant to measure")
+    parser.add_argument("--only", nargs="*", default=[], help="run these scenarios only")
+    parser.add_argument("--out", default="", help="where to write, instead of a dated directory")
+    parser.add_argument(
+        "--external",
+        action="store_true",
+        help="also run scenarios that spend a third-party service",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="compose everything and call nothing, so no GPU is woken",
+    )
+    parser.add_argument("--idle-window", type=float, default=IDLE_WINDOW_SECONDS)
+    parser.add_argument("--gpu-rate", type=float, default=A10_USD_PER_SECOND)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    return asyncio.run(measure(parse(sys.argv[1:] if argv is None else argv)))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

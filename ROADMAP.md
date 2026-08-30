@@ -4,13 +4,17 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.3, turn stopping and proportional validation. Its
-minimal extension seam is implemented, verified offline and deployed to
-`assistant-control`, but live product acceptance failed. The first natural HTML
-scenarios exposed unnecessary permission round-trips before safe inspection;
-the stronger system-prompt correction then regressed the same castle request
-from `write_file` into inline code with zero tool calls. The one-answer delivery
-boundary remained correct. 4.2, tool execution seam, remains
+**Current approved step:** 4.3.5, prompt assembly and user instructions. It was
+opened on 2026-08-30 because 4.3's live acceptance is blocked on it: the
+stopping seam is deployed and its one-answer behaviour holds, but the only
+production lever 4.3 shipped was system-prompt text, and hand-correcting that
+text neither produced autonomous inspection nor turned out to be what changed
+the behaviour. The first measured comparison ran the same requests against the
+prompt before and after that correction and got the same shape from both,
+including the failure it was blamed for; the earlier attribution is withdrawn.
+4.3 stays open and its live acceptance is re-run after 4.3.5, against that
+comparison rather than single chat messages.
+`reports/2026-08-30_v2_prompt_scenario_baseline.md`. 4.2, tool execution seam, remains
 deployed and accepted live, including the correction for narrated tool calls
 becoming a second Telegram answer. An article pushed at the bot produced seven turns up to
 28,113 tokens, with a single request of 15,699 against an old budget of 9,830,
@@ -262,8 +266,8 @@ Verified platform facts and cold-start evidence remain in
      2026-08-30. Live write/edit/read runs each had one update, one run and one
      final Telegram delivery after the narrated-tool correction.
      `reports/2026-08-30_v2_tool_execution_seam.md`.
-   - **4.3 Turn stopping and proportional validation — deployed, live
-     acceptance failed.** A minimal extension seam instead of a mandatory
+   - **4.3 Turn stopping and proportional validation — seam deployed, live
+     acceptance blocked on 4.3.5.** A minimal extension seam instead of a mandatory
      repair lifecycle: stop by default, and continue only through explicit
      structured steering. A rejected streamed candidate is withdrawn from the
      interface and is neither persisted nor delivered as a first answer. The
@@ -277,6 +281,28 @@ Verified platform facts and cold-start evidence remain in
      regressed the same natural castle request to inline code and zero tool
      calls. PDF creation is not acceptance until the sandbox exists.
      `reports/2026-08-30_v2_turn_stopping.md`.
+   - **4.3.5 Prompt assembly and user instructions.** The system prompt becomes
+     an assembled layer instead of one hand-written paragraph: a small stable
+     core that names no tool, capability-owned guidance generated from the
+     wired toolbox, the tool schemas, then the person's own standing
+     instructions. Order is fixed by how stable each layer is, so the prefix
+     cache is not invalidated by the layer above it; the caching win itself is
+     measured in 4.6a. `AGENTS.md` is one file per person at the root of their
+     workspace, editable with the ordinary workspace tools and through a thin
+     `/agents` command that writes the same file. It is a prompt overlay of
+     lower authority than product and capability policy, never memory: nothing
+     extracts it from conversation and `remember_fact` never writes to it. It
+     takes effect on the next turn without a redeploy. No memory redesign,
+     fact extraction, project hierarchy or second store.
+     `docs/v2_4_3_prompt_assembly_agents_handoff.md`.
+
+     A scenario runner is the instrument for both this step and 4.3's blocked
+     acceptance: fixed natural requests through the same agent the bot uses,
+     recording tools called, model calls, tokens, seconds and the full answer
+     against a named prompt variant, so two variants are compared in one warm
+     window. Judgement stays human; nothing asserts on wording. It is not part
+     of the offline suite, and every run is a product-runtime worker and its
+     own human gate.
    - **4.4 `todo` as agent state, not a mode**, surviving folding and restart.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
    - **4.6a Context engine.** Context preparation before every model step rather

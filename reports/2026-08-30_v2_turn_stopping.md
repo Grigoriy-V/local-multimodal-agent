@@ -164,12 +164,19 @@ derived GPU cost upper bound: $0.0152
 ```
 
 The response was delivered once, so this is not a Telegram delivery or turn
-stopping regression. It is an agent-action regression: the stronger prompt did
-not produce autonomous inspection and degraded the previously working creation
-step into instructions for the user. With model temperature `0.0`, unchanged
-tool wiring and the prompt as the material change between the two deployments,
-the prompt correction is the leading cause on current evidence, though one live
-sample is not a general model evaluation.
+stopping regression. It is an agent-action regression: the creation step that
+had worked degraded into instructions for the user.
+
+**The cause named here was wrong and is withdrawn.** This section originally
+concluded that the prompt correction was the leading cause, on the grounds that
+it was the material change between the two deployments. A measured comparison
+the same day ran the same request against both prompts, everything else held
+still, and got the identical failure from each: 1 model call, no tool call, the
+whole page in a fenced block with "сохраните его как файл `castle.html`". The
+two live samples differed in more than the prompt — the turns that did call
+`write_file` ran in a thread where a named HTML file already existed — and one
+sample per version could not tell those apart.
+`reports/2026-08-30_v2_prompt_scenario_baseline.md`.
 
 Step 4.3 therefore remains open. Its minimal `TurnStopping` seam is verified
 offline and its one-answer interface behavior survived live use, but there is

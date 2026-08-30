@@ -512,6 +512,7 @@ def create_agent(
     telemetry: Telemetry | None = None,
     stops: StopRequests = NO_STOPS,
     stopping: TurnStopping = STOP_ON_ANSWER,
+    system_prompt: str | None = None,
 ) -> Agent:
     """Build the default agent from configuration.
 
@@ -522,6 +523,10 @@ def create_agent(
     `telemetry` is passed in rather than opened here: one interface serves
     several people, and each of them gets an agent, but they all belong to one
     process that should hold one connection and one set of active turns.
+
+    `system_prompt` exists so one prompt can be measured against another
+    through the same wiring the product uses. An interface never passes it: the
+    prompt a person talks to is the default, and a variant is a comparison.
     """
 
     agent_settings = agent_settings or AgentSettings()
@@ -541,6 +546,7 @@ def create_agent(
         store=open_store(agent_settings),
         workspace=workspace,
         policy=policy,
+        system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
         checkpoints=agent_settings.checkpoints,
         checkpoint_database_url=agent_settings.database_url,
         context_fraction=agent_settings.context_fraction,

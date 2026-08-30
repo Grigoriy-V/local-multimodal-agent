@@ -52,6 +52,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Read the loop's steps back | `app/telemetry/inspect.py` | `steps`, `step_section`, `loop_step` |
 | Read the model server's engine metrics | `app/telemetry/vllm.py` | `parse_metrics`, `discover`, `restarted`, `summarize` |
 | Measure prefill, decode and prefix cache | `tools/vllm_baseline.py` | `plan`, `measure`, `report` |
+| Compare one system prompt against another | `tools/prompt_scenarios.py` | `SCENARIOS`, `select`, `run_one`, `render`, `--dry-run` |
 | Estimate GPU seconds and cost of a turn | `app/telemetry/cost.py` | `gpu_cost`, `IDLE_WINDOW_SECONDS`, `A10_USD_PER_SECOND` |
 | Reach the model endpoint's auth headers | `app/models/openai_compatible.py` | `auth_headers` |
 | Change SQLite persistence | `app/memory/store.py` | `SqliteStore` |

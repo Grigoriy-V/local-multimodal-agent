@@ -591,6 +591,22 @@ aggregates against `modal billing` instead. `--idle-window` and `--gpu-rate`
 override both inputs. `IDLE_WINDOW_SECONDS` mirrors `SCALEDOWN_WINDOW` in
 `deploy/modal/model_app.py` and a test keeps them equal.
 
+### Prompt scenario comparison
+
+`python tools/prompt_scenarios.py --dry-run` composes the assembled system
+message and the scenario list and contacts nothing. Without `--dry-run` it runs
+each scenario through the same agent the bot uses.
+
+**A real run wakes the GPU and needs explicit permission for that run.**
+`--external` additionally sends a query to the search provider and spends its
+credit, which is a separate permission; it is left out by default.
+
+`--prompt-file` measures a prompt variant instead of the shipped default;
+`tools/prompts/` holds the variants worth keeping. Each run writes its own
+directory under `reports/prompt_runs/`: `report.md`, the exact
+`system_prompt.txt` that produced it, and a throwaway workspace, store and
+telemetry file that never touch the deployed database.
+
 ### Model server baseline
 
 `python tools/vllm_baseline.py` prints the plan and contacts nothing. `--run`
@@ -658,6 +674,7 @@ Human-readable implementation evidence belongs in `reports/` rather than in the 
 | Diagnose deployed capabilities | `control_app.py::self_test` |
 | Diagnose local install | `scripts/doctor.py` |
 | Measure endpoint wake | `scripts/measure_endpoint_wake.py` |
+| Compare prompt variants on fixed scenarios | `tools/prompt_scenarios.py` |
 | Record/search agent/ML work journal | `tools/work_log.py` |
 
 ## Operations invariants

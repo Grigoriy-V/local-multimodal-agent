@@ -32,6 +32,9 @@ htmlcov/
 .chainlit/*
 !.chainlit/config.toml
 .files/
+# A scenario run keeps its report and the exact prompt that produced it; the
+# throwaway workspace the agent wrote into during the run is not evidence.
+reports/prompt_runs/*/workspaces/
 
 # Local agent/runtime state
 .codex/sessions/
