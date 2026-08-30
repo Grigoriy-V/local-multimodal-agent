@@ -538,6 +538,43 @@ Supersedes the consent half of 2026-08-01, "Tools declare consequence; the graph
 owns consent". The other half stands: a tool declares consequence, and the
 runtime — not the tool and not a UI adapter — owns what to do about it.
 
+## 2026-08-30 — Same-user presentation and sandboxed work stay autonomous
+
+Decision
+
+Explicitly presenting a workspace file back to the same person through the
+current conversation is part of fulfilling the request and does not ask for a
+second approval. Effects beyond that relationship — sending to another person or
+system, publishing, spending money or changing infrastructure — still require
+approval.
+
+Once a sandbox run itself has been separately authorized, shell, Python, package
+installation and workspace mutation inside that restricted sandbox do not ask
+for permission command by command. Starting each product-runtime sandbox worker
+remains its own human gate under the current execution rules.
+
+Why
+
+`send_file` is already an explicit agent decision and an accepted part of the
+conversation, not an accidental leak of an observation. Asking again would add
+friction without changing the recipient. For generated code, isolation from
+secrets and infrastructure is the useful boundary; confirming every command
+inside that boundary would remove the autonomy the sandbox exists to enable.
+
+Consequences
+
+The 4.2 execution seam owns one policy across execution backends. `send_file`
+remains non-destructive, while third-party and externally consequential tools
+declare the need for approval. A later sandbox plugs into `execute`; it does not
+change the loop or consent semantics. It receives a restricted workspace and no
+control-plane secrets, and its worker-start gate is not implied by approval of a
+surrounding roadmap step.
+
+Supersedes / Superseded by
+
+Clarifies the 2026-08-30 decision "Work inside a person's own workspace does not
+ask permission"; it does not supersede it.
+
 ## 2026-08-30 — A control signal never travels in the conversation queue
 
 Decision

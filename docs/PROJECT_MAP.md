@@ -191,8 +191,15 @@ Locally checkpoints use SQLite. Deployed checkpoints use PostgreSQL so a later C
 
 `app/tools/base.py` owns:
 
-- `Tool`: name, description, JSON-schema parameters, callable, destructive flag;
+- `Tool`: name, description, JSON-schema parameters, callable and the legacy
+  `destructive` field that now declares an approval-requiring external effect;
 - `Toolbox`: actual model-visible tools, validation and execution.
+
+`app/tools/execution.py` owns the one agent-runtime lifecycle around that
+toolbox: `pre_execute -> execute -> post_execute`. It applies the declared
+approval policy, brackets telemetry and preserves the model-visible tool result.
+The graph may pause a prepared batch for an answer, but does not implement a
+second execution path.
 
 A tool failure is normally returned as a tool result so the model can recover rather than losing the whole turn.
 
@@ -226,7 +233,10 @@ The model's capability description is generated separately in `app/capabilities.
 - `write_file`
 - `edit_file`
 
-All paths resolve through `resolve_in_root()`. Absolute paths are accepted only if they remain inside the granted root. Writes/edits are destructive and therefore require approval in the ordinary agent graph.
+All paths resolve through `resolve_in_root()`. Absolute paths are accepted only
+if they remain inside the granted root. Reads, writes and edits inside that
+root are autonomous. Tools whose effects cross the same-person conversation
+boundary declare that they require approval, and the execution seam enforces it.
 
 ### Attachments and documents
 

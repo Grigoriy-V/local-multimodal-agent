@@ -25,6 +25,7 @@ from app.capabilities import (
     Delivery,
     capability_brief,
     capability_report,
+    needs_approval,
     tool_inventory,
 )
 from app.context.window import DEFAULT_SYSTEM_PROMPT
@@ -98,19 +99,13 @@ def test_the_brief_grows_with_the_tools_it_is_given(registry: CapabilityRegistry
     assert "search_memory" in brief
 
 
-def test_the_brief_lists_exactly_the_tools_that_ask_first(
+def test_current_same_user_tools_do_not_advertise_an_approval_step(
     registry: CapabilityRegistry,
 ) -> None:
     tools = everything(registry)
 
-    approval_line = next(
-        line for line in capability_brief(tools).splitlines() if "approves" in line
-    )
-
-    assert "write_file" in approval_line
-    assert "edit_file" in approval_line
-    assert "read_file" not in approval_line
-    assert "inspect_page" not in approval_line
+    assert needs_approval(tools) == ()
+    assert "approves them" not in capability_brief(tools)
 
 
 def test_the_brief_covers_every_media_type_the_policy_admits(

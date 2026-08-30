@@ -4,9 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. 4.1.5, real context capacity, is deployed and
-accepted live. The next step in order is 4.2, tool execution seam; it is not yet
-approved to begin. An article pushed at the bot produced seven turns up to
+**Current approved step:** none. 4.2, tool execution seam, is deployed and
+accepted live, including the correction for narrated tool calls becoming a
+second Telegram answer. The next step in order is 4.3 and is not approved. An
+article pushed at the bot produced seven turns up to
 28,113 tokens, with a single request of 15,699 against an old budget of 9,830,
 and no fold was needed. One defect found in the same session — a Telegram rate
 limit discarding a finished answer — is fixed, tested and deployed. The edit
@@ -245,10 +246,17 @@ Verified platform facts and cold-start evidence remain in
      re-sending what it already had. `retry_after` is now waited out, bounded,
      and the fix is deployed.
      Not fixed, and queued below: the edit frequency that provoked the limit.
-   - **4.2 Tool execution seam.** One `pre_execute → execute → post_execute`
+   - **4.2 Tool execution seam — done, accepted live.**
+     One `pre_execute → execute → post_execute`
      path for every tool, holding consent policy, validation and telemetry.
-     Where autonomy inside the workspace is implemented; `DECISIONS.md`
-     2026-08-30.
+     Workspace mutation and explicit `send_file` presentation back to the same
+     person are autonomous; third-party, publication, spending and
+     infrastructure effects remain gated. A future sandbox plugs in as another
+     execution backend without changing that policy: its commands do not ask
+     one by one after the separately gated worker has started. `DECISIONS.md`
+     2026-08-30. Live write/edit/read runs each had one update, one run and one
+     final Telegram delivery after the narrated-tool correction.
+     `reports/2026-08-30_v2_tool_execution_seam.md`.
    - **4.3 Turn stopping and proportional validation.** A stopping seam instead
      of a mandatory repair lifecycle. The preserved product acceptance scenario
      lands here: from a natural request, create a simple PDF, validate the real

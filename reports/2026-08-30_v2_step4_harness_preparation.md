@@ -138,8 +138,12 @@ behaviour — consent policy, validation, telemetry bracketing gathered into one
 place — and not new machinery for a caller that does not exist yet. The
 workspace-autonomy decision is implemented here.
 
-*Acceptance:* every existing tool works unchanged through the seam; the trace
-still names tool, stage, duration, status and path; no behaviour is added.
+*Acceptance:* every existing tool keeps its results and failure behaviour
+through the seam; the trace still names tool, stage, duration, status and path.
+The intentional policy change is explicit: workspace write/edit stops asking,
+`send_file` back to the same person continues without asking, and effects on
+third parties, publication, spending or infrastructure remain gated. No other
+tool behaviour is added.
 
 ### 4.3 Turn stopping and proportional validation
 

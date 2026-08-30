@@ -185,13 +185,10 @@ def test_edit_file_leaves_the_original_when_atomic_replace_fails(
     assert sorted(path.name for path in workspace.iterdir()) == ["notes.txt", "sub"]
 
 
-def test_write_and_edit_are_destructive(workspace: Path) -> None:
+def test_workspace_write_and_edit_are_autonomous(workspace: Path) -> None:
     box = toolbox(workspace)
 
-    assert [name for name in box.names if box.destructive(name)] == [
-        "write_file",
-        "edit_file",
-    ]
+    assert [name for name in box.names if box.requires_approval(name)] == []
 
 
 def test_an_unknown_tool_is_not_destructive(workspace: Path) -> None:

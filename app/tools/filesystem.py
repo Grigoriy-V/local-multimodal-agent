@@ -4,8 +4,8 @@ The root is passed in, never read from the environment by the tool itself, so a
 caller cannot accidentally hand the model the whole disk. Every path the model
 supplies is resolved and checked against that root before anything is opened.
 
-Confinement is not consent: `write_file` stays inside the root and still asks
-first, because overwriting a file the user cares about is inside the root too.
+The granted root is the autonomy boundary: reads, writes and edits inside it do
+not ask one call at a time. Resolution and confinement still apply every time.
 """
 
 from __future__ import annotations
@@ -166,7 +166,7 @@ def filesystem_tools(root: Path) -> list[Tool]:
             name="write_file",
             description=(
                 "Write a UTF-8 text file inside the workspace, replacing it if it already "
-                "exists. The user is asked to approve the write before it happens."
+                "exists."
             ),
             parameters={
                 "type": "object",
@@ -186,13 +186,12 @@ def filesystem_tools(root: Path) -> list[Tool]:
                 "additionalProperties": False,
             },
             run=lambda path, content: _write_file(resolved, path, content),
-            destructive=True,
         ),
         Tool(
             name="edit_file",
             description=(
                 "Replace one exact, unique text fragment in an existing UTF-8 file inside "
-                "the workspace. The user is asked to approve the edit before it happens."
+                "the workspace."
             ),
             parameters={
                 "type": "object",
@@ -220,6 +219,5 @@ def filesystem_tools(root: Path) -> list[Tool]:
             run=lambda path, old_text, new_text: _edit_file(
                 resolved, path, old_text, new_text
             ),
-            destructive=True,
         ),
     ]

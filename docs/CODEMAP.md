@@ -57,7 +57,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change deployed PostgreSQL persistence | `app/memory/postgres.py` | `PostgresStore`, `turn_context`, `append` |
 | Change store selection | `app/memory/open.py` | `open_store` |
 | Change graph checkpoints | `app/checkpoints.py` | `CheckpointHandle`, `setup_postgres_checkpoints` |
-| Add/change a tool primitive | `app/tools/base.py` | `Tool`, `Toolbox`, `validation_error` |
+| Add/change a tool primitive or execution lifecycle | `app/tools/base.py`, `app/tools/execution.py` | `Tool`, `Toolbox`, `ToolExecutor`, `pre_execute`, `execute`, `post_execute` |
 | Add/change a capability/grant | `app/tools/capabilities.py` | `CapabilityRegistry`, `CapabilityGrant`, `DEFAULT_CAPABILITIES` |
 | Change what assistant says it can do | `app/capabilities.py` | `capability_brief`, `capability_report`, `tool_inventory` |
 | Change filesystem tools/path scope | `app/tools/filesystem.py` | `resolve_in_root`, `filesystem_tools` |
@@ -197,6 +197,7 @@ Do not merge these concepts by accident.
 
 ```text
 base.py          Tool / Toolbox contract and execution errors
+execution.py     pre_execute / execute / post_execute runtime lifecycle
 filesystem.py    list/read/write/edit workspace files
 documents.py     read_document / view_pages
 presentation.py  send_file (explicit outbound action)

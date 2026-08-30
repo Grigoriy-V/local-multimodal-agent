@@ -1,4 +1,4 @@
-"""Asking before writing, and finishing a turn that stopped to ask.
+"""Workspace autonomy and approval for effects beyond the conversation.
 
 Only the model is faked. The checkpoint file, the store and the tools are real,
 because the property under test is that a question outlives the process that
@@ -13,6 +13,7 @@ import pytest
 
 from app.agent.runtime import Agent
 from app.memory import SqliteStore
+from app.tools import Tool, Toolbox
 from tests.fakes import ScriptedBackend, body, calls, says, user
 
 
@@ -34,14 +35,34 @@ def open_agent(
     workspace: Path,
     backend: ScriptedBackend,
     checkpointed: bool = True,
+    consequential: bool = False,
 ) -> Agent:
     database, checkpoints = paths
-    return Agent(
+    agent = Agent(
         backend,
         SqliteStore(database),
         workspace,
         checkpoints=checkpoints if checkpointed else None,
     )
+    if consequential:
+        def publish(path: str) -> str:
+            (workspace / "published.txt").write_text(path, encoding="utf-8")
+            return f"published {path}"
+
+        tool = Tool(
+            name="publish_file",
+            description="Publish a file outside the conversation.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            run=publish,
+            destructive=True,
+        )
+        agent.toolbox = lambda _thread_id: Toolbox([tool])  # type: ignore[assignment]
+    return agent
 
 
 def writes(path: str, content: str) -> ScriptedBackend:
@@ -54,24 +75,24 @@ def edits(path: str, old_text: str, new_text: str) -> ScriptedBackend:
     )
 
 
-# --- the question ------------------------------------------------------------
+def publishes(path: str) -> ScriptedBackend:
+    return ScriptedBackend(calls("publish_file", path=path), says("Done."))
 
 
-async def test_a_write_stops_the_turn_and_asks(paths: tuple[Path, Path], workspace: Path) -> None:
+# --- autonomous workspace work ----------------------------------------------
+
+
+async def test_a_workspace_write_runs_without_asking(
+    paths: tuple[Path, Path], workspace: Path
+) -> None:
     agent = open_agent(paths, workspace, writes("notes.txt", "43"))
 
     produced = await agent.answer("t1", user("Change notes.txt to 43."))
     question = await agent.pending("t1")
 
-    assert [message.role for message in produced] == ["assistant"]
-    assert question == [
-        {
-            "id": "call_write_file",
-            "name": "write_file",
-            "arguments": {"path": "notes.txt", "content": "43"},
-        }
-    ]
-    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "the answer is 42"
+    assert [message.role for message in produced] == ["assistant", "tool", "assistant"]
+    assert question is None
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "43"
     await agent.aclose()
 
 
@@ -103,51 +124,65 @@ async def test_an_invalid_write_is_rejected_before_confirmation(
     await agent.aclose()
 
 
-# --- the answer --------------------------------------------------------------
+# --- consequential effects --------------------------------------------------
 
 
-async def test_approving_writes_the_file_and_finishes_the_turn(
+async def test_a_consequential_call_stops_the_turn_and_asks(
     paths: tuple[Path, Path], workspace: Path
 ) -> None:
-    agent = open_agent(paths, workspace, writes("notes.txt", "43"))
-    await agent.answer("t1", user("Change notes.txt to 43."))
+    agent = open_agent(paths, workspace, publishes("notes.txt"), consequential=True)
 
-    rest = [message async for message in agent.resume("t1", {"call_write_file": True})]
+    produced = await agent.answer("t1", user("Publish notes.txt."))
+    question = await agent.pending("t1")
 
-    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "43"
+    assert [message.role for message in produced] == ["assistant"]
+    assert question == [
+        {
+            "id": "call_publish_file",
+            "name": "publish_file",
+            "arguments": {"path": "notes.txt"},
+        }
+    ]
+    assert not (workspace / "published.txt").exists()
+    await agent.aclose()
+
+
+async def test_approving_runs_the_consequential_call_and_finishes_the_turn(
+    paths: tuple[Path, Path], workspace: Path
+) -> None:
+    agent = open_agent(paths, workspace, publishes("notes.txt"), consequential=True)
+    await agent.answer("t1", user("Publish notes.txt."))
+
+    rest = [message async for message in agent.resume("t1", {"call_publish_file": True})]
+
+    assert (workspace / "published.txt").read_text(encoding="utf-8") == "notes.txt"
     assert [message.role for message in rest] == ["tool", "assistant"]
-    assert body(rest[0]) == "overwrote notes.txt (2 characters)"
+    assert body(rest[0]) == "published notes.txt"
     assert await agent.pending("t1") is None
     await agent.aclose()
 
 
-async def test_an_edit_requires_approval_and_changes_one_match(
+async def test_a_workspace_edit_runs_without_approval_and_changes_one_match(
     paths: tuple[Path, Path], workspace: Path
 ) -> None:
     agent = open_agent(paths, workspace, edits("notes.txt", "42", "43"))
     await agent.answer("t1", user("Change 42 to 43."))
 
-    question = await agent.pending("t1")
-    assert question is not None and question[0]["name"] == "edit_file"
-    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "the answer is 42"
-
-    rest = [message async for message in agent.resume("t1", {"call_edit_file": True})]
-
+    assert await agent.pending("t1") is None
     assert (workspace / "notes.txt").read_text(encoding="utf-8") == "the answer is 43"
-    assert body(rest[0]).startswith("edited notes.txt")
     await agent.aclose()
 
 
 async def test_declining_leaves_the_file_alone_and_tells_the_model(
     paths: tuple[Path, Path], workspace: Path
 ) -> None:
-    backend = writes("notes.txt", "43")
-    agent = open_agent(paths, workspace, backend)
-    await agent.answer("t1", user("Change notes.txt to 43."))
+    backend = publishes("notes.txt")
+    agent = open_agent(paths, workspace, backend, consequential=True)
+    await agent.answer("t1", user("Publish notes.txt."))
 
-    rest = [message async for message in agent.resume("t1", {"call_write_file": False})]
+    rest = [message async for message in agent.resume("t1", {"call_publish_file": False})]
 
-    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "the answer is 42"
+    assert not (workspace / "published.txt").exists()
     assert body(rest[0]).startswith("error: the user declined")
     # The refusal is what the model sees next, so it can say so rather than retry.
     assert "declined" in body(backend.requests[-1][-1])
@@ -157,12 +192,12 @@ async def test_declining_leaves_the_file_alone_and_tells_the_model(
 async def test_the_whole_turn_is_stored_once_it_finishes(
     paths: tuple[Path, Path], workspace: Path
 ) -> None:
-    agent = open_agent(paths, workspace, writes("notes.txt", "43"))
-    await agent.answer("t1", user("Change notes.txt to 43."))
+    agent = open_agent(paths, workspace, publishes("notes.txt"), consequential=True)
+    await agent.answer("t1", user("Publish notes.txt."))
 
     assert agent.history("t1") == []
 
-    async for _ in agent.resume("t1", {"call_write_file": True}):
+    async for _ in agent.resume("t1", {"call_publish_file": True}):
         pass
 
     assert [message.role for message in agent.history("t1")] == [
@@ -180,16 +215,20 @@ async def test_the_whole_turn_is_stored_once_it_finishes(
 async def test_a_pending_question_survives_a_restart(
     paths: tuple[Path, Path], workspace: Path
 ) -> None:
-    first = open_agent(paths, workspace, writes("notes.txt", "43"))
-    await first.answer("t1", user("Change notes.txt to 43."))
+    first = open_agent(paths, workspace, publishes("notes.txt"), consequential=True)
+    await first.answer("t1", user("Publish notes.txt."))
     await first.aclose()
 
-    second = open_agent(paths, workspace, ScriptedBackend(says("Done.")))
+    second = open_agent(
+        paths, workspace, ScriptedBackend(says("Done.")), consequential=True
+    )
     question = await second.pending("t1")
-    rest = [message async for message in second.resume("t1", {"call_write_file": True})]
+    rest = [
+        message async for message in second.resume("t1", {"call_publish_file": True})
+    ]
 
-    assert question is not None and question[0]["name"] == "write_file"
-    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "43"
+    assert question is not None and question[0]["name"] == "publish_file"
+    assert (workspace / "published.txt").read_text(encoding="utf-8") == "notes.txt"
     assert [message.role for message in rest] == ["tool", "assistant"]
     await second.aclose()
 
@@ -197,14 +236,20 @@ async def test_a_pending_question_survives_a_restart(
 # --- without a checkpointer there is nowhere to wait -------------------------
 
 
-async def test_without_checkpoints_a_write_is_refused_rather_than_run(
+async def test_without_checkpoints_a_consequential_call_is_refused_rather_than_run(
     paths: tuple[Path, Path], workspace: Path
 ) -> None:
-    agent = open_agent(paths, workspace, writes("notes.txt", "43"), checkpointed=False)
+    agent = open_agent(
+        paths,
+        workspace,
+        publishes("notes.txt"),
+        checkpointed=False,
+        consequential=True,
+    )
 
-    produced = await agent.answer("t1", user("Change notes.txt to 43."))
+    produced = await agent.answer("t1", user("Publish notes.txt."))
 
-    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "the answer is 42"
+    assert not (workspace / "published.txt").exists()
     assert body(produced[1]).startswith("error: the user declined")
     await agent.aclose()
 

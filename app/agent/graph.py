@@ -37,7 +37,7 @@ from app.models import (
     Usage,
 )
 from app.telemetry import NO_TRACE, Telemetry, TurnTrace
-from app.tools import Toolbox, tool_failed
+from app.tools import ToolExecutor, Toolbox
 
 # The key a text delta travels under on LangGraph's custom stream channel. The
 # channel carries anything, so the runtime and the graph have to agree on one
@@ -514,39 +514,39 @@ def build_agent(
                 "stopping": BUDGET_EXHAUSTED,
             }
 
+        executor = ToolExecutor(toolbox, trace)
+        prepared = [executor.pre_execute(call) for call in calls]
         # Invalid calls go straight back to the model as tool errors. Asking a
         # user to approve a call that cannot run is both noisy and misleading.
-        risky = [
-            call
-            for call in calls
-            if toolbox.destructive(call.name) and toolbox.validation_error(call) is None
-        ]
+        risky = [item for item in prepared if item.approval_required]
         allowed = dict.fromkeys((call.id for call in calls), True)
         if risky and checkpointer is None:
-            allowed.update(dict.fromkeys((call.id for call in risky), False))
+            allowed.update(dict.fromkeys((item.call.id for item in risky), False))
         elif risky:
             # One question for the whole batch, asked before any tool has run:
             # resuming restarts this node from the top, and a tool that ran
             # before the pause would run a second time.
-            trace.event("approval_requested", calls=[call.name for call in risky])
-            answers = interrupt([describe_call(call) for call in risky])
-            allowed.update({call.id: bool(answers.get(call.id)) for call in risky})
+            trace.event("approval_requested", calls=[item.call.name for item in risky])
+            answers = interrupt([describe_call(item.call) for item in risky])
+            allowed.update(
+                {item.call.id: bool(answers.get(item.call.id)) for item in risky}
+            )
             trace.event(
                 "approval_resumed",
-                approved=[call.name for call in risky if allowed[call.id]],
+                approved=[
+                    item.call.name for item in risky if allowed[item.call.id]
+                ],
             )
         messages = []
         spent = 0
-        for call in calls:
+        for item in prepared:
+            call = item.call
             if not allowed[call.id]:
                 # Never run, so never counted as a tool call the turn spent.
                 trace.event("tool_failed", tool=call.name, status="declined")
                 messages.append(declined(call))
                 continue
-            with trace.tool(call.name) as measured:
-                result = await toolbox.run_async(call)
-                if tool_failed(result):
-                    measured.failed()
+            result = await executor.run(item)
             spent += 1
             messages.append(result)
         return {

@@ -787,7 +787,7 @@ async def test_can_is_answered_from_the_wiring_and_never_by_the_model(
     answer = telegram.sent[0]
     assert "inspect_page" in answer
     assert "image/png" in answer
-    assert "Ask first: write_file, edit_file" in answer
+    assert "Ask first: nothing" in answer
 
 
 async def test_stop_records_a_request_and_reaches_no_model(
@@ -1635,6 +1635,38 @@ async def test_a_tool_step_previews_only_the_answer(
     assert len(sent) == 2
     assert LONG_ANSWER.startswith(sent[1])
     assert texts(telegram, "editMessageText")[-1] == LONG_ANSWER
+
+
+async def test_text_that_ends_in_a_tool_call_is_discarded_before_the_answer(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Observed live: narrated tool use must not become a first answer."""
+
+    narrated_call = Completion(
+        text=LONG_ANSWER,
+        tool_calls=calls("list_files", path=".").tool_calls,
+        finish_reason="tool_calls",
+    )
+    final = "The actual final answer is complete and long enough to stream once."
+    backend = ScriptedBackend(narrated_call, says(final), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("look and then answer"))
+
+    deleted = [
+        payload["message_id"]
+        for name, payload in telegram.calls
+        if name == "deleteMessage"
+    ]
+    # 101 is the narrated preview; 102 is the transient tool activity cleared
+    # when the real answer appears. Neither remains as another answer.
+    assert deleted[:2] == [101, 102]
+    assert texts(telegram, "editMessageText")[-1] == final
+    assert [
+        payload["message_id"]
+        for name, payload in telegram.calls
+        if name == "editMessageText"
+    ] == [103]
 
 
 async def test_a_failed_final_edit_delivers_the_answer_and_clears_the_preview(

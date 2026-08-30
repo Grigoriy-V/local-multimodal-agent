@@ -57,7 +57,7 @@ def documents() -> str:
 def needs_approval(tools: Toolbox) -> tuple[str, ...]:
     """The tools that do not run until the person says yes."""
 
-    return tuple(name for name in tools.names if tools.destructive(name))
+    return tuple(name for name in tools.names if tools.requires_approval(name))
 
 
 def tool_inventory(tools: Toolbox) -> str:

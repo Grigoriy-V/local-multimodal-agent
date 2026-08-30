@@ -764,7 +764,15 @@ class TelegramAdapter:
                 await activity.clear()
             await self._send_media(chat_id, produced, outbound_only=True)
             return
-        if body:
+        if produced.tool_calls:
+            # A model may narrate its next action before emitting the tool call.
+            # Deltas arrive before the completion reveals that this was not the
+            # answer, so remove any preview instead of finalizing it as a first
+            # response. The ordinary tool activity is the visible status until
+            # a later model step actually answers.
+            if preview is not None:
+                await preview.discard()
+        elif body:
             # The status has done its job the moment there is something to read.
             if activity is not None:
                 await activity.clear()
@@ -778,8 +786,7 @@ class TelegramAdapter:
             # become visible: `visible` keeps the first of the two.
             trace.visible("final_sent")
         elif preview is not None:
-            # A completion with tool calls and no text: whatever was previewed
-            # is not an answer, so it does not stay in the chat.
+            # A completion with no spoken text cannot finalize a text preview.
             await preview.discard()
         await self._send_media(chat_id, produced)
         if produced.tool_calls:

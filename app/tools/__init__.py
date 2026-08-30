@@ -15,6 +15,7 @@ from app.tools.capabilities import (
     CapabilityRegistry,
 )
 from app.tools.documents import document_tools
+from app.tools.execution import PreparedToolCall, ToolExecutor
 from app.tools.filesystem import filesystem_tools
 from app.tools.memory import memory_tools
 from app.tools.presentation import presentation_tools, send_file
@@ -28,6 +29,7 @@ __all__ = [
     "FILESYSTEM_READ",
     "FILESYSTEM_WRITE",
     "PRESENT_FILES",
+    "PreparedToolCall",
     "WEB_FETCH",
     "WEB_SEARCH",
     "WEB_VIEW",
@@ -36,6 +38,7 @@ __all__ = [
     "CapabilityRegistry",
     "Tool",
     "ToolError",
+    "ToolExecutor",
     "Toolbox",
     "browser_tools",
     "document_tools",

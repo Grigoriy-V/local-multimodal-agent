@@ -36,10 +36,12 @@ def tool_failed(message: Message) -> bool:
 
 @dataclass(frozen=True)
 class Tool:
-    """`destructive` marks a tool that changes something outside the agent.
+    """`destructive` declares an effect that needs approval before execution.
 
-    The flag says nothing about how consent is obtained — that is the graph's
-    business. A tool only declares that running it is not free to undo.
+    The name is retained for compatibility, but the policy is about the
+    boundary crossed rather than whether bytes change. Work confined to the
+    person's workspace is autonomous; publication, third-party, spending and
+    infrastructure effects set this flag.
     """
 
     name: str
@@ -78,7 +80,7 @@ class Toolbox:
         return [tool.schema() for tool in self._tools.values()]
 
     def destructive(self, name: str) -> bool:
-        """Whether this call needs consent before it runs.
+        """Whether this call declares a consequential external effect.
 
         An unknown name is not destructive: it never runs, it only produces the
         error that tells the model the tool does not exist.
@@ -86,6 +88,11 @@ class Toolbox:
 
         tool = self._tools.get(name)
         return tool is not None and tool.destructive
+
+    def requires_approval(self, name: str) -> bool:
+        """Whether policy requires approval before this tool may execute."""
+
+        return self.destructive(name)
 
     def validation_error(self, call: ToolCall) -> str | None:
         """Return a readable JSON-schema error without executing the tool.
@@ -130,7 +137,9 @@ class Toolbox:
                 return f"argument {name!r} must contain at least {minimum} character(s)"
         return None
 
-    def _prepare(self, call: ToolCall) -> tuple[Tool | None, Message | None]:
+    def prepare(self, call: ToolCall) -> tuple[Tool | None, Message | None]:
+        """Resolve and validate one call without causing its effect."""
+
         tool = self._tools.get(call.name)
         if tool is None:
             return None, self._message(
@@ -169,7 +178,7 @@ class Toolbox:
     def run(self, call: ToolCall) -> Message:
         """Run a synchronous tool and return the message shown to the model."""
 
-        tool, refused = self._prepare(call)
+        tool, refused = self.prepare(call)
         if refused is not None:
             return refused
         try:
@@ -186,7 +195,7 @@ class Toolbox:
     async def run_async(self, call: ToolCall) -> Message:
         """Run either a synchronous or asynchronous tool."""
 
-        tool, refused = self._prepare(call)
+        tool, refused = self.prepare(call)
         if refused is not None:
             return refused
         try:

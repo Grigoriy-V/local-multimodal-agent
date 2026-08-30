@@ -320,6 +320,34 @@ async def test_an_executed_tool_has_one_start_and_one_terminal_event(
     assert stored_run(telemetry, run_id).tool_calls == 1
 
 
+async def test_a_tool_trace_keeps_the_path_but_not_argument_content(
+    tmp_path: Path, telemetry: Telemetry
+) -> None:
+    telegram, inbox = FakeTelegram(), FakeInbox()
+    tool = Tool(
+        name="write_thing",
+        description="write",
+        parameters={"type": "object", "properties": {}},
+        run=lambda path, content: "done",
+    )
+    backend = ScriptedBackend(
+        calls("write_thing", path="artifact.txt", content="private text"),
+        says("Done."),
+    )
+    adapter = build(telegram, tmp_path, backend, telemetry, tools=[tool])
+
+    await deliver(adapter, inbox, telemetry, text_update("Write it"))
+
+    events = [
+        event
+        for event in stored_events(telemetry, the_run_id(inbox))
+        if event.type in {"tool_started", "tool_finished"}
+    ]
+    assert [event.data["path"] for event in events] == ["artifact.txt", "artifact.txt"]
+    assert [event.data["stage"] for event in events] == ["execute", "execute"]
+    assert "private text" not in json.dumps([event.data for event in events])
+
+
 async def test_a_tool_that_fails_is_not_recorded_as_a_success(
     tmp_path: Path, telemetry: Telemetry
 ) -> None:
