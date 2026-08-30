@@ -4,19 +4,20 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.3.5, prompt assembly and user instructions. It was
-opened on 2026-08-30 because 4.3's live acceptance is blocked on it: the
-stopping seam is deployed and its one-answer behaviour holds, but the only
-production lever 4.3 shipped was system-prompt text, and hand-correcting that
-text neither produced autonomous inspection nor turned out to be what changed
-the behaviour. The first measured comparison ran the same requests against the
-prompt before and after that correction and got the same shape from both,
-including the failure it was blamed for; the earlier attribution is withdrawn.
-What decides that failure is whether a place for the file is established in
-what the model can see — named in the request or made by the previous turn.
-4.3 stays open and its live acceptance is re-run after 4.3.5, against that
-comparison rather than single chat messages.
-`reports/2026-08-30_v2_prompt_scenario_baseline.md`. 4.2, tool execution seam, remains
+**Current approved step:** 4.3.5, prompt assembly and user instructions —
+implemented, measured live and deployed on 2026-08-30. The prompt is now
+assembled from layers with a core that names no tool, the agent is told where
+its own workspace is, and each person has one `AGENTS.md` overlay. The failure
+that blocked 4.3 is gone: a request that names no file now produces the file.
+The earlier attribution of that failure to the 4.3 prompt correction was
+measured and withdrawn — the same shape came from both prompts, and what
+decides it is whether a place for the file is established in what the model
+can see. **4.3 stays open on its other half**: the artifact is still described
+without being looked at. The same run also found that inspecting a page
+replaced reading it and lost both real defects, which is a new question rather
+than a regression of this step.
+`reports/2026-08-30_v2_prompt_scenario_baseline.md`,
+`reports/2026-08-30_v2_prompt_assembly.md`. 4.2, tool execution seam, remains
 deployed and accepted live, including the correction for narrated tool calls
 becoming a second Telegram answer. An article pushed at the bot produced seven turns up to
 28,113 tokens, with a single request of 15,699 against an old budget of 9,830,
@@ -279,12 +280,18 @@ Verified platform facts and cold-start evidence remain in
      for HTML, tool-failure recovery, the normal stop, explicit steering and
      Telegram preview withdrawal. Live HTML runs preserved one final answer and
      proved that write, inspect and explicit presentation work, but the model
-     asked permission before safe inspection. A stronger system prompt then
-     regressed the same natural castle request to inline code and zero tool
-     calls. PDF creation is not acceptance until the sandbox exists.
-     `reports/2026-08-30_v2_turn_stopping.md`.
-   - **4.3.5 Prompt assembly and user instructions.** The system prompt becomes
-     an assembled layer instead of one hand-written paragraph: a small stable
+     asked permission before safe inspection. PDF creation is not acceptance
+     until the sandbox exists.
+
+     What remains after 4.3.5 is one thing, and it is smaller than it looked:
+     the artifact gets made and then described without being looked at. Asked
+     to look, the model looks — `broken_page` calls `inspect_page` — so this is
+     not a missing capability or a missing instruction, and there is still no
+     production source of steering. `reports/2026-08-30_v2_turn_stopping.md`,
+     `reports/2026-08-30_v2_prompt_assembly.md`.
+   - **4.3.5 Prompt assembly and user instructions — done, measured live,
+     deployed.** The system prompt is an assembled layer instead of one
+     hand-written paragraph: a small stable
      core that names no tool, capability-owned guidance generated from the
      wired toolbox, the tool schemas, then the person's own standing
      instructions. Order is fixed by how stable each layer is, so the prefix
@@ -305,6 +312,16 @@ Verified platform facts and cold-start evidence remain in
      window. Judgement stays human; nothing asserts on wording. It is not part
      of the offline suite, and every run is a product-runtime worker and its
      own human gate.
+
+     Deployed to `assistant-control` and the command menu republished with
+     `/agents` on 2026-08-30. Measured live: the file now gets written where it
+     was not, an ordinary answer still costs one model call and no tool, and
+     `note` got a model call cheaper because the workspace no longer has to be
+     looked for. The overlay demonstrably reaches the model and is partly
+     obeyed — a small model matched the question's language over a standing
+     instruction to answer in another. `/agents` has not yet been used from a
+     real phone. `reports/2026-08-30_v2_prompt_assembly.md`, `DECISIONS.md`
+     2026-08-30.
    - **4.4 `todo` as agent state, not a mode**, surviving folding and restart.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
    - **4.6a Context engine.** Context preparation before every model step rather
@@ -356,6 +373,15 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
 
 Recorded, not approved, not begun, and not in the order above. One line each.
 
+- **Looking at a page is not reading it.** Measured 2026-08-30: the same
+  seeded page with a white-on-white price and a `textContnet` typo gave both
+  defects when the model read the source and neither when it called
+  `inspect_page`. The typo is a silent no-op rather than a console error, and
+  the invisible text is invisible in rendered text by construction. Current
+  guidance encourages inspection as though it contained reading. Either the
+  tool returns the source alongside what it rendered, or the guidance says
+  both are needed for a question about what is wrong with a page — that choice
+  is the work. `reports/2026-08-30_v2_prompt_assembly.md`.
 - **Latency to the first visible word**, to give 4.1 a "before" number:
   `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
 - **Throttle the edits that write a streamed answer.** Seven long answers in
