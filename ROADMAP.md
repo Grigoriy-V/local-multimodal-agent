@@ -4,11 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.1, the one loop. The loop is **accepted live** —
-one ordinary message now costs one model call instead of two, and a stop
-recorded mid-flight ended a real turn at its next step. Migrated and deployed on
-2026-08-30; the one check left is `/stop` sent through the real bot while a long
-turn is running. `reports/2026-08-30_v2_one_loop.md`.
+**Current approved step:** none. Sub-step 4.1 is done and accepted live, in the
+deployed profile as well as locally; 4.2, the tool execution seam, is next and
+needs approval. `reports/2026-08-30_v2_one_loop.md`.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -175,43 +173,25 @@ Verified platform facts and cold-start evidence remain in
      the first finished. Coalescing an image and the question after it is held
      back — it redefines the turn every recorded number counts.
      `reports/2026-08-30_v2_conversation_serialization.md`.
-   - **4.1 One loop — the loop accepted live; the deployed control lane is
-     not.** The router and the plan/implement/test/evaluate lifecycle are
-     deleted; about 1,730 lines went, and a plain message costs one model call
-     instead of two. The surviving loop has a `TurnBudget` (steps, tool calls,
-     seconds, configurable), `loop_step` events the run inspector renders, and a
-     step number in the chat's tool status. A control signal now travels out of
-     band in both profiles and the loop reads a stop at each step boundary, so
-     `/stop` ends a turn that is actually running rather than one paused at an
-     approval. `reports/2026-08-30_v2_one_loop.md`, `DECISIONS.md` 2026-08-30.
+   - **4.1 One loop — done, accepted live.** The router and the
+     plan/implement/test/evaluate lifecycle are deleted, about 1,730 lines, and
+     an ordinary message costs one model call where it used to cost two. The
+     surviving loop has a `TurnBudget` (steps, tool calls, seconds), `loop_step`
+     events the run inspector renders, and a step number in the chat's status.
+     A control signal travels out of band in both profiles and the loop reads a
+     stop at each step boundary. Live in the deployed bot: `route loop`
+     everywhere, `plan.txt` written and read back with no plan to approve, and a
+     stop that ended a running turn at its next step with no model call spent.
+     The `browser_verifier` and `web_verifier` modules went with the lifecycle;
+     they were already unreachable, and 4.3 decides what validation the one loop
+     does. `reports/2026-08-30_v2_one_loop.md`, `DECISIONS.md` 2026-08-30.
 
-     Accepted live on 2026-08-30 through `scripts/loop_live.py`, four turns in
-     one warm window: an ordinary question cost 1 model call against the 2 it
-     used to; a write-read-report request ran as three steps of one loop with no
-     mode; a stop recorded mid-flight refused the tool the model had just asked
-     for and ended the turn without another request; 2.50 model calls a turn
-     against the measured 3.00. The two PostgreSQL contract suites ran against
-     the deployed database, 19 passed.
+     The live check also found and closed a blocking defect: a consent button
+     pressed after Telegram expired its callback query failed the whole turn,
+     and after 4.0 a failed update is claimed ahead of every later message of
+     that conversation for ever. The acknowledgement can no longer fail a turn,
+     and the queue gives up on an update after three attempts.
 
-     Migrated and deployed on 2026-08-30: `telegram_updates.control` on all 89
-     existing rows, `turn_stops` created, nothing in flight across the deploy,
-     `assistant-control` re-deployed. The live check confirmed one loop in
-     production — `route loop`, one model call to ask where it used to be two,
-     `plan.txt` written and read back with no plan to approve — and the control
-     lane in use.
-
-     It also found a blocking defect: a consent button pressed after Telegram
-     expired its callback query failed the whole turn, and after 4.0 a failed
-     update is claimed ahead of every later message of that conversation, for
-     ever. Fixed — the acknowledgement can no longer fail a turn, and the queue
-     gives up on an update after three attempts — and **not yet deployed**.
-
-     Owed: that deploy; a stop consumed by a turn that is genuinely running,
-     which the armed stop and the pending callback should produce together; and
-     the two `docs/PRODUCT.md` lines that still describe the deployed lifecycle. The `browser_verifier`
-     and `web_verifier` modules were deleted with it; they were already
-     unreachable from every product path, and 4.3 decides what validation the
-     one loop does.
    - **4.2 Tool execution seam.** One `pre_execute → execute → post_execute`
      path for every tool, holding consent policy, validation and telemetry.
      Where autonomy inside the workspace is implemented; `DECISIONS.md`

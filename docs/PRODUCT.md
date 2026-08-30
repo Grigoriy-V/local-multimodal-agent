@@ -73,7 +73,7 @@ Current examples:
 
 - search results are leads; a factual answer should read the selected source;
 - a rendered PDF page is evidence the multimodal model can inspect;
-- a task validation stage should judge real tool evidence, not an implementation summary;
+- a claim of success should rest on evidence the agent actually observed, not on its own summary of what it intended;
 - an artifact should not be described as delivered until an explicit presentation action has happened.
 
 Failures and uncertainty should remain visible to the agent so it can recover or report them honestly.
@@ -153,7 +153,7 @@ The current accepted deployed baseline includes:
 - local HTML/browser inspection;
 - public web search, bounded text fetch and isolated visual browser view;
 - explicit agent-controlled file/media delivery;
-- resumable approvals and a bounded task lifecycle;
+- resumable approvals, and one turn bounded by its own budget that a person can stop while it runs;
 - a scale-to-zero OpenAI-compatible multimodal model endpoint.
 
 `ROADMAP.md` is authoritative for what is accepted next and for known product gaps.
