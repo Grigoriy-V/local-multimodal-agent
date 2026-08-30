@@ -15,7 +15,7 @@ import pytest
 from app.config import TelegramSettings
 from tests.fakes import QueuedInbox
 from ui.telegram.inbox import InboxJob
-from ui.telegram.webhook import TelegramUpdateWorker, TelegramWebhook
+from ui.telegram.webhook import MAX_ATTEMPTS, TelegramUpdateWorker, TelegramWebhook
 from ui.telegram.wire import (
     MODEL_FREE_COMMANDS,
     SETTLED_APPROVED,
@@ -300,6 +300,69 @@ async def test_the_front_door_names_the_conversation_it_queues() -> None:
     await TelegramWebhook(settings(), inbox, spawn).accept(SECRET, body(update()))
 
     assert inbox.keys[7] == canonical_user_id(42)
+
+
+# --- an update that cannot be answered ---------------------------------------
+
+
+class Broken:
+    """A handler that fails the way a stale callback did: every single time."""
+
+    def __init__(self) -> None:
+        self.tries = 0
+
+    async def handle_update(self, update, trace=None) -> None:
+        self.tries += 1
+        raise RuntimeError("telegram refused answerCallbackQuery: query is too old")
+
+
+async def test_a_failing_update_returns_to_the_queue_a_bounded_number_of_times() -> None:
+    inbox = FakeInbox()
+    await queued(inbox, 5)
+    handler = Broken()
+    worker = TelegramUpdateWorker(inbox, handler)
+
+    for _ in range(MAX_ATTEMPTS - 1):
+        with pytest.raises(RuntimeError):
+            await worker.run(5)
+        assert inbox.state[5] == "pending"
+
+    # The last attempt gives up instead of queueing it again, and does not
+    # raise: the point of giving up is that the conversation carries on.
+    assert await worker.run(5) is True
+    assert inbox.state[5] == "done"
+    assert [update_id for update_id, _ in inbox.abandoned] == [5]
+    assert handler.tries == MAX_ATTEMPTS
+
+
+async def test_one_update_nobody_can_answer_does_not_block_the_conversation() -> None:
+    """Live, this was a bot that would have stopped answering that person.
+
+    A lease belongs to a conversation, so an update that fails every time it is
+    claimed is claimed ahead of every later message of that conversation — for
+    ever, since nothing bounded the retries. What made it fail was Telegram
+    expiring a callback query while the person thought about the question.
+    """
+
+    inbox = FakeInbox()
+    await queued(inbox, 5, 7)
+    inbox.attempts[5] = MAX_ATTEMPTS - 1  # it has already failed twice
+
+    class Selective:
+        def __init__(self) -> None:
+            self.seen: list[int] = []
+
+        async def handle_update(self, update, trace=None) -> None:
+            self.seen.append(update["update_id"])
+            if update["update_id"] == 5:
+                raise RuntimeError("this one can never be answered")
+
+    handler = Selective()
+
+    assert await TelegramUpdateWorker(inbox, handler).run(7) is True
+
+    assert handler.seen == [5, 7], "the later message is answered, not stranded"
+    assert inbox.state[5] == "done" and inbox.state[7] == "done"
 
 
 # --- out of band -------------------------------------------------------------

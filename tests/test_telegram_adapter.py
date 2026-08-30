@@ -1429,6 +1429,66 @@ async def test_an_approved_call_settles_to_the_success_button(
     assert (tmp_path / "workspace" / "notes.txt").exists()
 
 
+async def test_a_button_pressed_late_still_approves_the_call(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Found live: an approval four minutes old failed the whole turn.
+
+    Telegram expires a callback query after a few minutes and answers a late
+    press with `query is too old`. That answer is the spinner on the button,
+    not the work — and the work was a person saying yes to something the agent
+    is waiting to do. Losing it because the animation failed is the wrong
+    trade, and after 4.0 it was worse than losing one turn: the failed update
+    went back to a queue that claims it ahead of every later message.
+    """
+
+    refusals: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("answerCallbackQuery"):
+            refusals.append("asked")
+            return httpx.Response(
+                200,
+                json={
+                    "ok": False,
+                    "description": (
+                        "Bad Request: query is too old and response timeout "
+                        "expired or query ID is invalid"
+                    ),
+                },
+            )
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+    backend = ScriptedBackend(writes(), says("Written."), default=says("summary"))
+    client = TelegramClient(settings, transport=httpx.MockTransport(handle))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    agent_settings = AgentSettings(
+        database=str(tmp_path / "memory.sqlite3"),
+        checkpoints=str(tmp_path / "checkpoints.sqlite3"),
+        workspace=str(workspace),
+    )
+    adapter = TelegramAdapter(
+        client,
+        settings,
+        agent_settings,
+        agent_factory=lambda user_id: Agent(
+            backend,
+            SqliteStore(agent_settings.database),
+            workspace,
+            checkpoints=agent_settings.checkpoints,
+            user_id=user_id,
+        ),
+    )
+    BUILT.append(adapter)
+
+    await adapter.handle_update(text_update("write notes.txt"))
+    await adapter.handle_update(approval_update(f"call:yes:{WRITE}"))
+
+    assert refusals, "the acknowledgement was attempted"
+    assert (workspace / "notes.txt").exists()
+
+
 async def test_a_transition_that_failed_is_never_shown_as_settled(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:

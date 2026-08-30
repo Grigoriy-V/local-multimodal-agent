@@ -520,9 +520,22 @@ class TelegramClient:
             pass
 
     async def answer_callback(self, callback_id: str, text: str = "") -> None:
-        await self._call(
-            "answerCallbackQuery", {"callback_query_id": callback_id, "text": text}
-        )
+        """Take the spinner off a pressed button. Never raises.
+
+        This is an acknowledgement, not the work. Telegram expires a callback
+        query after a few minutes, and it answers a late press with `query is
+        too old` — so a person who took their time deciding would otherwise
+        have their approval thrown away by the failure of the animation that
+        told them it had been received. Found live: a consent button pressed
+        four and a half minutes after the question failed the whole turn.
+        """
+
+        try:
+            await self._call(
+                "answerCallbackQuery", {"callback_query_id": callback_id, "text": text}
+            )
+        except TelegramError:
+            return
 
     async def _upload(
         self, method: str, field: str, chat_id: int, name: str, data: bytes, limit: int

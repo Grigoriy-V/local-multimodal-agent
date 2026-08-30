@@ -75,6 +75,10 @@ class InboxJob:
     # A control update: answered beside the conversation rather than in it, and
     # never part of the drain. A worker that claimed one does that one thing.
     control: bool = False
+    # How many times this update has been claimed, this claim included. What
+    # bounds retrying it: an update that cannot be answered must not hold its
+    # conversation for the rest of time.
+    attempts: int = 1
 
 
 class UpdateInbox(Protocol):
@@ -96,6 +100,8 @@ class UpdateInbox(Protocol):
     async def complete(self, job: InboxJob) -> None: ...
 
     async def retry(self, job: InboxJob, error: str) -> None: ...
+
+    async def abandon(self, job: InboxJob, error: str) -> None: ...
 
 
 class PostgresUpdateInbox:
@@ -324,6 +330,7 @@ class PostgresUpdateInbox:
                 " attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP"
                 f" {where}"
                 " RETURNING update_id, payload, run_id, conversation_key, control,"
+                " attempts,"
                 " EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) AS waited",
                 (token, lease_seconds, *values),
             )
@@ -338,6 +345,7 @@ class PostgresUpdateInbox:
             queued_ms=max(0, int(float(row["waited"] or 0.0) * 1000)),
             conversation_key=row["conversation_key"] or "",
             control=bool(row["control"]),
+            attempts=int(row["attempts"] or 1),
         )
 
     async def complete(self, job: InboxJob) -> None:
@@ -345,6 +353,16 @@ class PostgresUpdateInbox:
 
     async def retry(self, job: InboxJob, error: str) -> None:
         await self._finish(job, "pending", error[:1000])
+
+    async def abandon(self, job: InboxJob, error: str) -> None:
+        """Give up on one update, keeping why, so it stops being claimed.
+
+        Finished rather than failed, because `state` answers one question — may
+        a worker take this? — and the answer here is no. The reason is in
+        `last_error`, and the turn's own row already says it failed.
+        """
+
+        await self._finish(job, "done", error[:1000])
 
     async def _finish(self, job: InboxJob, state: str, error: str | None) -> None:
         connection = await self._connection()

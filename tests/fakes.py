@@ -129,6 +129,8 @@ class QueuedInbox:
         self.state: dict[int, str] = {}
         self.completed: list[int] = []
         self.retried: list[tuple[int, str]] = []
+        self.abandoned: list[tuple[int, str]] = []
+        self.attempts: dict[int, int] = {}
         self.queued_ms = queued_ms
 
     async def enqueue(
@@ -181,6 +183,7 @@ class QueuedInbox:
 
     def _lease(self, update_id: int) -> "InboxJob":
         self.state[update_id] = "running"
+        self.attempts[update_id] = self.attempts.get(update_id, 0) + 1
         return InboxJob(
             update_id,
             self.payloads[update_id],
@@ -189,6 +192,7 @@ class QueuedInbox:
             queued_ms=self.queued_ms,
             conversation_key=self.keys.get(update_id, ""),
             control=update_id in self.control,
+            attempts=self.attempts[update_id],
         )
 
     async def complete(self, job: "InboxJob") -> None:
@@ -198,3 +202,7 @@ class QueuedInbox:
     async def retry(self, job: "InboxJob", error: str) -> None:
         self.state[job.update_id] = "pending"
         self.retried.append((job.update_id, error))
+
+    async def abandon(self, job: "InboxJob", error: str) -> None:
+        self.state[job.update_id] = "done"
+        self.abandoned.append((job.update_id, error))

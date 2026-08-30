@@ -40,6 +40,14 @@ SECRET_HEADER = "x-telegram-bot-api-secret-token"
 # whole turn's worth of room left. Four minutes leaves that room.
 DRAIN_SECONDS = 240.0
 
+# How many times one update may be claimed before the queue gives up on it. A
+# failed turn returns to the queue because most failures are transient, and a
+# lease belongs to a conversation — so an update that fails every time it is
+# claimed is now claimed ahead of every later message of that conversation, for
+# ever. Found live: a consent button pressed after Telegram had expired its
+# callback query failed the turn, and would have blocked every message after it.
+MAX_ATTEMPTS = 3
+
 
 @dataclass(frozen=True)
 class WebhookResponse:
@@ -245,7 +253,23 @@ class TelegramUpdateWorker:
             await self.handler.handle_update(job.payload, trace)
         except Exception as error:
             trace.finish("failed", error_type=type(error).__name__)
-            await self.inbox.retry(job, f"{type(error).__name__}: {error}")
+            detail = f"{type(error).__name__}: {error}"
+            if job.attempts >= MAX_ATTEMPTS:
+                # Deliberately not re-raised: the point of giving up is that the
+                # conversation carries on, and raising here would leave the
+                # messages behind this one waiting for the next thing to spawn
+                # a worker.
+                log_event(
+                    TraceEvent(
+                        run_id=job.run_id,
+                        seq=0,
+                        type="update_abandoned",
+                        data={"update_id": job.update_id, "attempts": job.attempts},
+                    )
+                )
+                await self.inbox.abandon(job, detail)
+                return
+            await self.inbox.retry(job, detail)
             raise
         finally:
             # A turn the adapter did not close is one that ended some other way.

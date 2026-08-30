@@ -195,10 +195,20 @@ Verified platform facts and cold-start evidence remain in
 
      Migrated and deployed on 2026-08-30: `telegram_updates.control` on all 89
      existing rows, `turn_stops` created, nothing in flight across the deploy,
-     `assistant-control` re-deployed. Owed: a check through the real bot —
-     `/stop` sent while a long turn runs, which is the only thing that
-     exercises the control lane end to end — and the two `docs/PRODUCT.md` lines
-     that still describe the deployed lifecycle. The `browser_verifier`
+     `assistant-control` re-deployed. The live check confirmed one loop in
+     production — `route loop`, one model call to ask where it used to be two,
+     `plan.txt` written and read back with no plan to approve — and the control
+     lane in use.
+
+     It also found a blocking defect: a consent button pressed after Telegram
+     expired its callback query failed the whole turn, and after 4.0 a failed
+     update is claimed ahead of every later message of that conversation, for
+     ever. Fixed — the acknowledgement can no longer fail a turn, and the queue
+     gives up on an update after three attempts — and **not yet deployed**.
+
+     Owed: that deploy; a stop consumed by a turn that is genuinely running,
+     which the armed stop and the pending callback should produce together; and
+     the two `docs/PRODUCT.md` lines that still describe the deployed lifecycle. The `browser_verifier`
      and `web_verifier` modules were deleted with it; they were already
      unreachable from every product path, and 4.3 decides what validation the
      one loop does.

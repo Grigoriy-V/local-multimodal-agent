@@ -188,6 +188,37 @@ async def test_a_claimed_update_is_not_spawned_a_second_time(
     assert again.should_spawn is False
 
 
+async def test_a_claim_reports_how_many_times_it_has_been_tried(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """What bounds retrying an update the worker can never answer."""
+
+    await queue(inbox, 5)
+    first = await inbox.claim(5)
+    assert first is not None and first.attempts == 1
+
+    await inbox.retry(first, "RuntimeError: again")
+    second = await inbox.claim(5)
+
+    assert second is not None and second.attempts == 2
+
+
+async def test_an_abandoned_update_stops_being_claimed(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """Giving up has to mean the conversation moves on, not that it waits."""
+
+    await queue(inbox, 5, 7)
+    doomed = await inbox.claim(5)
+    assert doomed is not None
+
+    await inbox.abandon(doomed, "RuntimeError: nobody can answer this")
+    following = await inbox.claim(7)
+
+    assert following is not None and following.update_id == 7
+    assert await inbox.claim(5) is None
+
+
 async def test_a_control_update_is_claimed_while_the_conversation_runs(
     inbox: PostgresUpdateInbox,
 ) -> None:
