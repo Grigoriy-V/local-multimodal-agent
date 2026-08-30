@@ -4,12 +4,13 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.1.5, real context capacity — deployed and accepted
-live. An article pushed at the bot produced seven turns up to 28,113 tokens,
-with a single request of 15,699 against an old budget of 9,830, and no fold was
-needed. One defect found in the same session — a Telegram rate limit discarding
-a finished answer — is fixed, tested and deployed. The edit frequency that
-provoked the limit remains queued separately.
+**Current approved step:** none. 4.1.5, real context capacity, is deployed and
+accepted live. The next step in order is 4.2, tool execution seam; it is not yet
+approved to begin. An article pushed at the bot produced seven turns up to
+28,113 tokens, with a single request of 15,699 against an old budget of 9,830,
+and no fold was needed. One defect found in the same session — a Telegram rate
+limit discarding a finished answer — is fixed, tested and deployed. The edit
+frequency that provoked the limit remains queued separately.
 `reports/2026-08-30_v2_context_capacity.md`,
 `reports/2026-08-30_v2_context_memory_plan.md`.
 
@@ -200,16 +201,15 @@ Verified platform facts and cold-start evidence remain in
      that conversation for ever. The acknowledgement can no longer fail a turn,
      and the queue gives up on an update after three attempts.
 
-   - **4.1.5 Real context capacity.** The effective limit at the start of this
-     step was 9,830 tokens — 16,384 spent at `AGENT_CONTEXT_FRACTION` 0.6 — and
-     one loop can now spend many steps inside a single turn. Raise the engine
-     ceiling to **65,536** on
-     the boot already owed the NCCL fix; keep one threshold rather than two;
-     measure context pressure before the model call instead of from the previous
-     turn's reported usage; and make the per-request budget per-user in
-     mechanism without exposing a choice yet. Not the context engine: no
-     pruning, no summarizer schema, no new tables. It comes before 4.2 because
-     4.2 deliberately increases how many tool results a turn accumulates.
+   - **4.1.5 Real context capacity — done, accepted live.** The effective limit
+     at the start of this step was 9,830 tokens — 16,384 spent at
+     `AGENT_CONTEXT_FRACTION` 0.6 — and one loop can now spend many steps inside
+     a single turn. The step raised the engine ceiling to **65,536**, kept one
+     threshold rather than two, moved context-pressure measurement ahead of
+     every model call, and made the request budget per-user in mechanism without
+     exposing a choice yet. It deliberately did not implement the context
+     engine: no pruning, summarizer schema or new tables. It came before 4.2
+     because 4.2 increases how many tool results a turn accumulates.
      `DECISIONS.md` 2026-08-30, both entries of that date on context;
      `reports/2026-08-30_v2_context_memory_plan.md` for the KV arithmetic.
 
