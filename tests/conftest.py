@@ -14,9 +14,30 @@ without forbidding the import.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import selectors
+import sys
 
 import pytest
+
+
+def pytest_asyncio_loop_factories(config, item):
+    """Give the live suites a loop psycopg can actually use on Windows.
+
+    Python's default on Windows is the Proactor loop, and psycopg refuses to
+    run async on it. Every offline test passes either way, so this was invisible
+    until a suite that talks to PostgreSQL was run here: it errored at fixture
+    setup with `Psycopg cannot use the 'ProactorEventLoop'`, which reads like a
+    broken test rather than a loop policy. The application's own entry points
+    already choose the selector loop — `tools/setup_control_plane.py` passes
+    `loop_factory=asyncio.SelectorEventLoop` — so this is the suite agreeing
+    with them rather than a new decision.
+    """
+
+    if sys.platform != "win32":
+        return None
+    return {"selector": lambda: asyncio.SelectorEventLoop(selectors.SelectSelector())}
 
 # This has to happen while conftest is imported, before pytest collects a test
 # module that imports Chainlit. A fixture is too late: live-test parametrization

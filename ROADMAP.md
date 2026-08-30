@@ -4,9 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.1, the one loop. Implemented and proven offline;
-**not deployed and not accepted live**, which needs the migration, a deploy and
-a live check, each on its own permission.
+**Current approved step:** 4.1, the one loop. The loop is implemented and
+**accepted live**: one ordinary message now costs one model call instead of two,
+and a stop recorded mid-flight ended a real turn at its next step. Its deployed
+control half is **not** live — the migration and the deploy have not been run.
 `reports/2026-08-30_v2_one_loop.md`.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
@@ -174,8 +175,8 @@ Verified platform facts and cold-start evidence remain in
      the first finished. Coalescing an image and the question after it is held
      back — it redefines the turn every recorded number counts.
      `reports/2026-08-30_v2_conversation_serialization.md`.
-   - **4.1 One loop — implemented offline, awaiting migration, deploy and a
-     live check.** The router and the plan/implement/test/evaluate lifecycle are
+   - **4.1 One loop — the loop accepted live; the deployed control lane is
+     not.** The router and the plan/implement/test/evaluate lifecycle are
      deleted; about 1,730 lines went, and a plain message costs one model call
      instead of two. The surviving loop has a `TurnBudget` (steps, tool calls,
      seconds, configurable), `loop_step` events the run inspector renders, and a
@@ -184,9 +185,17 @@ Verified platform facts and cold-start evidence remain in
      `/stop` ends a turn that is actually running rather than one paused at an
      approval. `reports/2026-08-30_v2_one_loop.md`, `DECISIONS.md` 2026-08-30.
 
+     Accepted live on 2026-08-30 through `scripts/loop_live.py`, four turns in
+     one warm window: an ordinary question cost 1 model call against the 2 it
+     used to; a write-read-report request ran as three steps of one loop with no
+     mode; a stop recorded mid-flight refused the tool the model had just asked
+     for and ended the turn without another request; 2.50 model calls a turn
+     against the measured 3.00. The two PostgreSQL contract suites ran against
+     the deployed database, 19 passed.
+
      Owed before it is done: the deployed migration (`control` column,
-     `turn_stops`), a deploy, a live check showing model calls a turn below the
-     measured 3.00 with no scenario needing a mode, and the two `docs/PRODUCT.md`
+     `turn_stops`), a deploy, a live check through the real bot — the only thing
+     that exercises the control lane end to end — and the two `docs/PRODUCT.md`
      lines that still describe the deployed lifecycle. The `browser_verifier`
      and `web_verifier` modules were deleted with it; they were already
      unreachable from every product path, and 4.3 decides what validation the
