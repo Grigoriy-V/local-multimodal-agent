@@ -237,6 +237,11 @@ If a Telegram webhook is registered, Telegram refuses normal `getUpdates` pollin
 
 **Owner:** `deploy/modal/control_app.py`.
 
+On Windows, deploy with `PYTHONIOENCODING=utf-8`. Modal prints a tick character
+when it finishes, a cp1252 console cannot encode it, and the deploy ends with
+`'charmap' codec can't encode character '✓'` after every image has already
+been built — which reads like a failed deployment and is not one.
+
 App name:
 
 ```text

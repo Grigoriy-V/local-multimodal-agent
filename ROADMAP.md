@@ -4,11 +4,11 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.1, the one loop. The loop is implemented and
-**accepted live**: one ordinary message now costs one model call instead of two,
-and a stop recorded mid-flight ended a real turn at its next step. Its deployed
-control half is **not** live — the migration and the deploy have not been run.
-`reports/2026-08-30_v2_one_loop.md`.
+**Current approved step:** 4.1, the one loop. The loop is **accepted live** —
+one ordinary message now costs one model call instead of two, and a stop
+recorded mid-flight ended a real turn at its next step. Migrated and deployed on
+2026-08-30; the one check left is `/stop` sent through the real bot while a long
+turn is running. `reports/2026-08-30_v2_one_loop.md`.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -193,10 +193,12 @@ Verified platform facts and cold-start evidence remain in
      against the measured 3.00. The two PostgreSQL contract suites ran against
      the deployed database, 19 passed.
 
-     Owed before it is done: the deployed migration (`control` column,
-     `turn_stops`), a deploy, a live check through the real bot — the only thing
-     that exercises the control lane end to end — and the two `docs/PRODUCT.md`
-     lines that still describe the deployed lifecycle. The `browser_verifier`
+     Migrated and deployed on 2026-08-30: `telegram_updates.control` on all 89
+     existing rows, `turn_stops` created, nothing in flight across the deploy,
+     `assistant-control` re-deployed. Owed: a check through the real bot —
+     `/stop` sent while a long turn runs, which is the only thing that
+     exercises the control lane end to end — and the two `docs/PRODUCT.md` lines
+     that still describe the deployed lifecycle. The `browser_verifier`
      and `web_verifier` modules were deleted with it; they were already
      unreachable from every product path, and 4.3 decides what validation the
      one loop does.
