@@ -17,6 +17,7 @@ import pytest
 
 from app.agent.runtime import Agent
 from app.agent.stop import MemoryStopRequests
+from app.agent.stopping import STOP_ON_ANSWER, Candidate, Steering
 from app.config import AgentSettings, TelegramSettings
 from app.memory import SqliteStore
 from app.models import Completion, ContentPart, Message, ToolCall
@@ -144,6 +145,7 @@ def build(
     tmp_path: Path,
     backend: ScriptedBackend,
     stops: MemoryStopRequests | None = None,
+    stopping=STOP_ON_ANSWER,
 ) -> TelegramAdapter:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -162,6 +164,7 @@ def build(
             checkpoints=agent_settings.checkpoints,
             user_id=user_id,
             stops=stops,
+            stopping=stopping,
         )
 
     client = TelegramClient(settings, transport=telegram.transport())
@@ -1667,6 +1670,47 @@ async def test_text_that_ends_in_a_tool_call_is_discarded_before_the_answer(
         for name, payload in telegram.calls
         if name == "editMessageText"
     ] == [103]
+
+
+async def test_a_steered_candidate_is_discarded_before_the_real_answer(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """The same correction as narrated tool use, for a candidate that was steered.
+
+    Streaming makes a draft visible before the turn has decided it is the
+    answer. A turn that carried on instead of stopping must not leave that draft
+    standing as a first Telegram answer beside the second.
+    """
+
+    class SteersOnce:
+        def __init__(self) -> None:
+            self.asked = 0
+
+        async def stopping(self, candidate: Candidate) -> Steering | None:
+            self.asked += 1
+            return Steering("check it first", source="test") if self.asked == 1 else None
+
+    final = "The actual final answer is complete and long enough to stream once."
+    backend = ScriptedBackend(says(LONG_ANSWER), says(final), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend, stopping=SteersOnce())
+
+    await adapter.handle_update(text_update("do it properly"))
+
+    deleted = [
+        payload["message_id"]
+        for name, payload in telegram.calls
+        if name == "deleteMessage"
+    ]
+    # The draft's preview is removed rather than finalized, and the answer is
+    # the only message the person is left with.
+    assert deleted[:1] == [101]
+    assert texts(telegram, "editMessageText")[-1] == final
+    assert [
+        payload["message_id"]
+        for name, payload in telegram.calls
+        if name == "editMessageText"
+    ] == [102]
+    assert LONG_ANSWER not in texts(telegram, "editMessageText")
 
 
 async def test_a_failed_final_edit_delivers_the_answer_and_clears_the_preview(

@@ -152,9 +152,16 @@ The measured live task spent more on validation than on implementation — five
 model calls and 9.79 s against three and 8.04 s — which is what proportional
 means here in numbers.
 
-*Acceptance:* the PDF scenario (F) and the tool-failure scenario (G): a failed
-tool reaches the model, the model adapts, and no turn reports success without
-evidence. A simple text write must not acquire a validation pass.
+**Approved refinement, 2026-08-30:** the seam is minimal: stop by default and
+continue only through explicit structured steering. It adds no validator,
+finish tool, text heuristic or new obligation state. HTML is only an acceptance
+scenario in which the model may decide that `inspect_page` is useful; it is not
+a workflow. The PDF scenario is removed from this sub-step until the sandbox
+can create one through generic execution.
+
+*Acceptance:* the HTML scenario and the tool-failure scenario (G): a failed
+tool reaches the model, the model adapts, and no scenario reports success
+without evidence. A simple text write must not acquire a validation pass.
 
 ### 4.4 `todo` as state, not a mode
 

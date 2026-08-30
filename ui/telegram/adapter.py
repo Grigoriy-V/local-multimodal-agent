@@ -29,7 +29,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from app.agent.runtime import Agent, AssistantDelta, create_agent
+from app.agent.runtime import Agent, AnswerWithdrawn, AssistantDelta, create_agent
 from app.agent.stop import MemoryStopRequests, PostgresStopRequests, StopRequests
 from app.attachments import AttachmentBytes, AttachmentError, admit_uploads
 from app.capabilities import Delivery
@@ -733,6 +733,12 @@ class TelegramAdapter:
                         await activity.clear()
                         trace.visible("preview_started")
                     continue
+                if isinstance(event, AnswerWithdrawn):
+                    # The turn kept working instead of ending here, so what the
+                    # person watched being written is not an answer. Same
+                    # correction as a narrated tool call, for the same reason.
+                    await preview.discard()
+                    continue
                 await self._deliver(chat_id, event.message, activity, preview, trace)
         finally:
             # Including when the turn failed: the last thing a person should be
@@ -886,6 +892,9 @@ class TelegramAdapter:
                         if await preview.add(event.text):
                             await activity.clear()
                             trace.visible("preview_started")
+                        continue
+                    if isinstance(event, AnswerWithdrawn):
+                        await preview.discard()
                         continue
                     await self._deliver(
                         incoming.chat_id, event.message, activity, preview, trace

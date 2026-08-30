@@ -4,10 +4,15 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. 4.2, tool execution seam, is deployed and
-accepted live, including the correction for narrated tool calls becoming a
-second Telegram answer. The next step in order is 4.3 and is not approved. An
-article pushed at the bot produced seven turns up to
+**Current approved step:** 4.3, turn stopping and proportional validation. Its
+minimal extension seam is implemented, verified offline and deployed to
+`assistant-control`, but live product acceptance failed. The first natural HTML
+scenarios exposed unnecessary permission round-trips before safe inspection;
+the stronger system-prompt correction then regressed the same castle request
+from `write_file` into inline code with zero tool calls. The one-answer delivery
+boundary remained correct. 4.2, tool execution seam, remains
+deployed and accepted live, including the correction for narrated tool calls
+becoming a second Telegram answer. An article pushed at the bot produced seven turns up to
 28,113 tokens, with a single request of 15,699 against an old budget of 9,830,
 and no fold was needed. One defect found in the same session — a Telegram rate
 limit discarding a finished answer — is fixed, tested and deployed. The edit
@@ -257,10 +262,21 @@ Verified platform facts and cold-start evidence remain in
      2026-08-30. Live write/edit/read runs each had one update, one run and one
      final Telegram delivery after the narrated-tool correction.
      `reports/2026-08-30_v2_tool_execution_seam.md`.
-   - **4.3 Turn stopping and proportional validation.** A stopping seam instead
-     of a mandatory repair lifecycle. The preserved product acceptance scenario
-     lands here: from a natural request, create a simple PDF, validate the real
-     document and deliver it — as a harness test, never a PDF workflow.
+   - **4.3 Turn stopping and proportional validation — deployed, live
+     acceptance failed.** A minimal extension seam instead of a mandatory
+     repair lifecycle: stop by default, and continue only through explicit
+     structured steering. A rejected streamed candidate is withdrawn from the
+     interface and is neither persisted nor delivered as a first answer. The
+     seam adds no validator, finish tool, heuristics or obligation state;
+     validation remains proportional and chosen by the model. Offline scenarios
+     cover a simple write with no validation pass, model-chosen `inspect_page`
+     for HTML, tool-failure recovery, the normal stop, explicit steering and
+     Telegram preview withdrawal. Live HTML runs preserved one final answer and
+     proved that write, inspect and explicit presentation work, but the model
+     asked permission before safe inspection. A stronger system prompt then
+     regressed the same natural castle request to inline code and zero tool
+     calls. PDF creation is not acceptance until the sandbox exists.
+     `reports/2026-08-30_v2_turn_stopping.md`.
    - **4.4 `todo` as agent state, not a mode**, surviving folding and restart.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
    - **4.6a Context engine.** Context preparation before every model step rather
@@ -292,7 +308,10 @@ Verified platform facts and cold-start evidence remain in
    and package installation in a restricted workspace holding no control-plane
    secret. Isolation, not a confirmation prompt, is the boundary for arbitrary
    generated code. What executes it in the local profile is undecided. Every run
-   is a product-runtime worker and a separate human gate.
+   is a product-runtime worker and a separate human gate. The natural-request
+   PDF scenario is accepted only after this capability exists: create the PDF,
+   inspect the real document and explicitly deliver it, without a PDF-specific
+   workflow.
 
 6. **Optimization after the agent is observable.** Adaptive scaledown through
    `autoscale.py`. Prefix caching is confirmed active and needs no work before

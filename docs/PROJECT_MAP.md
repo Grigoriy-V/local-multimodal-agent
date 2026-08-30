@@ -90,10 +90,16 @@ The graph:
 
 ### One loop, bounded and stoppable
 
-There is one route. An ordinary request enters the graph above and leaves it
-when the model answers without asking for a tool. Nothing chooses between two
-lifecycles, and no second lifecycle exists: the router and the bounded
-plan/implement/test/evaluate task path were removed in roadmap sub-step 4.1.
+There is one route. An ordinary request enters the graph above and normally
+leaves it when the model answers without asking for a tool. Before that ordinary
+exit, `app/agent/stopping.py` provides one typed extension seam: the default
+accepts the answer immediately, while explicit structured `Steering` carries a
+candidate and an instruction into one more model step. The candidate stays out
+of conversation persistence and finished-message delivery; an interface that
+already showed its streamed text receives `AnswerWithdrawn` and removes the
+preview. Nothing chooses between two lifecycles, and no second lifecycle exists:
+the router and the bounded plan/implement/test/evaluate task path were removed
+in roadmap sub-step 4.1.
 
 Three things bound one turn, and they are the reason the single loop is allowed
 to be autonomous.
@@ -121,6 +127,12 @@ load context ─> model ─> tools ─> model ─> … ─> persist
 - A stop carries the sequence number its update arrived with, and applies to
   every turn that began before it. That is what stops an unconsumed stop from
   cancelling the next message.
+- `TurnStopping` is asked only for a result that would otherwise end an ordinary
+  turn and only while another step still fits the turn budget. It is not asked
+  for tool-call completions, the final budget answer, a user stop or a context
+  refusal. Its default performs no validation and spends no extra model call;
+  policy belongs to an injected structured extension, not to HTML/PDF/tool-name
+  heuristics in the graph.
 
 Time is accumulated by the nodes rather than measured from the turn's start, so
 a turn that waited an hour for an approval is not over budget the moment it is

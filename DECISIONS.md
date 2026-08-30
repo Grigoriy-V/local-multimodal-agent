@@ -685,3 +685,43 @@ is paid for in seconds per turn even when it fits.
 Supersedes / Superseded by
 
 None.
+
+## 2026-08-30 — Turn stopping is a minimal steering seam
+
+Decision
+
+Turn stopping runs only when a model result would otherwise end the turn. Its
+default is to stop. It continues the same loop only when an extension supplies
+explicit structured steering. Sub-step 4.3 adds no validator model, finish tool,
+text heuristic or new obligation state. The model decides whether the requested
+outcome needs validation and which available observation capability to use.
+
+HTML is only an acceptance scenario: the model may choose `inspect_page` when
+visual evidence is material. PDF creation is removed from 4.3 acceptance until
+the sandbox provides generic execution capable of creating it; no PDF-specific
+workflow or tool is added to satisfy the test.
+
+Why
+
+A mandatory validator would recreate the fixed repair lifecycle and its cost,
+while heuristics would move a semantic product decision out of the agent. A
+small steering seam preserves one loop and leaves later structured state, such
+as `todo`, a place to object to stopping without requiring that state now. The
+current tools can read, render and deliver a PDF but cannot create its binary
+contents, so retaining that acceptance before generic execution exists would
+either be impossible or reward a benchmark-specific workaround.
+
+Consequences
+
+A normal final candidate settles immediately. Structured steering causes
+another step in the same turn and must not become a second final answer in the
+interface. A simple successful text write does not gain a validation pass.
+Artifact validation is demonstrated through the model's trajectory and real
+evidence, not through a universal validator. The natural-request PDF scenario
+returns as sandbox acceptance and remains a generic harness test.
+
+Supersedes / Superseded by
+
+Refines the 4.3 acceptance proposed in
+`reports/2026-08-30_v2_step4_harness_preparation.md`; no earlier durable
+decision is superseded.

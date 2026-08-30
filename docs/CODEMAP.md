@@ -34,9 +34,10 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change the agent loop | `app/agent/graph.py` | `build_agent`, `AgentState`, `interrupt`, `tests/test_agent_graph.py` |
 | Change what one turn may spend | `app/agent/graph.py` | `TurnBudget`, `exceeded`, `BUDGET_EXHAUSTED`, `tests/test_turn_bounds.py` |
 | Change how a running turn is stopped | `app/agent/stop.py` | `StopRequests`, `MemoryStopRequests`, `PostgresStopRequests`, `asked_to_stop` |
+| Change whether a model result ends the turn | `app/agent/stopping.py` | `TurnStopping`, `Candidate`, `Steering`, `Steered`, `STOP_ON_ANSWER`, `settled`, `carried`, `tests/test_turn_stopping.py` |
 | Change which updates skip the conversation queue | `ui/telegram/wire.py` | `travels_out_of_band`, `needs_model`, `InboxJob.control` |
 | Change agent wiring/context/tools | `app/agent/runtime.py` | `Agent`, `create_agent`, `toolbox`, `_graph` |
-| Change how an answer streams as it is written | `app/agent/graph.py`, `ui/telegram/adapter.py` | `complete`, `ASSISTANT_DELTA`, `AssistantDelta`, `MessageProduced`, `AnswerPreview`, `StreamedCompletion` |
+| Change how an answer streams as it is written | `app/agent/graph.py`, `ui/telegram/adapter.py` | `complete`, `ASSISTANT_DELTA`, `AssistantDelta`, `MessageProduced`, `AnswerWithdrawn`, `AnswerPreview`, `StreamedCompletion` |
 | Change model-agnostic message types | `app/models/base.py` | `Message`, `ContentPart`, `ToolCall`, `ModelBackend` |
 | Change OpenAI/vLLM request translation | `app/models/openai_compatible.py` | `OpenAICompatibleBackend`, `build_messages`, `parse_completion` |
 | Change system prompt/context replay | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT`, `Context`, `ContextPolicy` |
@@ -97,7 +98,8 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 
 ```text
 app/                 application domain and runtime
-  agent/             the agent loop, its wiring, its budget and its stop
+  agent/             the agent loop, its wiring, its budget, its stop and its
+                     turn-stopping seam
   context/           prompt context and compaction
   memory/            conversation/fact store contract + implementations
   telemetry/         turn records, traces and the recorder handed to the app

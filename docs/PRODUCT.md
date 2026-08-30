@@ -152,7 +152,7 @@ The current accepted deployed baseline includes:
 - per-user persistent workspace;
 - text, image and audio input where supported;
 - document upload, structured reading and PDF page viewing in the Telegram path;
-- filesystem read/write/edit with scoped paths and approvals for writes;
+- autonomous filesystem read/write/edit inside scoped per-user workspace paths;
 - local HTML/browser inspection;
 - public web search, bounded text fetch and isolated visual browser view;
 - explicit agent-controlled file/media delivery;

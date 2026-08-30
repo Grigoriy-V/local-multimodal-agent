@@ -80,6 +80,16 @@ def test_a_prelude_without_summary_or_facts_is_just_the_system_prompt() -> None:
     assert message.content[0].text == DEFAULT_SYSTEM_PROMPT
 
 
+def test_the_system_prompt_requires_evidence_before_visual_claims() -> None:
+    assert (
+        "Safe observation tools do not require the person's permission"
+        in DEFAULT_SYSTEM_PROMPT
+    )
+    assert "for local HTML use inspect_page" in DEFAULT_SYSTEM_PROMPT
+    assert "Never ask whether to inspect" in DEFAULT_SYSTEM_PROMPT
+    assert "do not claim how it looks or works" in DEFAULT_SYSTEM_PROMPT
+
+
 def test_the_summary_and_the_facts_become_readable_layers() -> None:
     prelude = build_prelude("earlier they discussed cats", ["The human has two cats"])
 

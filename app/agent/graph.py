@@ -12,7 +12,7 @@ conversation is stored; all three are arguments.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
@@ -22,6 +22,13 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import StreamWriter, interrupt
 
 from app.agent.stop import NO_STOPS, StopRequests
+from app.agent.stopping import (
+    STOP_ON_ANSWER,
+    Candidate,
+    Steered,
+    TurnStopping,
+    steering_message,
+)
 from app.context import Context, ContextPolicy, fold_older_messages, load_turn_context
 from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.memory import ConversationStore
@@ -122,6 +129,11 @@ class AgentState:
     reset by the caller when a turn begins, because with a checkpointer this
     state outlives the turn and an inherited counter would exhaust the next
     turn's budget before it ran.
+
+    `steered` is the one candidate answer the turn did not accept, carried to
+    the next model step and no further. It is deliberately not in `messages`:
+    what is in `messages` is what the store keeps and what an interface is told
+    about, and a candidate that was steered into another step is neither.
     """
 
     thread_id: str = "default"
@@ -133,6 +145,7 @@ class AgentState:
     tool_calls: int = 0
     spent_seconds: float = 0.0
     stopping: str = ""
+    steered: Steered | None = None
 
 
 def assistant_message(completion: Completion) -> Message:
@@ -248,6 +261,7 @@ def build_agent(
     telemetry: Telemetry | None = None,
     budget: TurnBudget | None = None,
     stops: StopRequests = NO_STOPS,
+    stopping: TurnStopping = STOP_ON_ANSWER,
 ) -> CompiledStateGraph:
     """Compile the graph. This is the loop, and there is only one of it.
 
@@ -264,6 +278,10 @@ def build_agent(
     `stops` is asked at each step boundary and never at the start: a turn that
     has not run anything yet has nothing to stop, and in the deployed profile
     the question costs a round trip to the control plane.
+
+    `stopping` is asked only at the first of those four endings, and only when
+    the turn could still afford another step. Its default stops, so wiring
+    nothing changes nothing: an ordinary answer still costs one model call.
     """
 
     policy = policy or ContextPolicy()
@@ -336,15 +354,27 @@ def build_agent(
         state: AgentState, config: RunnableConfig, writer: StreamWriter
     ) -> dict[str, Any]:
         started = time.monotonic()
-        patch = await _ask(state, config, writer)
+        patch = await _ask(state, config, writer, started)
         # One step is one model call and whatever it decided to do next, which
         # is the unit a budget and a reader of the trace both care about.
         patch["steps"] = state.steps + 1
-        patch["spent_seconds"] = state.spent_seconds + (time.monotonic() - started)
+        # A path that reached a stopping decision has already priced this call,
+        # because the decision is made *from* the accounted spend. The paths
+        # that did not — a request that could not be made at all — are priced
+        # here.
+        patch.setdefault(
+            "spent_seconds", state.spent_seconds + (time.monotonic() - started)
+        )
+        # A candidate is carried for one step only. Every path through `_ask`
+        # that did not steer clears it here, so nothing can inherit a draft.
+        patch.setdefault("steered", None)
         return patch
 
     async def _ask(
-        state: AgentState, config: RunnableConfig, writer: StreamWriter
+        state: AgentState,
+        config: RunnableConfig,
+        writer: StreamWriter,
+        started: float,
     ) -> dict[str, Any]:
         trace = trace_of(config)
         trace.event(
@@ -379,11 +409,10 @@ def build_agent(
                 return Message(role="assistant", content=message.content)
             return message
 
-        prepared = await fitted(state, trace)
+        turn = carried(state)
+        prepared = await fitted(state, turn, trace)
         try:
-            completion = await complete(
-                prepared.prompt(state.messages), writer, trace, offered
-            )
+            completion = await complete(prepared.prompt(turn), writer, trace, offered)
         except ContextOverflowError:
             try:
                 folded = await fold_older_messages(
@@ -396,27 +425,102 @@ def build_agent(
 
             recovered = assemble_context(state)
             try:
-                completion = await complete(
-                    recovered.prompt(state.messages), writer, trace, offered
-                )
+                completion = await complete(recovered.prompt(turn), writer, trace, offered)
             except ContextOverflowError:
                 return {
                     "context": recovered,
                     "messages": [context_refusal()],
                     "usage": Usage(),
                 }
-            return {
-                "context": recovered,
-                "messages": [produced(completion)],
-                "usage": completion.usage,
-            }
-        return {
-            "context": prepared,
-            "messages": [produced(completion)],
-            "usage": completion.usage,
-        }
+            return await settled(
+                state, recovered, turn, produced(completion), completion, trace, started
+            )
+        return await settled(
+            state, prepared, turn, produced(completion), completion, trace, started
+        )
 
-    async def fitted(state: AgentState, trace: TurnTrace) -> Context:
+    def carried(state: AgentState) -> list[Message]:
+        """The turn as the model sees it, including a candidate it did not keep.
+
+        A steered draft and the instruction that replaced it are appended here
+        and nowhere else. The model needs both — without the draft it is being
+        corrected about something it cannot see, and without the instruction it
+        would simply write the draft again — and neither belongs to the
+        conversation, so neither is ever in `messages`.
+        """
+
+        if state.steered is None:
+            return list(state.messages)
+        return [
+            *state.messages,
+            state.steered.candidate,
+            steering_message(state.steered.steering),
+        ]
+
+    async def settled(
+        state: AgentState,
+        context: Context,
+        turn: list[Message],
+        message: Message,
+        completion: Completion,
+        trace: TurnTrace,
+        started: float,
+    ) -> dict[str, Any]:
+        """The model's result, once it is known whether it ends the turn.
+
+        Only a result that would end the turn is offered to the extension: a
+        tool call is the turn continuing on the model's own initiative, and a
+        turn already finalizing after its budget or a stop is not asking anyone
+        whether it may spend more. **What finalizing means is a state of the
+        turn, not the shape of the toolbox.** Reading it off whether tools were
+        offered would silently disable the seam for an agent that has no tools
+        at all — the one arrangement in which a caller most plainly wired an
+        extension on purpose.
+
+        This is also where the step just taken is priced. The elapsed time of
+        this very model call is added before the budget is asked whether
+        another step fits, so a request that took the turn past its seconds
+        cannot be steered into one more, and the spend an extension is shown is
+        the spend that has actually happened.
+        """
+
+        # The whole node, including a recovery attempt, is what this call cost.
+        spent = state.spent_seconds + (time.monotonic() - started)
+        keep = {"context": context, "usage": completion.usage, "spent_seconds": spent}
+        # `state.steps` has not been incremented yet, so the question asked of
+        # the budget is whether the turn could afford the step *after* this one.
+        priced = replace(state, steps=state.steps + 1, spent_seconds=spent)
+        if (
+            message.tool_calls
+            or state.stopping == BUDGET_EXHAUSTED
+            or exceeded(priced, 0)
+        ):
+            return {**keep, "messages": [message]}
+        try:
+            steering = await stopping.stopping(
+                Candidate(
+                    message=message,
+                    messages=(*turn, message),
+                    steps=priced.steps,
+                    tool_calls=priced.tool_calls,
+                    spent_seconds=priced.spent_seconds,
+                )
+            )
+        except Exception as error:  # noqa: BLE001 - an extension may not fail a turn
+            # The type, never the message: an exception raised while an
+            # extension was reading a candidate can carry that candidate inside
+            # it, and a trace may not hold conversation content.
+            trace.event("turn_stopping_failed", error=type(error).__name__)
+            steering = None
+        if steering is None:
+            return {**keep, "messages": [message]}
+        # Who objected and where. Nothing the person or the model wrote.
+        trace.event("turn_steered", source=steering.source, step=priced.steps)
+        return {**keep, "steered": Steered(candidate=message, steering=steering)}
+
+    async def fitted(
+        state: AgentState, turn: list[Message], trace: TurnTrace
+    ) -> Context:
         """Fold before asking, if what is about to be sent is already too big.
 
         The fold used to happen in `persist`, from the size the *previous*
@@ -438,7 +542,7 @@ def build_agent(
 
         if policy.max_input_tokens is None:
             return state.context
-        estimated = backend.estimate_tokens(state.context.prompt(state.messages))
+        estimated = backend.estimate_tokens(state.context.prompt(turn))
         if estimated <= policy.max_input_tokens:
             return state.context
         folded = await fold_older_messages(
@@ -453,7 +557,7 @@ def build_agent(
             "context_folded",
             estimated=estimated,
             budget=policy.max_input_tokens,
-            now=backend.estimate_tokens(context.prompt(state.messages)),
+            now=backend.estimate_tokens(context.prompt(turn)),
         )
         return context
 
@@ -563,6 +667,10 @@ def build_agent(
             )
 
     def after_model(state: AgentState) -> str:
+        if state.steered is not None:
+            # Nothing was produced for the conversation, so there is nothing to
+            # persist yet; the turn takes another step with the steering in it.
+            return "model"
         if state.stopping == BUDGET_EXHAUSTED:
             # The answer written without tools is the end of the turn, whatever
             # the model asked for while writing it.
@@ -580,7 +688,13 @@ def build_agent(
     graph.add_node("persist", persist)
     graph.add_edge(START, "load")
     graph.add_edge("load", "model")
-    graph.add_conditional_edges("model", after_model, {"tools": "tools", "persist": "persist"})
+    graph.add_conditional_edges(
+        "model",
+        after_model,
+        # The self-edge is the steering seam: a candidate that was not accepted
+        # takes another step of the same turn rather than ending it.
+        {"tools": "tools", "persist": "persist", "model": "model"},
+    )
     graph.add_conditional_edges("tools", after_tools, {"model": "model", "persist": "persist"})
     graph.add_edge("persist", END)
     return graph.compile(checkpointer=checkpointer)

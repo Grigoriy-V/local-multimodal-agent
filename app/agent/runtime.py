@@ -25,6 +25,7 @@ from app.agent.graph import (
     latest_text,
 )
 from app.agent.stop import NO_STOPS, StopRequests
+from app.agent.stopping import STOP_ON_ANSWER, TurnStopping
 from app.checkpoints import CheckpointHandle
 from app.capabilities import (
     CHAT_DELIVERY,
@@ -57,6 +58,8 @@ CHECKPOINT_TYPES = [
     ("app.models.base", "ToolCall"),
     ("app.models.base", "Usage"),
     ("app.context.window", "Context"),
+    ("app.agent.stopping", "Steered"),
+    ("app.agent.stopping", "Steering"),
 ]
 
 
@@ -74,7 +77,22 @@ class MessageProduced:
     message: Message
 
 
-AgentEvent = AssistantDelta | MessageProduced
+@dataclass(frozen=True)
+class AnswerWithdrawn:
+    """An answer the turn did not accept, after it was already being written.
+
+    Streaming makes a candidate visible before the graph has decided it is the
+    answer, exactly as a narrated tool call does. An interface that showed the
+    text has to be told to take it back; one that shows nothing until a message
+    is finished can ignore this. The message is never stored and never
+    delivered — it is here so an interface can undo what it already did, not so
+    it can present it.
+    """
+
+    message: Message
+
+
+AgentEvent = AssistantDelta | MessageProduced | AnswerWithdrawn
 
 
 @dataclass(frozen=True)
@@ -126,6 +144,7 @@ class Agent:
         telemetry: Telemetry | None = None,
         turn_budget: TurnBudget | None = None,
         stops: StopRequests = NO_STOPS,
+        stopping: TurnStopping = STOP_ON_ANSWER,
     ) -> None:
         self.backend = backend
         self.stream_answers = stream_answers
@@ -138,6 +157,10 @@ class Agent:
         # much work a turn may do.
         self.turn_budget = turn_budget or TurnBudget()
         self.stops = stops
+        # Asked when a model result would otherwise end a turn. The default
+        # stops, so an agent nobody wired an extension into behaves exactly as
+        # it did before the seam existed.
+        self.stopping = stopping
         # One recorder for every thread this agent serves. What varies per turn
         # is the run identity, which travels with the invocation.
         self.telemetry = telemetry or Telemetry(None)
@@ -281,6 +304,7 @@ class Agent:
                 self.telemetry,
                 self.turn_budget,
                 self.stops,
+                self.stopping,
             )
         return self._graphs[thread_id]
 
@@ -319,6 +343,12 @@ class Agent:
                 usage = patch.get("usage")
                 if usage is not None:
                     self._usage = usage
+                steered = patch.get("steered")
+                if steered is not None:
+                    # The graph kept this out of the conversation; the only
+                    # thing left to undo is whatever the stream already showed.
+                    yield AnswerWithdrawn(steered.candidate)
+                    continue
                 for produced in patch.get("messages") or []:
                     yield MessageProduced(produced)
 
@@ -348,6 +378,7 @@ class Agent:
             "tool_calls": 0,
             "spent_seconds": 0.0,
             "stopping": "",
+            "steered": None,
         }
         async for event in self._run(thread_id, command, trace):
             yield event
@@ -480,6 +511,7 @@ def create_agent(
     delivery: Delivery = CHAT_DELIVERY,
     telemetry: Telemetry | None = None,
     stops: StopRequests = NO_STOPS,
+    stopping: TurnStopping = STOP_ON_ANSWER,
 ) -> Agent:
     """Build the default agent from configuration.
 
@@ -523,4 +555,5 @@ def create_agent(
             max_seconds=agent_settings.turn_max_seconds,
         ),
         stops=stops,
+        stopping=stopping,
     )
