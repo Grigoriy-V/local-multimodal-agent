@@ -62,9 +62,12 @@ async def test_valid_update_is_persisted_before_spawn() -> None:
         payload: dict[str, Any],
         run_id: str = "",
         conversation_key: str = "",
+        control: bool = False,
     ) -> EnqueueResult:
         order.append("persist")
-        return await original_enqueue(update_id, payload, run_id, conversation_key)
+        return await original_enqueue(
+            update_id, payload, run_id, conversation_key, control
+        )
 
     inbox.enqueue = enqueue  # type: ignore[method-assign]
 
@@ -299,6 +302,75 @@ async def test_the_front_door_names_the_conversation_it_queues() -> None:
     assert inbox.keys[7] == canonical_user_id(42)
 
 
+# --- out of band -------------------------------------------------------------
+#
+# Serializing a conversation is right for the messages in it and wrong for the
+# updates about it. `/stop` behind the turn it exists to stop is not a slow
+# stop; it is no stop at all.
+
+
+def command(text: str, update_id: int = 8, user_id: int = 42) -> dict[str, Any]:
+    payload = update(update_id, user_id)
+    payload["message"]["text"] = text
+    return payload
+
+
+async def accepted(inbox: FakeInbox, payload: dict[str, Any]) -> None:
+    async def spawn(_update_id: int) -> None:
+        return None
+
+    await TelegramWebhook(settings(), inbox, spawn).accept(SECRET, body(payload))
+
+
+async def test_the_front_door_marks_a_control_update_and_nothing_else() -> None:
+    inbox = FakeInbox()
+
+    await accepted(inbox, update(7))
+    await accepted(inbox, command("/stop", 8))
+    await accepted(inbox, command("/chats", 9))
+
+    assert inbox.control == {8, 9}
+
+
+async def test_a_stop_is_answered_while_the_turn_it_stops_is_running() -> None:
+    """The whole point. Queued behind the turn, it arrives after the end."""
+
+    inbox = FakeInbox()
+    await queued(inbox, 5)
+    await accepted(inbox, command("/stop", 8))
+    running = await inbox.claim(5)
+    assert running is not None, "the turn is in flight"
+    handler = Handler()
+
+    assert await TelegramUpdateWorker(inbox, handler).run(8) is True
+    assert update_ids(handler) == [8]
+
+
+async def test_a_control_worker_does_not_take_the_conversation_over() -> None:
+    """It answers beside the conversation; it does not join the queue for it."""
+
+    inbox = FakeInbox()
+    await accepted(inbox, command("/chats", 8))
+    await queued(inbox, 9)
+    handler = Handler()
+
+    assert await TelegramUpdateWorker(inbox, handler).run(8) is True
+    assert update_ids(handler) == [8]
+    assert inbox.state[9] == "pending"
+
+
+async def test_a_control_update_never_holds_a_conversation_up() -> None:
+    inbox = FakeInbox()
+    await accepted(inbox, command("/stop", 8))
+    await queued(inbox, 9)
+    control = await inbox.claim(8)
+    assert control is not None and control.control is True
+    handler = Handler()
+
+    assert await TelegramUpdateWorker(inbox, handler).run(9) is True
+    assert update_ids(handler) == [9]
+
+
 def test_accepting_an_update_does_not_load_the_agent_stack() -> None:
     """The webhook's import cost is a product decision, so it is a test.
 
@@ -484,10 +556,11 @@ async def test_waking_does_not_delay_the_durable_hand_off() -> None:
         payload: dict[str, Any],
         run_id: str = "",
         conversation_key: str = "",
+        control: bool = False,
     ) -> EnqueueResult:
         await started.wait()
         order.append("write")
-        return await original(update_id, payload, run_id, conversation_key)
+        return await original(update_id, payload, run_id, conversation_key, control)
 
     inbox.enqueue = enqueue  # type: ignore[method-assign]
 

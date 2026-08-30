@@ -26,6 +26,7 @@ from ui.telegram.wire import (
     is_cancellation,
     needs_model,
     read_update,
+    travels_out_of_band,
 )
 
 
@@ -129,6 +130,10 @@ class TelegramWebhook:
         and this is the only place that decides it. It is what a worker's lease
         is taken against, so a second message arriving while the first is being
         answered waits for it instead of racing it.
+
+        Whether it waits at all is decided here too. A control update is queued
+        durably like any other — losing a `/stop` is not an improvement on a
+        slow one — and marked so that no conversation's lease holds it.
         """
 
         queued = await self.inbox.enqueue(
@@ -136,6 +141,7 @@ class TelegramWebhook:
             update,
             run_id=uuid.uuid4().hex,
             conversation_key=conversation_key(incoming),
+            control=travels_out_of_band(incoming),
         )
         # One line, so the webhook's own logs join the rest of the turn. The
         # durable record is the worker's; this is correlation, and free.
@@ -213,6 +219,11 @@ class TelegramUpdateWorker:
         deadline = self.clock() + self.drain_seconds
         while True:
             await self._answer(job)
+            if job.control:
+                # A control worker exists to answer beside a conversation, not
+                # to take it over. Draining from here would put this container
+                # in the lane it was created to skip.
+                return True
             if not job.conversation_key:
                 return True
             if self.clock() >= deadline:

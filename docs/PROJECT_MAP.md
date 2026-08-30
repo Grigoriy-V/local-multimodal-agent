@@ -19,13 +19,13 @@ reconsidered; this map describes the current system.
                                      │ ModelBackend
                                      │
 Telegram ─┐                           ▼
-          ├─> interface adapter ─> GeneralHarness / Agent
+          ├─> interface adapter ─────> Agent
 Chainlit ─┘                           │
                                      ├─ Context engine
                                      ├─ ConversationStore
                                      ├─ LangGraph checkpoints
                                      ├─ CapabilityRegistry / Toolbox
-                                     └─ bounded TaskRuntime
+                                     └─ TurnBudget / StopRequests
                                               │
               ┌───────────────────────────────┼──────────────────────────────┐
               ▼                               ▼                              ▼
@@ -88,43 +88,43 @@ The graph:
 
 `app/agent/runtime.py` owns `Agent`, which wires together backend, store, context policy, workspace, capability grant and checkpointer. One `Agent` belongs to one user; a graph is compiled per conversation thread.
 
-### General harness and bounded tasks
+### One loop, bounded and stoppable
 
-`app/agent/harness.py` owns `GeneralHarness`.
+There is one route. An ordinary request enters the graph above and leaves it
+when the model answers without asking for a tool. Nothing chooses between two
+lifecycles, and no second lifecycle exists: the router and the bounded
+plan/implement/test/evaluate task path were removed in roadmap sub-step 4.1.
 
-Current behavior has two internal branches:
+Three things bound one turn, and they are the reason the single loop is allowed
+to be autonomous.
 
 ```text
 user request
    ↓
-structured router model call
-   ├─ answer ─> ordinary Agent graph
-   └─ act    ─> bounded TaskRuntime
+load context ─> model ─> tools ─> model ─> … ─> persist
+                  ▲        │
+                  └────────┘
+        each pass is one step, and before each batch of tools:
+          has the person asked to stop?   -> stop, and say so
+          is the budget spent?            -> no more tools; answer with what you have
 ```
 
-The user does not choose this branch. It is internal implementation.
+- `app/agent/graph.py` owns `TurnBudget` (steps, tool calls, wall seconds) and
+  enforces both checks in the `tools` node — before any tool runs and before
+  anyone is asked to approve one. A crossed limit is not an error: no further
+  tool runs, and the model is asked once more, without tools, for the answer
+  the person is owed. So a ceiling of N steps costs at most N + 1 model calls.
+- `app/agent/stop.py` owns `StopRequests`: where "stop what is running" is
+  recorded. `MemoryStopRequests` for the local profile, which is one process;
+  `PostgresStopRequests` for the deployed one, where `/stop` is answered in one
+  container and the turn it ends runs in another.
+- A stop carries the sequence number its update arrived with, and applies to
+  every turn that began before it. That is what stops an unconsumed stop from
+  cancelling the next message.
 
-The task path is separate from the ordinary conversational graph:
-
-```text
-task
- → plan
- → authorize workspace grant
- → implement
- → validate real evidence
- → evaluate
- → repair if needed
- → finalize
-```
-
-Key owners:
-
-- `app/agent/task_graph.py` — durable lifecycle and budgets;
-- `app/agent/task_runtime.py` — start/resume/view/cancel API and task checkpointer;
-- `app/agent/task_worker.py` — model planner + implementation loop;
-- `app/agent/task_validator.py` — model-driven evidence collection and criterion evaluation.
-
-Current task-loop capability is narrower than the ordinary assistant: implementation is built around filesystem read/write, while validation currently admits filesystem read and local browser inspection. This is a current implementation constraint, not a general statement about what the conversational agent can do.
+Time is accumulated by the nodes rather than measured from the turn's start, so
+a turn that waited an hour for an approval is not over budget the moment it is
+answered.
 
 ## Context and memory
 
@@ -175,8 +175,8 @@ Checkpoints store resumable in-flight graph state. They are deliberately separat
 
 ```text
 conversation / summary / facts -> ConversationStore
-ordinary in-flight turn        -> conversation checkpointer
-task lifecycle                 -> task checkpointer
+in-flight turn                 -> conversation checkpointer
+"stop what is running"         -> StopRequests (memory, or turn_stops)
 ```
 
 Locally checkpoints use SQLite. Deployed checkpoints use PostgreSQL so a later CPU worker can resume work started by another container.
@@ -283,19 +283,21 @@ It owns transport translation, not agent policy:
 - maps Telegram account identity to canonical application user id;
 - finds/creates the current application thread;
 - downloads uploads and passes them through app admission;
-- dispatches `/new`, `/can`, `/check`, `/stop` and help commands;
-- passes ordinary messages to `GeneralHarness`;
-- renders task approvals/progress/results;
+- dispatches `/new`, `/chats`, `/can`, `/check`, `/stop` and help commands;
+- passes ordinary messages to the `Agent`, with the update id as the turn's
+  sequence so a later `/stop` can be told from an earlier one;
+- renders the consent question, the transient tool status and the step it
+  belongs to;
 - transports only explicitly outbound tool media;
 - displays model-declared tool calls as concise status lines.
 
 `ui/telegram/api.py` owns direct Telegram Bot API calls.
 
-`ui/telegram/wire.py` owns minimal raw-update parsing and the `needs_model()` predicate. It intentionally imports only the standard library to keep webhook cold start independent of the agent stack.
+`ui/telegram/wire.py` owns minimal raw-update parsing, the `needs_model()` predicate and `travels_out_of_band()`, which is what marks an update as control. It intentionally imports only the standard library to keep webhook cold start independent of the agent stack.
 
 #### Local Telegram profile
 
-`ui/telegram/run.py` uses long polling. Different chats run concurrently; updates from the same chat are serialized with per-chat locks.
+`ui/telegram/run.py` uses long polling. Different chats run concurrently; updates from the same chat are serialized with per-chat locks — except control updates, which are handled beside the lock rather than behind it, because `/stop` waiting for the turn it stops is not a stop.
 
 #### Deployed Telegram profile
 
@@ -325,7 +327,7 @@ Not yet decided: whether an image and the question that follows it are one inten
 
 `ui/chainlit_app.py` is the local Chainlit adapter and `ui/chainlit_history.py` connects Chainlit history to the application's store.
 
-It uses the same `Agent` / `GeneralHarness` core and the same explicit outbound-media rule.
+It uses the same `Agent` core and the same explicit outbound-media rule. Chainlit's stop button records a `StopRequests` entry for the running turn rather than cancelling a coroutine; the session counts its own sequence, since it has no update ids to take one from.
 
 Current asymmetry: Chainlit upload admission still goes through `load_attachments()`, which accepts direct image/audio media rather than the Telegram `admit_uploads()` document-save path. Documents already present in the workspace can still be handled by application tools, but document upload parity should not be inferred from Telegram behavior.
 
@@ -394,7 +396,7 @@ The application and model deployment have no Python import dependency on each ot
 | Rolling conversation summary | `ConversationStore` | yes |
 | Long-term facts | `ConversationStore` | yes |
 | In-flight conversational graph | LangGraph checkpointer | resumable |
-| In-flight bounded task | task LangGraph checkpointer | resumable |
+| "Stop what is running" | `StopRequests`: memory, or `turn_stops` | yes |
 | Telegram accepted update / retry lease | PostgreSQL Telegram inbox | yes |
 | Turn identity (`run_id`), generated at ingress | Telegram inbox row / polling loop | yes |
 | Turn summary and trace | `TelemetryStore` (`turn_runs`, `trace_events`) | yes |
@@ -431,11 +433,11 @@ Model output, tool output, documents and web content are data. They do not acqui
 
 These are facts useful when reading the code; `ROADMAP.md` decides whether/when they change.
 
-- `GeneralHarness` currently spends a separate structured model call to choose `answer` versus `act`.
-- The bounded task implementation/validation toolbox is narrower than the ordinary assistant toolbox.
-- The deployed Telegram inbox leases by conversation. The code is written and tested offline; the column it needs is created by `tools/setup_control_plane.py`, so the deployed behaviour is the old one until that has run.
+- There is one route and one loop. The router's second full-context model call per message is gone, as is the bounded task lifecycle it selected.
+- A turn is bounded by `TurnBudget` and can be ended by `StopRequests`; both are enforced in the graph's `tools` node, so a turn that never calls a tool is never checked and costs neither.
+- The deployed Telegram inbox leases by conversation and marks control updates so they skip that lease. The `control` column is created by `tools/setup_control_plane.py`, as is `turn_stops`; until both have run against a database, the deployed behaviour is the old one.
 - Every turn that reaches the model carries one `run_id` from ingress to delivery, and its model calls, tool calls, tokens, first token, first visible response and outcome are recorded. `tools/show_run.py` reads one back, lists failed and unfinished turns, and derives GPU time and cost at read time.
-- The bounded task path reports the model calls it spends through a wrapped backend rather than per stage, so an act turn's totals are honest while its internal stage detail is still coarse.
+- `tools/show_run.py` renders the loop's steps from `loop_step` events, and names the limit or the stop that ended a turn early.
 - Chainlit document-upload admission is not yet the same as Telegram document admission.
 - `Capability.build` currently receives a local `Path`; remote execution/sandbox abstraction is not yet a first-class provider boundary.
 - `app/api/` exists as an empty stub; no separately hosted application API is currently used.
@@ -461,8 +463,8 @@ when it fits this product.
   seams, a common agent loop, structured session events, tool/runtime
   separation, workflows, skills and subagents built around the same core rather
   than as unrelated execution systems. It is especially useful when evolving
-  this project's agent runtime without turning `GeneralHarness` into a
-  collection of special-case modes.
+  this project's agent runtime without turning the one loop into a collection
+  of special-case modes.
 
 - **[OpenCode](https://github.com/anomalyco/opencode)** — reference for a mature
   headless agent core: sessions as first-class runtime objects, tool and plugin

@@ -162,9 +162,6 @@ class AgentSettings(BaseSettings):
     # In-flight turns only, in LangGraph's own schema. Kept apart from the
     # database so that discarding it costs no conversation.
     checkpoints: str = "data/checkpoints.sqlite3"
-    # The bounded task graph has a different state shape and lifecycle from a
-    # conversational turn, so its resumable grants live in their own file.
-    task_checkpoints: str = "data/task-checkpoints.sqlite3"
     # The only directory the filesystem tools may reach, created on first use.
     # It defaults to a sandbox rather than to the current directory: the default
     # should be the safe answer, and pointing the agent at real work is then a
@@ -173,6 +170,15 @@ class AgentSettings(BaseSettings):
     keep_recent: int = 8
     summarize_after: int = 16
     retrieved_facts: int = 5
+    # What one turn may spend before it has to stop and say so. These are the
+    # only ceiling on an autonomous turn: the loop ends when the model stops
+    # asking for tools, and nothing else limits how long it may keep asking.
+    # Settings rather than constants because the right answer differs between a
+    # personal machine, where the GPU is already paid for, and a deployment
+    # where every second is billed.
+    turn_max_steps: int = 12
+    turn_max_tool_calls: int = 24
+    turn_max_seconds: float = 300.0
     # The share of the model's own context a request may occupy. The limit
     # itself is read from the server, never copied here: two copies of one
     # number are one number and one lie waiting to happen. The headroom is what

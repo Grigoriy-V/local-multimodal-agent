@@ -7,7 +7,7 @@ twice.
 Nothing else is imported eagerly either, and that is load-bearing rather than
 tidy. The deployed webhook imports `ui.telegram.webhook`, which runs this file
 first; while this named the adapter at module level, that one line pulled the
-harness and LangGraph into a container whose whole job is to validate an update
+agent runtime and LangGraph into a container whose whole job is to validate an update
 and return 200. The names below are still importable from the package — they
 are resolved on first use instead of on import.
 """

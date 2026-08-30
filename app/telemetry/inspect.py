@@ -135,24 +135,26 @@ def tool_calls(events: Sequence[TraceEvent]) -> list[dict[str, object]]:
     return rows
 
 
-def stages(events: Sequence[TraceEvent]) -> list[tuple[str, int | None, object]]:
-    """Every bounded stage of the task path that reported a duration.
+def steps(events: Sequence[TraceEvent]) -> list[tuple[int, int, int, str]]:
+    """The loop's own shape: each step, and what the turn had spent reaching it.
 
-    A stage is recognised by carrying one, not by its event name: `task_finished`
-    is the task's own summary and `task_planning` is the runtime's outer bracket,
-    and reading either as a stage put rows in this section that no stage
-    produced. Live, that printed a stage called "finished".
+    One step is one model call and whatever it decided to do next, so this is
+    where a long autonomous turn becomes readable — not "it took ninety
+    seconds" but "it took nine steps, and the fourth was where the tools went".
     """
 
     found = []
     for event in events:
-        stage = event.data.get("stage")
-        if (
-            stage
-            and event.type.startswith("task_")
-            and event.type.endswith(("_finished", "_failed"))
-        ):
-            found.append((str(stage), event.duration_ms, event.data.get("iteration")))
+        if event.type != "loop_step":
+            continue
+        found.append(
+            (
+                int(event.data.get("step") or 0),
+                int(event.data.get("spent_ms") or 0),
+                int(event.data.get("tool_calls") or 0),
+                str(event.data.get("stopping") or ""),
+            )
+        )
     return found
 
 
@@ -251,14 +253,29 @@ def tool_section(events: Sequence[TraceEvent]) -> list[str]:
     return lines
 
 
-def stage_section(events: Sequence[TraceEvent]) -> list[str]:
-    found = stages(events)
+def step_section(events: Sequence[TraceEvent]) -> list[str]:
+    found = steps(events)
     if not found:
         return []
-    lines = ["", "Stages"]
-    for name, duration, iteration in found:
-        attempt = f" attempt {iteration}" if iteration is not None else ""
-        lines.append(f"  {name + attempt:<28}{seconds(duration)}")
+    lines = ["", "Steps"]
+    for index, spent_ms, tool_calls, stopping in found:
+        note = f"  {stopping}" if stopping else ""
+        lines.append(
+            f"  {index:<4}{seconds(spent_ms):>9} spent"
+            f"   {tool_calls} tool call(s) so far{note}"
+        )
+    ended = [
+        event
+        for event in events
+        if event.type in {"turn_budget_exhausted", "turn_stopped"}
+    ]
+    for event in ended:
+        why = (
+            f"reached its {event.data.get('limit')} limit"
+            if event.type == "turn_budget_exhausted"
+            else "was stopped by the person"
+        )
+        lines.append(f"  the turn {why}")
     return lines
 
 
@@ -310,7 +327,7 @@ def render_run(
         *timings(run, events),
         *model_section(events),
         *tool_section(events),
-        *stage_section(events),
+        *step_section(events),
         *timeline(run, events),
         *totals(run, events),
         *render_cost(

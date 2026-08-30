@@ -16,9 +16,8 @@ from typing import Any
 import httpx
 import pytest
 
-from app.agent.harness import GeneralHarness
 from app.agent.runtime import Agent
-from app.agent.task_runtime import TaskRuntime
+from app.agent.stop import MemoryStopRequests
 from app.config import AgentSettings, TelegramSettings
 from app.memory import SqliteStore
 from app.models import Completion, Usage
@@ -33,13 +32,6 @@ from ui.telegram.webhook import TelegramUpdateWorker, TelegramWebhook
 ALLOWED = 4242
 CHAT = 1000
 SECRET = {"x-telegram-bot-api-secret-token": "webhook-secret"}
-
-
-def route(task: str = "") -> Completion:
-    """The router answer the harness always asks for first."""
-
-    payload = {"route": "act" if task else "answer", "task": task}
-    return Completion(text=json.dumps(payload), finish_reason="stop")
 
 
 class FakeTelegram:
@@ -87,6 +79,7 @@ def build(
     backend: ScriptedBackend,
     telemetry: Telemetry,
     tools: Sequence[Tool] = (),
+    stops: MemoryStopRequests | None = None,
 ) -> TelegramAdapter:
     settings = TelegramSettings(
         token="test-token",
@@ -96,15 +89,15 @@ def build(
     )
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
+    stops = stops or MemoryStopRequests()
     agent_settings = AgentSettings(
         database=str(tmp_path / "memory.sqlite3"),
         checkpoints=str(tmp_path / "checkpoints.sqlite3"),
-        task_checkpoints=str(tmp_path / "tasks.sqlite3"),
         workspace=str(workspace),
         _env_file=None,
     )
 
-    def factory(user_id: str) -> GeneralHarness:
+    def factory(user_id: str) -> Agent:
         agent = Agent(
             backend,
             SqliteStore(agent_settings.database),
@@ -112,21 +105,20 @@ def build(
             checkpoints=agent_settings.checkpoints,
             user_id=user_id,
             telemetry=telemetry,
+            stops=stops,
         )
         if tools:
             agent.toolbox = lambda _thread_id: Toolbox(tools)  # type: ignore[assignment]
-        return GeneralHarness(
-            agent,
-            TaskRuntime(
-                backend=backend,
-                workspace=workspace,
-                checkpoints=agent_settings.task_checkpoints,
-            ),
-        )
+        return agent
 
     client = TelegramClient(settings, transport=telegram.transport())
     adapter = TelegramAdapter(
-        client, settings, agent_settings, harness_factory=factory, telemetry=telemetry
+        client,
+        settings,
+        agent_settings,
+        agent_factory=factory,
+        telemetry=telemetry,
+        stops=stops,
     )
     BUILT.append(adapter)
     return adapter
@@ -187,7 +179,6 @@ async def test_one_turn_is_one_row_with_its_real_counts(
 ) -> None:
     telegram, inbox = FakeTelegram(), FakeInbox()
     backend = ScriptedBackend(
-        route(),
         Completion(text="Two plus two is four.", finish_reason="stop"),
     )
     adapter = build(telegram, tmp_path, backend, telemetry)
@@ -200,10 +191,10 @@ async def test_one_turn_is_one_row_with_its_real_counts(
     assert run.source_update_id == "1"
     assert run.user_id == canonical_user_id(ALLOWED)
     assert run.thread_id
-    assert run.route == "answer"
-    # The router and the answer. A turn that counted only the visible half
-    # would report every message as costing one request less than it does.
-    assert run.model_calls == 2
+    assert run.route == "loop"
+    # One request. Before 4.1 this was two: a router ran before the answer the
+    # person was waiting for, on every single message.
+    assert run.model_calls == 1
     assert run.first_visible_ms is not None
     assert run.total_ms is not None and run.total_ms >= 250
     assert run.successful is True
@@ -213,7 +204,7 @@ async def test_the_identity_from_ingress_is_the_one_everything_records(
     tmp_path: Path, telemetry: Telemetry
 ) -> None:
     telegram, inbox = FakeTelegram(), FakeInbox()
-    backend = ScriptedBackend(route(), says("Hello."))
+    backend = ScriptedBackend(says("Hello."))
     adapter = build(telegram, tmp_path, backend, telemetry)
 
     await deliver(adapter, inbox, telemetry, text_update("Hi"))
@@ -229,7 +220,7 @@ async def test_a_redelivered_update_is_one_turn_seen_twice(
     tmp_path: Path, telemetry: Telemetry
 ) -> None:
     telegram, inbox = FakeTelegram(), FakeInbox()
-    backend = ScriptedBackend(route(), says("Hello."), default=says("Hello."))
+    backend = ScriptedBackend(says("Hello."), default=says("Hello."))
     adapter = build(telegram, tmp_path, backend, telemetry)
 
     async def spawn(_update_id: int) -> None:
@@ -252,13 +243,13 @@ async def test_a_redelivered_update_is_one_turn_seen_twice(
 # --- model and tool detail ---------------------------------------------------
 
 
-async def test_a_streamed_answer_records_one_first_token_and_the_router_none(
+async def test_a_streamed_answer_records_one_first_token(
     tmp_path: Path, telemetry: Telemetry
 ) -> None:
-    """TTFT is a boundary the streamed call has and the router does not."""
+    """TTFT is a boundary the streamed call has, and it is recorded once."""
 
     telegram, inbox = FakeTelegram(), FakeInbox()
-    backend = ScriptedBackend(route(), says("A streamed answer, in pieces."))
+    backend = ScriptedBackend(says("A streamed answer, in pieces."))
     adapter = build(telegram, tmp_path, backend, telemetry)
 
     await deliver(adapter, inbox, telemetry, text_update("Say something"))
@@ -277,21 +268,32 @@ async def test_token_counts_add_up_across_every_model_call(
     tmp_path: Path, telemetry: Telemetry
 ) -> None:
     telegram, inbox = FakeTelegram(), FakeInbox()
-    router = Completion(
-        text=json.dumps({"route": "answer", "task": ""}),
+    tool = Tool(
+        name="ping",
+        description="answer",
+        parameters={"type": "object", "properties": {}},
+        run=lambda: "pong",
+    )
+    asked = Completion(
+        text="",
+        tool_calls=calls("ping").tool_calls,
         usage=Usage(input_tokens=100, output_tokens=10),
-        finish_reason="stop",
+        finish_reason="tool_calls",
     )
     answer = Completion(
         text="Done.",
         usage=Usage(input_tokens=400, output_tokens=40),
         finish_reason="stop",
     )
-    adapter = build(telegram, tmp_path, ScriptedBackend(router, answer), telemetry)
+    adapter = build(
+        telegram, tmp_path, ScriptedBackend(asked, answer), telemetry, tools=[tool]
+    )
 
     await deliver(adapter, inbox, telemetry, text_update("Anything"))
 
     run = stored_run(telemetry, the_run_id(inbox))
+    # Both steps of one turn, which is what a turn now costs instead of a
+    # router plus an answer.
     assert (run.input_tokens, run.output_tokens) == (500, 50)
 
 
@@ -305,7 +307,7 @@ async def test_an_executed_tool_has_one_start_and_one_terminal_event(
         parameters={"type": "object", "properties": {}},
         run=lambda: "pong",
     )
-    backend = ScriptedBackend(route(), calls("ping"), says("It said pong."))
+    backend = ScriptedBackend(calls("ping"), says("It said pong."))
     adapter = build(telegram, tmp_path, backend, telemetry, tools=[tool])
 
     await deliver(adapter, inbox, telemetry, text_update("Ping it"))
@@ -332,7 +334,7 @@ async def test_a_tool_that_fails_is_not_recorded_as_a_success(
         parameters={"type": "object", "properties": {}},
         run=explode,
     )
-    backend = ScriptedBackend(route(), calls("ping"), says("It failed."))
+    backend = ScriptedBackend(calls("ping"), says("It failed."))
     adapter = build(telegram, tmp_path, backend, telemetry, tools=[tool])
 
     await deliver(adapter, inbox, telemetry, text_update("Ping it"))
@@ -357,7 +359,7 @@ async def test_a_turn_that_stops_to_ask_is_successful_not_failed(
         run=lambda: "gone",
         destructive=True,
     )
-    backend = ScriptedBackend(route(), calls("wipe"))
+    backend = ScriptedBackend(calls("wipe"))
     adapter = build(telegram, tmp_path, backend, telemetry, tools=[tool])
 
     await deliver(adapter, inbox, telemetry, text_update("Wipe it"))
@@ -370,53 +372,11 @@ async def test_a_turn_that_stops_to_ask_is_successful_not_failed(
     assert "approval_requested" in types
 
 
-async def test_a_turn_that_plans_a_task_reports_when_it_became_visible(
-    tmp_path: Path, telemetry: Telemetry
-) -> None:
-    """Found live: a turn that ended in an approval reported no visible response.
-
-    It had written "Planning…" into the chat within a second and then shown the
-    plan, so the person had waited for none of the twenty seconds the row
-    implied. First visibility belongs to every branch that says something, not
-    only to the streamed answer.
-    """
-
-    telegram, inbox = FakeTelegram(), FakeInbox()
-    plan = Completion(
-        text=json.dumps(
-            {
-                "summary": "Create the file",
-                "steps": ["write notes.txt"],
-                "acceptance_criteria": ["notes.txt exists"],
-                "validation_strategy": [
-                    {
-                        "criterion": "notes.txt exists",
-                        "evidence": "read notes.txt",
-                        "capabilities": ["filesystem.read"],
-                    }
-                ],
-            }
-        ),
-        finish_reason="stop",
-    )
-    backend = ScriptedBackend(route(task="create notes.txt"), plan)
-    adapter = build(telegram, tmp_path, backend, telemetry)
-
-    await deliver(adapter, inbox, telemetry, text_update("create notes.txt"))
-
-    run = stored_run(telemetry, the_run_id(inbox))
-    assert run.outcome == "approval_requested"
-    assert run.first_visible_ms is not None
-    types = [event.type for event in stored_events(telemetry, run.run_id)]
-    assert "telegram_planning_started" in types
-    assert "telegram_plan_sent" in types
-
-
 async def test_a_failed_turn_closes_its_own_row(
     tmp_path: Path, telemetry: Telemetry
 ) -> None:
     telegram, inbox = FakeTelegram(), FakeInbox()
-    backend = ScriptedBackend(route(), RuntimeError("the model fell over"))
+    backend = ScriptedBackend(RuntimeError("the model fell over"))
     adapter = build(telegram, tmp_path, backend, telemetry)
 
     await deliver(adapter, inbox, telemetry, text_update("Anything"))
@@ -478,7 +438,7 @@ async def test_telemetry_that_fails_does_not_fail_the_turn(
 
     telemetry = Telemetry(Broken(tmp_path / "telemetry.sqlite3"))
     telegram, inbox = FakeTelegram(), FakeInbox()
-    backend = ScriptedBackend(route(), says("The answer survives."))
+    backend = ScriptedBackend(says("The answer survives."))
     adapter = build(telegram, tmp_path, backend, telemetry)
 
     await deliver(adapter, inbox, telemetry, text_update("Anything"))
@@ -499,7 +459,7 @@ async def test_no_conversation_content_reaches_telemetry(
         parameters={"type": "object", "properties": {}},
         run=lambda: "the secret tool result",
     )
-    backend = ScriptedBackend(route(), calls("ping"), says("The private answer."))
+    backend = ScriptedBackend(calls("ping"), says("The private answer."))
     adapter = build(telegram, tmp_path, backend, telemetry, tools=[tool])
 
     await deliver(adapter, inbox, telemetry, text_update("My private question"))

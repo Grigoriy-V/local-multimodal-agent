@@ -27,10 +27,8 @@ async def delete_conversation(
     store: ConversationStore,
     thread_id: str,
     checkpoints: str | Path,
-    task_checkpoints: str | Path,
 ) -> bool:
-    """Delete canonical chat data and any resumable work owned by that chat."""
+    """Delete canonical chat data and any turn of it still in flight."""
 
     await _discard_checkpoint(checkpoints, thread_id)
-    await _discard_checkpoint(task_checkpoints, f"task:{thread_id}")
     return store.delete_thread(thread_id)

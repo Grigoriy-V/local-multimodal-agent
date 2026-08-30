@@ -17,7 +17,14 @@ from typing import Any
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
-from app.agent.graph import ASSISTANT_DELTA, RUN_ID, build_agent, latest_text
+from app.agent.graph import (
+    ASSISTANT_DELTA,
+    RUN_ID,
+    TurnBudget,
+    build_agent,
+    latest_text,
+)
+from app.agent.stop import NO_STOPS, StopRequests
 from app.checkpoints import CheckpointHandle
 from app.capabilities import (
     CHAT_DELIVERY,
@@ -50,14 +57,6 @@ CHECKPOINT_TYPES = [
     ("app.models.base", "ToolCall"),
     ("app.models.base", "Usage"),
     ("app.context.window", "Context"),
-    ("app.agent.task_graph", "TaskPlan"),
-    ("app.agent.task_graph", "ValidationStep"),
-    ("app.agent.task_graph", "TaskGrant"),
-    ("app.agent.task_graph", "ImplementationResult"),
-    ("app.agent.task_graph", "CheckResult"),
-    ("app.agent.task_graph", "TestReport"),
-    ("app.agent.task_graph", "Evaluation"),
-    ("app.agent.task_graph", "TaskOutcome"),
 ]
 
 
@@ -124,9 +123,20 @@ class Agent:
         delivery: Delivery = CHAT_DELIVERY,
         stream_answers: bool = True,
         telemetry: Telemetry | None = None,
+        turn_budget: TurnBudget | None = None,
+        stops: StopRequests = NO_STOPS,
     ) -> None:
         self.backend = backend
         self.stream_answers = stream_answers
+        # What a turn may spend, and where a request to end one is recorded.
+        # Both belong to the agent rather than to a graph, because a graph is
+        # compiled per thread and these are the same for every thread a person
+        # has: one person, one ceiling, one stop.
+        # Named apart from `budget()` below, which answers a different question:
+        # that one is how much context a request may occupy, this one is how
+        # much work a turn may do.
+        self.turn_budget = turn_budget or TurnBudget()
+        self.stops = stops
         # One recorder for every thread this agent serves. What varies per turn
         # is the run identity, which travels with the invocation.
         self.telemetry = telemetry or Telemetry(None)
@@ -255,6 +265,8 @@ class Agent:
                 await self._checkpointer(),
                 self.stream_answers,
                 self.telemetry,
+                self.turn_budget,
+                self.stops,
             )
         return self._graphs[thread_id]
 
@@ -297,11 +309,32 @@ class Agent:
                     yield MessageProduced(produced)
 
     async def events(
-        self, thread_id: str, message: Message, trace: TurnTrace = NO_TRACE
+        self,
+        thread_id: str,
+        message: Message,
+        trace: TurnTrace = NO_TRACE,
+        sequence: int = 0,
     ) -> AsyncIterator[AgentEvent]:
-        """Run one turn, reporting deltas and finished messages as they occur."""
+        """Run one turn, reporting deltas and finished messages as they occur.
 
-        command = {"thread_id": thread_id, "messages": [message]}
+        `sequence` is the number this request arrived with — Telegram's update
+        id, or an interface's own counter. A stop recorded after it ends this
+        turn; a stop recorded before it belongs to a turn that is already over.
+
+        The counters are reset here rather than defaulted in the state, because
+        with a checkpointer the previous turn's state is still there: a turn
+        that inherited it would start already out of budget.
+        """
+
+        command = {
+            "thread_id": thread_id,
+            "messages": [message],
+            "sequence": sequence,
+            "steps": 0,
+            "tool_calls": 0,
+            "spent_seconds": 0.0,
+            "stopping": "",
+        }
         async for event in self._run(thread_id, command, trace):
             yield event
 
@@ -313,7 +346,9 @@ class Agent:
         async for event in self._run(thread_id, Command(resume=answers), trace):
             yield event
 
-    async def steps(self, thread_id: str, message: Message) -> AsyncIterator[Message]:
+    async def steps(
+        self, thread_id: str, message: Message, sequence: int = 0
+    ) -> AsyncIterator[Message]:
         """Yield each message as its node finishes, so a UI can show the work.
 
         The user's own message is not yielded: the caller already has it. An
@@ -321,7 +356,7 @@ class Agent:
         learns that a turn is streamed at all.
         """
 
-        async for event in self.events(thread_id, message):
+        async for event in self.events(thread_id, message, NO_TRACE, sequence):
             if isinstance(event, MessageProduced):
                 yield event.message
 
@@ -365,14 +400,18 @@ class Agent:
             if isinstance(event, MessageProduced):
                 yield event.message
 
-    async def answer(self, thread_id: str, message: Message) -> list[Message]:
+    async def answer(
+        self, thread_id: str, message: Message, sequence: int = 0
+    ) -> list[Message]:
         """Run one turn and return everything the agent produced for it.
 
         A turn that stops to ask a question ends here; the caller answers with
         `pending` and `resume`.
         """
 
-        return [produced async for produced in self.steps(thread_id, message)]
+        return [
+            produced async for produced in self.steps(thread_id, message, sequence)
+        ]
 
     def history(self, thread_id: str) -> list[Message]:
         return self.store.messages(thread_id)
@@ -426,6 +465,7 @@ def create_agent(
     user_id: str = LOCAL_USER_ID,
     delivery: Delivery = CHAT_DELIVERY,
     telemetry: Telemetry | None = None,
+    stops: StopRequests = NO_STOPS,
 ) -> Agent:
     """Build the default agent from configuration.
 
@@ -462,4 +502,10 @@ def create_agent(
         delivery=delivery,
         stream_answers=agent_settings.stream_answers,
         telemetry=telemetry,
+        turn_budget=TurnBudget(
+            max_steps=agent_settings.turn_max_steps,
+            max_tool_calls=agent_settings.turn_max_tool_calls,
+            max_seconds=agent_settings.turn_max_seconds,
+        ),
+        stops=stops,
     )

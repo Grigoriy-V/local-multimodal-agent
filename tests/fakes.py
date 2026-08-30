@@ -114,9 +114,10 @@ class QueuedInbox:
 
     The worker's ordering behaviour is worth testing offline; the real queue's
     is not testable that way, and `tests/test_update_inbox_contract.py` asserts
-    the same rules against PostgreSQL itself. So this holds exactly the two that
-    the worker depends on — one conversation runs one update at a time, and the
-    oldest unfinished one goes first — and models a lease that never expires,
+    the same rules against PostgreSQL itself. So this holds exactly the three
+    that the worker depends on — one conversation runs one update at a time, the
+    oldest unfinished one goes first, and a control update is claimed on its own
+    whatever the conversation is doing — and models a lease that never expires,
     because nothing offline moves a clock forward.
     """
 
@@ -124,6 +125,7 @@ class QueuedInbox:
         self.payloads: dict[int, dict[str, Any]] = {}
         self.runs: dict[int, str] = {}
         self.keys: dict[int, str] = {}
+        self.control: set[int] = set()
         self.state: dict[int, str] = {}
         self.completed: list[int] = []
         self.retried: list[tuple[int, str]] = []
@@ -135,9 +137,12 @@ class QueuedInbox:
         payload: dict[str, Any],
         run_id: str = "",
         conversation_key: str = "",
+        control: bool = False,
     ) -> "EnqueueResult":
         if update_id not in self.payloads:
             self.payloads[update_id] = payload
+            if control:
+                self.control.add(update_id)
             # The stored identity wins, exactly as the real queue's insert does:
             # a redelivered update is one turn seen twice.
             self.runs[update_id] = run_id
@@ -151,9 +156,10 @@ class QueuedInbox:
         if update_id not in self.payloads:
             return None
         key = self.keys.get(update_id, "")
-        if key:
+        if key and update_id not in self.control:
             return await self.claim_next(key, lease_seconds)
-        # Queued before conversations were part of the queue: one row, alone.
+        # A control update, or one queued before conversations were part of the
+        # queue: one row, alone, whatever else the conversation is doing.
         return self._lease(update_id) if self.state[update_id] == "pending" else None
 
     async def claim_next(
@@ -164,7 +170,7 @@ class QueuedInbox:
         theirs = [
             update_id
             for update_id, key in self.keys.items()
-            if key == conversation_key
+            if key == conversation_key and update_id not in self.control
         ]
         if any(self.state[update_id] == "running" for update_id in theirs):
             return None
@@ -182,6 +188,7 @@ class QueuedInbox:
             run_id=self.runs.get(update_id, ""),
             queued_ms=self.queued_ms,
             conversation_key=self.keys.get(update_id, ""),
+            control=update_id in self.control,
         )
 
     async def complete(self, job: "InboxJob") -> None:

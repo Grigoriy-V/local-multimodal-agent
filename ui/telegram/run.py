@@ -6,10 +6,11 @@ the worker calls the same `TelegramAdapter.handle_update`. Keeping the loop in
 its own module is what makes that a substitution rather than a rewrite.
 
 Updates from different chats run concurrently, because one person's five-minute
-task must not silence the assistant for everyone else. Updates from the same
+turn must not silence the assistant for everyone else. Updates from the same
 chat are serialized, so an approval cannot overtake the question that produced
-it. One consequence is worth stating plainly: `/stop` sent while that same chat
-is mid-task is processed after the task finishes, not during it.
+it — except for the control updates, which are answered beside the lock rather
+than behind it. `/stop` waiting for the turn it exists to stop was this
+profile's behaviour for as long as the lock has existed.
 """
 
 from __future__ import annotations
@@ -23,7 +24,12 @@ from app.config import AgentSettings, TelegramSettings
 from app.telemetry import NO_TRACE, TurnRun, TurnTrace, open_telemetry
 from ui.telegram.adapter import TelegramAdapter
 from ui.telegram.api import TelegramClient, TelegramError
-from ui.telegram.wire import is_cancellation, needs_model, read_update
+from ui.telegram.wire import (
+    is_cancellation,
+    needs_model,
+    read_update,
+    travels_out_of_band,
+)
 
 # How long to wait after a transport failure before polling again, so a bot
 # pointed at an unreachable network does not spin.
@@ -70,16 +76,26 @@ class PollingBot:
         )
 
     async def _guarded(self, update: dict[str, Any]) -> None:
+        incoming = read_update(update)
+        if incoming is not None and travels_out_of_band(incoming):
+            # Past the lock, deliberately. These are answered from wiring or
+            # storage in milliseconds and change no history, and one of them is
+            # `/stop`, which is useless anywhere but here.
+            await self._handle(update)
+            return
         async with self._lock(self._chat_of(update)):
-            trace = self._trace(update)
-            try:
-                await self.adapter.handle_update(update, trace)
-            except TelegramError as error:
-                trace.finish("failed", error_type="TelegramError")
-                print(f"telegram delivery failed: {error}", flush=True)
-            finally:
-                trace.finish("failed", error_type="incomplete")
-                self.adapter.telemetry.release(trace.run.run_id)
+            await self._handle(update)
+
+    async def _handle(self, update: dict[str, Any]) -> None:
+        trace = self._trace(update)
+        try:
+            await self.adapter.handle_update(update, trace)
+        except TelegramError as error:
+            trace.finish("failed", error_type="TelegramError")
+            print(f"telegram delivery failed: {error}", flush=True)
+        finally:
+            trace.finish("failed", error_type="incomplete")
+            self.adapter.telemetry.release(trace.run.run_id)
 
     def dispatch(self, update: dict[str, Any]) -> None:
         task = asyncio.create_task(self._guarded(update))

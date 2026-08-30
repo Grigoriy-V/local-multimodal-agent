@@ -537,3 +537,41 @@ Supersedes / Superseded by
 Supersedes the consent half of 2026-08-01, "Tools declare consequence; the graph
 owns consent". The other half stands: a tool declares consequence, and the
 runtime — not the tool and not a UI adapter — owns what to do about it.
+
+## 2026-08-30 — A control signal never travels in the conversation queue
+
+Decision
+
+An update whose purpose is to act on what is already running, or to be answered
+instantly from storage, is delivered out of band: it skips the lease that
+serializes a conversation, and skips the local profile's per-chat lock. `/stop`
+is the case that matters — the rest of the model-free commands travel the same
+way because they are the same kind of thing. Delivery alone is not enough: the
+running turn has to look for the signal, so the loop checks at each step
+boundary and the two halves ship together.
+
+Why
+
+The human's instruction on 2026-08-30, after sub-step 4.0 was accepted: a
+cancellation or control signal must pass out of band relative to the ordinary
+turn queue. Serializing a conversation is what makes two messages arrive in
+order, and it is exactly wrong for a message about the conversation: `/stop`
+queued behind the turn it exists to stop reaches the worker after that turn has
+ended, finds nothing running, and says so. That was true of the local profile
+from the day the per-chat lock existed, and 4.0 gave the deployed profile the
+same flaw.
+
+Consequences
+
+`telegram_updates` gains a `control` column, and the claim never takes a control
+row for a conversation. `turn_stops` records the sequence a stop arrived with,
+because deployed the stop is answered in one container and the turn runs in
+another. A stop applies to every turn that began before it and to no turn that
+began after, so an unconsumed stop cannot cancel the next message. Evidence:
+`reports/2026-08-30_v2_one_loop.md`.
+
+Supersedes / Superseded by
+
+Narrows the guarantee recorded on 2026-08-30 in
+`reports/2026-08-30_v2_conversation_serialization.md`: a conversation's
+*messages* are serialized, not everything a person sends it.

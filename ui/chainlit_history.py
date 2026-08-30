@@ -103,11 +103,9 @@ class MemoryStoreDataLayer(BaseDataLayer):
         self,
         store: ConversationStore,
         checkpoints: str = "data/checkpoints.sqlite3",
-        task_checkpoints: str = "data/task-checkpoints.sqlite3",
     ) -> None:
         self.store = store
         self.checkpoints = checkpoints
-        self.task_checkpoints = task_checkpoints
 
     async def get_user(self, identifier: str) -> PersistedUser | None:
         if identifier != LOCAL_USER_IDENTIFIER:
@@ -156,12 +154,7 @@ class MemoryStoreDataLayer(BaseDataLayer):
         return LOCAL_USER_IDENTIFIER if owner == LOCAL_USER_ID else ""
 
     async def delete_thread(self, thread_id: str) -> None:
-        await delete_conversation(
-            self.store,
-            thread_id,
-            self.checkpoints,
-            self.task_checkpoints,
-        )
+        await delete_conversation(self.store, thread_id, self.checkpoints)
 
     async def list_threads(
         self, pagination: Pagination, filters: ThreadFilter

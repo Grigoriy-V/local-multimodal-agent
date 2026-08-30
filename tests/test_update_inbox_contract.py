@@ -188,6 +188,81 @@ async def test_a_claimed_update_is_not_spawned_a_second_time(
     assert again.should_spawn is False
 
 
+async def test_a_control_update_is_claimed_while_the_conversation_runs(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """The out-of-band lane, which is the reason the column exists.
+
+    A `/stop` that waits for the turn it exists to stop is not a slow stop.
+    """
+
+    await queue(inbox, 5)
+    await inbox.enqueue(8, payload(8), conversation_key=ALICE, control=True)
+    running = await inbox.claim(5)
+    assert running is not None
+
+    control = await inbox.claim(8)
+
+    assert control is not None
+    assert control.update_id == 8
+    assert control.control is True
+
+
+async def test_a_control_update_is_never_what_a_conversation_claims(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """It is answered beside the conversation, so the drain must not take it."""
+
+    await inbox.enqueue(5, payload(5), conversation_key=ALICE, control=True)
+    await queue(inbox, 7)
+
+    claimed = await inbox.claim(7)
+
+    assert claimed is not None and claimed.update_id == 7
+    assert await inbox.claim_next(ALICE) is None
+
+
+async def test_a_running_control_update_does_not_hold_a_conversation_up(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    await inbox.enqueue(5, payload(5), conversation_key=ALICE, control=True)
+    await queue(inbox, 7)
+    control = await inbox.claim(5)
+    assert control is not None
+
+    assert await inbox.claim(7) is not None
+
+
+async def test_an_update_queued_before_the_control_lane_existed_is_ordinary(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """The migration itself, against a table that already holds rows.
+
+    The column is taken away and the rows are written as the previous
+    deployment wrote them; `setup()` is then what a deploy runs. Every one of
+    them has to come back meaning exactly what it meant.
+    """
+
+    import psycopg
+    from psycopg.types.json import Jsonb
+
+    connection = await psycopg.AsyncConnection.connect(POSTGRES_DSN, autocommit=True)
+    async with connection:
+        await connection.execute(f"ALTER TABLE {inbox.table} DROP COLUMN control")
+        for update_id in (5, 7):
+            await connection.execute(
+                f"INSERT INTO {inbox.table} (update_id, run_id, conversation_key, payload)"
+                " VALUES (%s, %s, %s, %s)",
+                (update_id, f"run-{update_id}", ALICE, Jsonb(payload(update_id))),
+            )
+
+    await inbox.setup()
+    claimed = await inbox.claim(7)
+
+    assert claimed is not None and claimed.update_id == 5
+    assert claimed.control is False
+
+
 async def test_setting_the_queue_up_twice_changes_nothing(
     inbox: PostgresUpdateInbox,
 ) -> None:

@@ -176,47 +176,56 @@ def test_a_call_that_never_ran_is_shown_with_the_reason() -> None:
     assert "implement" in text
 
 
-def test_a_task_stage_reports_its_own_duration() -> None:
+def test_the_loop_s_steps_are_what_a_long_turn_is_read_by() -> None:
+    """Not "it took ninety seconds" but "nine steps, and where they went"."""
+
     trace = [
         event(1, "turn_started", "2026-08-29T10:00:00.000+00:00"),
-        event(2, "task_implement_started", "2026-08-29T10:00:00.100+00:00", stage="implement", iteration=2),
+        event(2, "loop_step", "2026-08-29T10:00:00.100+00:00", step=1, tool_calls=0, spent_ms=0),
         event(
             3,
-            "task_implement_finished",
-            "2026-08-29T10:00:22.400+00:00",
-            22300,
-            stage="implement",
-            iteration=2,
+            "loop_step",
+            "2026-08-29T10:00:06.400+00:00",
+            step=2,
+            tool_calls=1,
+            spent_ms=6300,
+        ),
+    ]
+
+    section = render_run(finished_run(), trace).split("Steps")[1].split("Timeline")[0]
+
+    assert "6.30s" in section
+    assert "1 tool call(s) so far" in section
+
+
+def test_a_turn_that_hit_its_ceiling_says_so_where_its_steps_are() -> None:
+    trace = [
+        event(1, "turn_started", "2026-08-29T10:00:00.000+00:00"),
+        event(2, "loop_step", "2026-08-29T10:00:00.100+00:00", step=1, tool_calls=0, spent_ms=0),
+        event(
+            3,
+            "turn_budget_exhausted",
+            "2026-08-29T10:00:09.000+00:00",
+            limit="tool_calls",
+            step=1,
         ),
     ]
 
     text = render_run(finished_run(), trace)
 
-    assert "implement attempt 2" in text
-    assert "22.30s" in text
+    assert "reached its tool_calls limit" in text
 
 
-def test_only_events_that_name_a_stage_are_stages() -> None:
-    """`task_finished` is the task's summary, not a stage it went through.
-
-    Live, matching on the event name alone printed a stage called "finished"
-    and listed the runtime's outer bracket beside the stage inside it.
-    """
-
+def test_a_turn_the_person_stopped_says_that_instead() -> None:
     trace = [
         event(1, "turn_started", "2026-08-29T10:00:00.000+00:00"),
-        event(2, "task_planning_started", "2026-08-29T10:00:00.100+00:00"),
-        event(3, "task_plan_started", "2026-08-29T10:00:00.200+00:00", stage="plan"),
-        event(4, "task_plan_finished", "2026-08-29T10:00:06.300+00:00", 6100, stage="plan"),
-        event(5, "task_planning_finished", "2026-08-29T10:00:06.500+00:00", 6400),
-        event(6, "task_finished", "2026-08-29T10:00:07.000+00:00", status="completed"),
+        event(2, "loop_step", "2026-08-29T10:00:00.100+00:00", step=1, tool_calls=0, spent_ms=0),
+        event(3, "turn_stopped", "2026-08-29T10:00:09.000+00:00", step=1, tool_calls=2),
     ]
 
-    section = render_run(finished_run(), trace).split("Stages")[1].split("Timeline")[0]
+    text = render_run(finished_run(), trace)
 
-    assert "plan" in section
-    assert "planning" not in section
-    assert "finished" not in section
+    assert "was stopped by the person" in text
 
 
 def test_the_listing_orders_and_summarizes_runs() -> None:

@@ -4,8 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. Sub-step 4.0 is done and accepted live; 4.1,
-the one loop, is next and needs approval. Item 3 is closed and moved to Done.
+**Current approved step:** 4.1, the one loop. Implemented and proven offline;
+**not deployed and not accepted live**, which needs the migration, a deploy and
+a live check, each on its own permission.
+`reports/2026-08-30_v2_one_loop.md`.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -172,17 +174,23 @@ Verified platform facts and cold-start evidence remain in
      the first finished. Coalescing an image and the question after it is held
      back — it redefines the turn every recorded number counts.
      `reports/2026-08-30_v2_conversation_serialization.md`.
-   - **4.1 One loop.** Delete the answer/act router and the fixed
-     plan/implement/test/evaluate lifecycle. The surviving loop gains step
-     boundaries, its own spend budget — today only the task path has one — and
-     progress a person can watch. Removing the router's second full-context
-     request per message moves here from item 6.
+   - **4.1 One loop — implemented offline, awaiting migration, deploy and a
+     live check.** The router and the plan/implement/test/evaluate lifecycle are
+     deleted; about 1,730 lines went, and a plain message costs one model call
+     instead of two. The surviving loop has a `TurnBudget` (steps, tool calls,
+     seconds, configurable), `loop_step` events the run inspector renders, and a
+     step number in the chat's tool status. A control signal now travels out of
+     band in both profiles and the loop reads a stop at each step boundary, so
+     `/stop` ends a turn that is actually running rather than one paused at an
+     approval. `reports/2026-08-30_v2_one_loop.md`, `DECISIONS.md` 2026-08-30.
 
-     Also here: **a control signal travels out of band.** 4.0 put `/stop` in the
-     same lane as the turn it exists to stop, and the storage-answered commands
-     behind whatever is running. Both profiles need control delivered past the
-     conversation lease, and a running turn that looks for a cancellation —
-     today `/stop` only stops a task paused at an approval.
+     Owed before it is done: the deployed migration (`control` column,
+     `turn_stops`), a deploy, a live check showing model calls a turn below the
+     measured 3.00 with no scenario needing a mode, and the two `docs/PRODUCT.md`
+     lines that still describe the deployed lifecycle. The `browser_verifier`
+     and `web_verifier` modules were deleted with it; they were already
+     unreachable from every product path, and 4.3 decides what validation the
+     one loop does.
    - **4.2 Tool execution seam.** One `pre_execute → execute → post_execute`
      path for every tool, holding consent policy, validation and telemetry.
      Where autonomy inside the workspace is implemented; `DECISIONS.md`
@@ -211,8 +219,8 @@ Verified platform facts and cold-start evidence remain in
    `autoscale.py`. Prefix caching is confirmed active and needs no work before
    it is used deliberately; speculative decoding is the weakest lever, since
    decode is 21-24 ms per output token while prefill dominates long turns. The
-   router's second request left this item for 4.1, where the same edit deletes
-   it.
+   router's second request per message is already gone, deleted with the route
+   it existed to choose.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the

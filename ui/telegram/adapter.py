@@ -1,9 +1,9 @@
-"""Telegram in front of the harness.
+"""Telegram in front of the agent.
 
 This file adapts between Telegram's world and the project's own: an update
-becomes a `Message`, harness output becomes chat messages, and a consent
-question becomes two buttons. It holds no logic about routing, tools, memory or
-validation — that lives in `app/`, which is why a second interface can exist
+becomes a `Message`, what the loop produces becomes chat messages, and a
+consent question becomes two buttons. It holds no logic about tools, memory or
+stopping — that lives in `app/`, which is why a second interface can exist
 without moving any of it.
 
 Two properties here are load-bearing for the deployed profile.
@@ -29,9 +29,8 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from app.agent.harness import GeneralHarness
-from app.agent.runtime import AssistantDelta, create_agent
-from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
+from app.agent.runtime import Agent, AssistantDelta, create_agent
+from app.agent.stop import MemoryStopRequests, PostgresStopRequests, StopRequests
 from app.attachments import AttachmentBytes, AttachmentError, admit_uploads
 from app.capabilities import Delivery
 from app.config import AgentSettings, TelegramSettings
@@ -166,10 +165,20 @@ class ToolActivity:
         self.chat_id = chat_id
         self.message_id: int | None = None
         self._shown: str | None = None
+        self.step = 0
 
     async def show(self, labels: list[str]) -> None:
+        if not labels:
+            return
+        # One batch of tool calls is one step of the loop, so counting them here
+        # is counting the loop. Shown only from the second onwards: a turn that
+        # reads one file is not a process a person needs a progress report on,
+        # and a turn on its fifth step is.
+        self.step += 1
         text = "\n".join(labels)
-        if not text or text == self._shown:
+        if self.step > 1:
+            text = f"Step {self.step} · {text}"
+        if text == self._shown:
             return
         try:
             if self.message_id is None:
@@ -433,82 +442,17 @@ def spoken(message: Message) -> str:
     return " ".join(part.text or "" for part in message.content if part.kind == "text").strip()
 
 
-def task_plan_text(view: TaskView, workspace: Path) -> str | Formatted:
-    """The plan a person has to read before approving it.
-
-    Shaped rather than dumped: this message is the one moment where someone
-    decides whether the agent may touch their files, and a wall of text is how
-    that decision gets made without being made.
-    """
-
-    if view.plan is None:
-        return "Task planning did not produce a plan."
-    steps = "\n".join(f"{index}. {step}" for index, step in enumerate(view.plan.steps, 1))
-    criteria = "\n".join(f"• {item}" for item in view.plan.acceptance_criteria)
-    permissions = ", ".join((view.interrupt or {}).get("permissions", []))
-    return Formatted.build(
-        [
-            ("Plan", view.plan.summary),
-            ("Steps", steps),
-            ("Acceptance criteria", criteria),
-            ("Scope", f"{workspace}\n{permissions}"),
-            ("", "Run this plan?"),
-        ]
-    )
-
-
-def task_result_text(view: TaskView, fallback: str) -> str | Formatted:
-    """The finished task, in the order a person reads it.
-
-    The outcome first, because that is the question being answered; then what
-    was checked against real evidence, which is the part that separates a claim
-    from a result.
-    """
-
-    if view.outcome is None:
-        return fallback
-    summary = view.implementation.summary if view.implementation else view.outcome.summary
-    checks = "\n".join(
-        f"{'✓' if check.passed else '✗'} {check.name}\n   {check.detail}"
-        for check in (view.report.checks if view.report else ())
-    )
-    artifacts = "\n".join(f"• {artifact}" for artifact in view.outcome.artifacts)
-    counted = (
-        f"{view.outcome.status} · {view.outcome.iterations} iteration(s) · "
-        f"{view.outcome.tool_calls} tool call(s)"
-    )
-    return Formatted.build(
-        [
-            ("Result", summary),
-            ("Checks", checks),
-            ("Files", artifacts),
-            ("", counted),
-        ]
-    )
-
-
-def progress_text(progress: TaskProgress) -> str:
-    labels = {
-        "approval": "Approval",
-        "implementation": "Implementation",
-        "validation": "Validation",
-        "evaluation": "Evaluation",
-        "repair": "Repair",
-        "finalization": "Finalization",
-    }
-    return f"{labels[progress.stage]}: {progress.detail}"
-
-
 class TelegramAdapter:
-    """Turn Telegram updates into harness work, for allowed accounts only."""
+    """Turn Telegram updates into agent turns, for allowed accounts only."""
 
     def __init__(
         self,
         client: TelegramClient,
         settings: TelegramSettings | None = None,
         agent_settings: AgentSettings | None = None,
-        harness_factory: Callable[[str], GeneralHarness] | None = None,
+        agent_factory: Callable[[str], Agent] | None = None,
         telemetry: Telemetry | None = None,
+        stops: StopRequests | None = None,
     ) -> None:
         self.client = client
         self.settings = settings or TelegramSettings()
@@ -516,25 +460,28 @@ class TelegramAdapter:
         # One recorder for every person this process serves. Whether a turn is
         # measured at all is decided by whoever started the worker, not here.
         self.telemetry = telemetry or Telemetry(None)
+        # Where a request to stop is recorded, chosen the same way the store is:
+        # a personal machine runs one process, so memory is the whole truth,
+        # while the deployed profile answers `/stop` in one container and runs
+        # the turn in another, and only the database is visible to both.
+        self.stops = stops or (
+            PostgresStopRequests(
+                self.agent_settings.database_url, self.agent_settings.database_schema
+            )
+            if self.agent_settings.database_url
+            else MemoryStopRequests()
+        )
         # Supplied by tests so a turn can be driven without a model endpoint.
-        self.harness_factory = harness_factory or self._default_harness
-        self._harnesses: dict[str, GeneralHarness] = {}
+        self.agent_factory = agent_factory or self._default_agent
+        self._agents: dict[str, Agent] = {}
 
-    def _default_harness(self, user_id: str) -> GeneralHarness:
-        agent = create_agent(
+    def _default_agent(self, user_id: str) -> Agent:
+        return create_agent(
             agent_settings=self.agent_settings,
             user_id=user_id,
             delivery=DELIVERY,
             telemetry=self.telemetry,
-        )
-        return GeneralHarness(
-            agent,
-            TaskRuntime(
-                backend=agent.backend,
-                workspace=agent.workspace,
-                checkpoints=self.agent_settings.task_checkpoints,
-                checkpoint_database_url=self.agent_settings.database_url,
-            ),
+            stops=self.stops,
         )
 
     # --- identity and access -------------------------------------------------
@@ -549,12 +496,12 @@ class TelegramAdapter:
 
         return self.settings.open_access or telegram_user_id in self.settings.allowed
 
-    def harness(self, user_id: str) -> GeneralHarness:
-        """One harness per person, because an `Agent` works for one owner."""
+    def agent(self, user_id: str) -> Agent:
+        """One agent per person, because an `Agent` works for one owner."""
 
-        if user_id not in self._harnesses:
-            self._harnesses[user_id] = self.harness_factory(user_id)
-        return self._harnesses[user_id]
+        if user_id not in self._agents:
+            self._agents[user_id] = self.agent_factory(user_id)
+        return self._agents[user_id]
 
     # --- inbound -------------------------------------------------------------
 
@@ -607,7 +554,7 @@ class TelegramAdapter:
         # The application's own identifier, never Telegram's: per-user cost is
         # part of the product, and telemetry has no reason to hold an account id.
         trace.run.user_id = user_id
-        harness = self.harness(user_id)
+        agent = self.agent(user_id)
         try:
             # `needs_model` decides this as well as whether the webhook wakes the
             # GPU, and it should: the updates worth showing progress for are
@@ -615,9 +562,9 @@ class TelegramAdapter:
             # answers from storage and is done before an indicator would appear.
             async with typing(self.client, incoming.chat_id, needs_model(incoming)):
                 if incoming.callback_data is not None:
-                    await self._on_callback(harness, user_id, incoming, trace)
+                    await self._on_callback(agent, user_id, incoming, trace)
                 else:
-                    await self._on_message(harness, user_id, incoming, trace)
+                    await self._on_message(agent, user_id, incoming, trace)
         except TelegramError:
             raise
         except Exception as error:  # noqa: BLE001 - a failed turn must not kill the bot
@@ -628,12 +575,12 @@ class TelegramAdapter:
 
     async def _on_message(
         self,
-        harness: GeneralHarness,
+        agent: Agent,
         user_id: str,
         incoming: Incoming,
         trace: TurnTrace = NO_TRACE,
     ) -> None:
-        store = harness.agent.store
+        store = agent.store
         command = incoming.text.strip().lower()
         if command in {"/start", "/help"}:
             await self.client.send_message(incoming.chat_id, HELP)
@@ -659,7 +606,7 @@ class TelegramAdapter:
             # against — and it costs nothing, because no GPU is involved.
             await self.client.send_message(
                 incoming.chat_id,
-                harness.agent.capabilities(current_thread(store, user_id)),
+                agent.capabilities(current_thread(store, user_id)),
             )
             return
         if command == "/check":
@@ -667,36 +614,42 @@ class TelegramAdapter:
             # the model is not called, so nothing here wakes a GPU.
             await self.client.send_message(
                 incoming.chat_id,
-                await harness.agent.selftest(current_thread(store, user_id)),
+                await agent.selftest(current_thread(store, user_id)),
             )
             return
         if command == "/stop":
-            result = await harness.cancel_task(current_thread(store, user_id))
+            # Recorded, not executed. This update reached here out of band, so
+            # the turn it is about is still running — in another container, in
+            # the deployed profile — and what ends it is the loop reading this
+            # at its next step. Saying so is the honest message: claiming the
+            # work has stopped before it has is how a person sends `/stop`
+            # twice.
+            await agent.stops.request(user_id, incoming.update_id)
             await self.client.send_message(
                 incoming.chat_id,
-                spoken(result) if result is not None else "Nothing is running.",
+                "Stopping. Anything running will stop at its next step.",
             )
-            # A stopped task is neither a failure nor a delivered result. It has
-            # its own outcome so that reliability figures do not count a person
-            # changing their mind as the assistant breaking.
+            # Neither a failure nor a delivered answer. Its own outcome, so that
+            # reliability figures do not count a person changing their mind as
+            # the assistant breaking.
             trace.finish("cancelled", status="cancelled")
             return
 
         try:
-            message = await self.to_message(incoming, harness.agent.capability_grant.root)
+            message = await self.to_message(incoming, agent.capability_grant.root)
         except AttachmentError as error:
             await self.client.send_message(incoming.chat_id, f"Upload refused: {error}.")
             return
 
         thread_id = current_thread(store, user_id)
         trace.run.thread_id = thread_id
-        decision = await harness.decide(thread_id, message, trace)
-        if decision.route == "act":
-            await self._start_task(
-                harness, incoming.chat_id, thread_id, message, decision.task, trace
-            )
-            return
-        await self._answer(harness, incoming.chat_id, thread_id, message, trace)
+        # One route, so nothing decides between two. What used to be a full
+        # model request per message, before the answer the person was waiting
+        # for, is now this line.
+        trace.route("loop")
+        await self._answer(
+            agent, incoming.chat_id, thread_id, message, incoming.update_id, trace
+        )
 
     # --- choosing a conversation ---------------------------------------------
 
@@ -762,16 +715,17 @@ class TelegramAdapter:
 
     async def _answer(
         self,
-        harness: GeneralHarness,
+        agent: Agent,
         chat_id: int,
         thread_id: str,
         message: Message,
+        sequence: int = 0,
         trace: TurnTrace = NO_TRACE,
     ) -> None:
         activity = ToolActivity(self.client, chat_id)
         preview = AnswerPreview(self.client, chat_id)
         try:
-            async for event in harness.agent.events(thread_id, message, trace):
+            async for event in agent.events(thread_id, message, trace, sequence):
                 if isinstance(event, AssistantDelta):
                     if await preview.add(event.text):
                         # There is something to read now, so the status has
@@ -786,7 +740,7 @@ class TelegramAdapter:
             # not half an answer that is never going to be finished.
             await activity.clear()
             await preview.discard()
-        asked = await self._ask_pending_calls(harness, chat_id, thread_id)
+        asked = await self._ask_pending_calls(agent, chat_id, thread_id)
         # A turn that stopped to ask is not a turn that failed to answer. Both
         # are successful endings, and they are told apart here.
         trace.finish("approval_requested" if asked else "answer_delivered")
@@ -854,7 +808,7 @@ class TelegramAdapter:
                 await self.client.send_document(chat_id, name, part.data)
 
     async def _ask_pending_calls(
-        self, harness: GeneralHarness, chat_id: int, thread_id: str
+        self, agent: Agent, chat_id: int, thread_id: str
     ) -> bool:
         """Put the graph's own consent question in front of the user.
 
@@ -864,7 +818,7 @@ class TelegramAdapter:
         ends in an answer.
         """
 
-        pending = await harness.agent.pending(thread_id)
+        pending = await agent.pending(thread_id)
         for call in pending or []:
             await self.client.send_message(
                 chat_id,
@@ -873,124 +827,11 @@ class TelegramAdapter:
             )
         return bool(pending)
 
-    # --- the act branch ------------------------------------------------------
-
-    async def _start_task(
-        self,
-        harness: GeneralHarness,
-        chat_id: int,
-        thread_id: str,
-        original: Message,
-        task: str,
-        trace: TurnTrace = NO_TRACE,
-    ) -> None:
-        await self.client.send_message(chat_id, "Planning…")
-        # The person now has something to read, which is what first visibility
-        # means. Live, a turn that ended in an approval reported no visible
-        # response at all, though it had answered in under a second.
-        trace.visible("planning_started")
-        view = await harness.start_task(thread_id, original, task, trace)
-        if view.interrupt is not None:
-            await self.client.send_message(
-                chat_id,
-                task_plan_text(view, harness.tasks.workspace),
-                approval_keyboard("task:yes", "task:no"),
-            )
-            trace.visible("plan_sent")
-            trace.finish("approval_requested")
-            return
-        await self._finish_task(harness, chat_id, thread_id, view, trace)
-
-    async def _run_task(
-        self,
-        harness: GeneralHarness,
-        incoming: Incoming,
-        thread_id: str,
-        approved: bool,
-        trace: TurnTrace = NO_TRACE,
-    ) -> None:
-        chat_id = incoming.chat_id
-        if not approved:
-            view = await harness.resume_task(thread_id, False, trace)
-            await self._settle(incoming, approved=False)
-            await self._finish_task(harness, chat_id, thread_id, view, trace)
-            return
-        # Responsive without claiming anything yet. Until the resume has
-        # produced proof that it happened, the only honest thing the chat can
-        # say is that the press arrived: an "Approved" written here would
-        # outlive a transition that never took place.
-        sent = await self.client.send_message(chat_id, "Starting…")
-        trace.visible("task_started")
-        message_id = int(sent["message_id"]) if sent else None
-        lines: list[str] = []
-        settled = False
-
-        async def confirm() -> None:
-            # The first proof that the task really did resume, which is the
-            # moment both the button and the text may say it was approved.
-            nonlocal settled
-            if settled:
-                return
-            await self._settle(incoming, approved=True)
-            settled = True
-            lines.append("Approved; working…")
-
-        async for progress in harness.resume_task_with_progress(thread_id, True, trace):
-            await confirm()
-            lines.append(progress_text(progress))
-            if message_id is not None:
-                await self.client.edit_message(chat_id, message_id, "\n".join(lines))
-        view = await harness.task_view(thread_id)
-        if not settled:
-            # A resume that finished without reporting a stage still resumed.
-            await confirm()
-            if message_id is not None:
-                await self.client.edit_message(chat_id, message_id, "\n".join(lines))
-        await self._finish_task(harness, chat_id, thread_id, view, trace)
-
-    async def _finish_task(
-        self,
-        harness: GeneralHarness,
-        chat_id: int,
-        thread_id: str,
-        view: TaskView,
-        trace: TurnTrace = NO_TRACE,
-    ) -> None:
-        result = harness.finish_task(thread_id, view)
-        if view.outcome is not None:
-            # The turn's own counter is not touched here. Every tool the task
-            # executed was bracketed where it ran, so adding this total would
-            # count each of them twice; what it reports is budget spent, which
-            # also includes calls refused before they ran.
-            trace.event(
-                "task_finished",
-                status=view.outcome.status,
-                iterations=view.outcome.iterations,
-                budget_spent=view.outcome.tool_calls,
-                artifacts=len(view.outcome.artifacts) or None,
-            )
-        # The store keeps the harness's canonical text; the chat gets the same
-        # facts in a shape someone can read. Presentation is the adapter's job.
-        await self.client.send_message(
-            chat_id,
-            task_result_text(view, spoken(result) or "The task produced no result."),
-        )
-        await self._send_media(chat_id, result)
-        for artifact in (view.outcome.artifacts if view.outcome else ()):
-            try:
-                path = harness.tasks.artifact_path(view, artifact)
-                data = path.read_bytes()
-            except (OSError, PermissionError, ValueError):
-                continue
-            await self.client.send_document(chat_id, path.name, data)
-        trace.visible("final_sent")
-        trace.finish("task_result_delivered")
-
     # --- consent answers -----------------------------------------------------
 
     async def _on_callback(
         self,
-        harness: GeneralHarness,
+        agent: Agent,
         user_id: str,
         incoming: Incoming,
         trace: TurnTrace = NO_TRACE,
@@ -1011,25 +852,17 @@ class TelegramAdapter:
         if data.startswith(CHATS_CALLBACK_PREFIX):
             # Also before any thread is read or created: choosing a conversation
             # is answered from storage, and a tap on this list must not become a
-            # reason to start one, resume a task or wake a GPU.
-            await self._choose_conversation(
-                harness.agent.store, user_id, incoming, data
-            )
+            # reason to start one, resume a turn or wake a GPU.
+            await self._choose_conversation(agent.store, user_id, incoming, data)
             return
 
-        thread_id = current_thread(harness.agent.store, user_id)
+        thread_id = current_thread(agent.store, user_id)
         trace.run.thread_id = thread_id
         if incoming.callback_id:
             await self.client.answer_callback(incoming.callback_id)
 
-        if data.startswith("task:"):
-            trace.route("act")
-            await self._run_task(
-                harness, incoming, thread_id, data == "task:yes", trace
-            )
-            return
         if data.startswith("call:"):
-            trace.route("answer")
+            trace.route("loop")
             _, verdict, call_id = data.split(":", 2)
             approved = verdict == "yes"
             settled = False
@@ -1037,9 +870,7 @@ class TelegramAdapter:
             preview = AnswerPreview(self.client, incoming.chat_id)
             trace.event("approval_resumed" if approved else "approval_declined")
             try:
-                events = harness.agent.resume_events(
-                    thread_id, {call_id: approved}, trace
-                )
+                events = agent.resume_events(thread_id, {call_id: approved}, trace)
                 async for event in events:
                     if not settled:
                         await self._settle(incoming, approved=approved)
@@ -1057,7 +888,7 @@ class TelegramAdapter:
                 await preview.discard()
             if not settled:
                 await self._settle(incoming, approved=approved)
-            asked = await self._ask_pending_calls(harness, incoming.chat_id, thread_id)
+            asked = await self._ask_pending_calls(agent, incoming.chat_id, thread_id)
             trace.finish("approval_requested" if asked else "answer_delivered")
 
     async def _settle(self, incoming: Incoming, *, approved: bool) -> None:
@@ -1086,6 +917,6 @@ class TelegramAdapter:
                 continue
 
     async def aclose(self) -> None:
-        for harness in self._harnesses.values():
-            await harness.aclose()
-        self._harnesses.clear()
+        for agent in self._agents.values():
+            await agent.aclose()
+        self._agents.clear()

@@ -10,8 +10,8 @@ second consumer can be added without moving any of it.
 
 from __future__ import annotations
 
+import itertools
 import json
-import mimetypes
 import os
 import secrets
 from collections.abc import AsyncIterator
@@ -46,9 +46,8 @@ os.environ.setdefault("CHAINLIT_AUTH_SECRET", _auth_secret())
 
 import chainlit as cl
 
-from app.agent.harness import GeneralHarness
 from app.agent.runtime import Agent, create_agent
-from app.agent.task_runtime import TaskProgress, TaskRuntime, TaskView
+from app.agent.stop import MemoryStopRequests
 from app.capabilities import Delivery
 from app.config import AgentSettings
 from app.memory import SqliteStore
@@ -72,9 +71,7 @@ async def local_auth(_headers: Any) -> cl.User:
 def history_layer() -> MemoryStoreDataLayer:
     settings = AgentSettings()
     return MemoryStoreDataLayer(
-        SqliteStore(settings.database),
-        checkpoints=settings.checkpoints,
-        task_checkpoints=settings.task_checkpoints,
+        SqliteStore(settings.database), checkpoints=settings.checkpoints
     )
 
 
@@ -197,126 +194,26 @@ async def confirm(question: list[dict[str, Any]]) -> dict[str, bool]:
     return answers
 
 
-def create_runtime() -> Agent:
-    # `attachments` above renders both kinds inline, which is what the model is
-    # told it may produce.
-    return create_agent(agent_settings=AgentSettings(), delivery=DELIVERY)
+# Every event of this session in order, so a stop can be told from the turn it
+# is meant to stop. Telegram gets the same number from its own update ids; here
+# there is nothing to take it from, so the session counts its own.
+_sequence = itertools.count(1)
 
 
-def create_harness() -> GeneralHarness:
-    agent = create_runtime()
+def create_runtime_with_stops() -> tuple[Agent, MemoryStopRequests]:
+    """One agent and the place a stop for it is recorded.
+
+    `attachments` above renders both kinds of media inline, which is what the
+    model is told it may produce. Chainlit runs the turn and the stop in one process, so memory is the whole
+    truth here — unlike the deployed profile, where they are two containers.
+    """
+
+    stops = MemoryStopRequests()
     settings = AgentSettings()
-    return GeneralHarness(
-        agent,
-        TaskRuntime(
-            backend=agent.backend,
-            workspace=agent.workspace,
-            checkpoints=settings.task_checkpoints,
-            checkpoint_database_url=settings.database_url,
-        ),
-    )
-
-
-def task_plan_text(view: TaskView) -> str:
-    if view.plan is None:
-        return "Task planning did not produce a plan."
-    steps = "\n".join(f"{index}. {step}" for index, step in enumerate(view.plan.steps, 1))
-    criteria = "\n".join(f"- {item}" for item in view.plan.acceptance_criteria)
-    validation = "\n".join(
-        f"- **{step.criterion}** — {step.evidence} "
-        f"(`{', '.join(step.capabilities)}`)"
-        for step in view.plan.validation_strategy
-    )
     return (
-        f"**Plan**\n\n{view.plan.summary}\n\n{steps}\n\n"
-        f"**Acceptance criteria**\n\n{criteria}\n\n"
-        f"**Validation strategy**\n\n{validation}"
+        create_agent(agent_settings=settings, delivery=DELIVERY, stops=stops),
+        stops,
     )
-
-
-async def drive_task(
-    harness: GeneralHarness,
-    thread_id: str,
-    original: Message | None = None,
-    task: str | None = None,
-) -> None:
-    if task is not None and original is not None:
-        planning = cl.Step(name="Planning", type="run")
-        await planning.send()
-        view = await harness.start_task(thread_id, original, task)
-        planning.output = view.plan.summary if view.plan is not None else "Planning stopped."
-        await planning.update()
-    else:
-        view = await harness.task_view(thread_id)
-    if view.interrupt is not None:
-        permissions = ", ".join(view.interrupt.get("permissions", []))
-        response = await cl.AskActionMessage(
-            content=(
-                f"{task_plan_text(view)}\n\n"
-                f"**Scope:** configured workspace (`{harness.tasks.workspace}`)\n\n"
-                f"**Capabilities:** {permissions}\n\nRun this plan?"
-            ),
-            actions=[
-                cl.Action(name="approve_task", payload={"approved": True}, label="Run it"),
-                cl.Action(name="decline_task", payload={"approved": False}, label="Don't"),
-            ],
-            timeout=CONFIRM_TIMEOUT,
-        ).send()
-        approved = bool((response or {}).get("payload", {}).get("approved"))
-        if approved:
-            progress_step = cl.Step(name="Task progress", type="run")
-            progress_lines = ["Workspace grant approved; execution started."]
-            progress_step.output = "\n".join(progress_lines)
-            await progress_step.send()
-            async for progress in harness.resume_task_with_progress(thread_id, True):
-                progress_lines.append(task_progress_text(progress))
-                progress_step.output = "\n".join(progress_lines)
-                await progress_step.update()
-            view = await harness.task_view(thread_id)
-        else:
-            view = await harness.resume_task(thread_id, False)
-    result = harness.finish_task(thread_id, view)
-    elements = [*attachments(result), *task_artifacts(harness, view, thread_id)]
-    await cl.Message(content=spoken(result), elements=elements).send()
-
-
-def task_progress_text(progress: TaskProgress) -> str:
-    labels = {
-        "approval": "Approval",
-        "implementation": "Implementation",
-        "validation": "Validation",
-        "evaluation": "Evaluation",
-        "repair": "Repair",
-        "finalization": "Finalization",
-    }
-    return f"{labels[progress.stage]}: {progress.detail}"
-
-
-def task_artifacts(
-    harness: GeneralHarness, view: TaskView, thread_id: str
-) -> list[Any]:
-    """Expose only real files that the application runtime resolves in scope."""
-
-    if view.outcome is None:
-        return []
-    shown = []
-    for artifact in view.outcome.artifacts:
-        try:
-            path = harness.tasks.artifact_path(view, artifact)
-        except (OSError, PermissionError, ValueError):
-            continue
-        if path.is_file():
-            shown.append(
-                cl.File(
-                    thread_id=thread_id,
-                    name=path.name,
-                    path=str(path),
-                    display="inline",
-                    mime=mimetypes.guess_type(path.name)[0]
-                    or "application/octet-stream",
-                )
-            )
-    return shown
 
 
 async def report_fill(agent: Agent) -> None:
@@ -352,33 +249,30 @@ async def drive(
 
 @cl.on_chat_start
 async def start() -> None:
-    harness = create_harness()
+    agent, stops = create_runtime_with_stops()
     # The websocket session id is ephemeral and differs from the canonical
     # thread id that Chainlit puts in its sidebar and data layer.
     thread_id = canonical_thread_id(cl.context.session)
-    cl.user_session.set("harness", harness)
+    cl.user_session.set("agent", agent)
+    cl.user_session.set("stops", stops)
     cl.user_session.set("thread_id", thread_id)
 
 
 @cl.on_chat_resume
 async def resume(thread: dict[str, Any]) -> None:
-    harness = create_harness()
+    agent, stops = create_runtime_with_stops()
     thread_id = thread["id"]
-    cl.user_session.set("harness", harness)
+    cl.user_session.set("agent", agent)
+    cl.user_session.set("stops", stops)
     cl.user_session.set("thread_id", thread_id)
-    task_view = await harness.task_view(thread_id)
-    if task_view.interrupt is not None:
-        await cl.Message(content="This task stopped waiting for workspace approval.").send()
-        await drive_task(harness, thread_id)
-        return
-    if await harness.agent.pending(thread_id) is not None:
+    if await agent.pending(thread_id) is not None:
         await cl.Message(content="This conversation stopped waiting for an answer.").send()
-        await drive(harness.agent, thread_id)
+        await drive(agent, thread_id)
 
 
 @cl.on_message
 async def on_message(incoming: cl.Message) -> None:
-    harness: GeneralHarness = cl.user_session.get("harness")
+    agent: Agent = cl.user_session.get("agent")
     thread_id: str = cl.user_session.get("thread_id")
 
     try:
@@ -389,31 +283,26 @@ async def on_message(incoming: cl.Message) -> None:
         ).send()
         return
 
-    decision = await harness.decide(thread_id, message)
-    if decision.route == "act":
-        await drive_task(harness, thread_id, message, decision.task)
-        return
-
-    await drive(
-        harness.agent,
-        thread_id,
-        harness.agent.steps(thread_id, message),
-    )
+    await drive(agent, thread_id, agent.steps(thread_id, message, next(_sequence)))
 
 
 @cl.on_chat_end
 async def end() -> None:
-    harness: GeneralHarness | None = cl.user_session.get("harness")
-    if harness is not None:
-        await harness.aclose()
+    agent: Agent | None = cl.user_session.get("agent")
+    if agent is not None:
+        await agent.aclose()
 
 
 @cl.on_stop
 async def stop() -> None:
-    harness: GeneralHarness | None = cl.user_session.get("harness")
-    thread_id: str | None = cl.user_session.get("thread_id")
-    if harness is None or thread_id is None:
+    """Chainlit's stop button, as the loop's own stop.
+
+    It records a request rather than cancelling a coroutine: the turn is what
+    decides where it can safely be interrupted, and it looks between steps.
+    """
+
+    agent: Agent | None = cl.user_session.get("agent")
+    stops: MemoryStopRequests | None = cl.user_session.get("stops")
+    if agent is None or stops is None:
         return
-    result = await harness.cancel_task(thread_id)
-    if result is not None:
-        await cl.Message(content=spoken(result), elements=attachments(result)).send()
+    await stops.request(agent.user_id, next(_sequence))

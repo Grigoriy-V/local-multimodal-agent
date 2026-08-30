@@ -4,6 +4,7 @@ import asyncio
 import sys
 
 from app.agent.runtime import CHECKPOINT_TYPES
+from app.agent.stop import PostgresStopRequests
 from app.checkpoints import setup_postgres_checkpoints
 from app.config import AgentSettings
 from app.memory import ConversationStore
@@ -15,9 +16,9 @@ from ui.telegram.inbox import PostgresUpdateInbox
 async def setup_control_plane(settings: AgentSettings | None = None) -> None:
     """Create or migrate conversations, checkpoints, the inbox and telemetry.
 
-    Every step is additive against a populated database: the telemetry tables
-    did not exist before, and the inbox gains a nullable `run_id` column whose
-    existing rows stay valid as updates that were never measured.
+    Every step is additive against a populated database. Nothing here rewrites
+    or drops a row: new tables are created if missing, and a new column arrives
+    with a default that makes every existing row mean what it already meant.
     """
 
     settings = settings or AgentSettings()
@@ -31,6 +32,10 @@ async def setup_control_plane(settings: AgentSettings | None = None) -> None:
             allowed_types=CHECKPOINT_TYPES,
         )
         await PostgresUpdateInbox(
+            settings.database_url,
+            settings.database_schema,
+        ).setup()
+        await PostgresStopRequests(
             settings.database_url,
             settings.database_schema,
         ).setup()

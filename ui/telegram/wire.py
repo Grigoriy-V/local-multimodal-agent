@@ -66,6 +66,10 @@ class Incoming:
     telegram_user_id: int
     text: str
     files: tuple[tuple[str, str, str], ...] = ()  # (file_id, name, media_type)
+    # Telegram's own number for this update, which only grows. It is what a
+    # stop is compared against: a stop that arrived after this update ends the
+    # turn it started, and one that arrived before it belongs to an older turn.
+    update_id: int = 0
     callback_id: str | None = None
     callback_data: str | None = None
     # The message the pressed button belongs to. Carried because settling an
@@ -77,6 +81,8 @@ class Incoming:
 def read_update(update: dict[str, Any]) -> Incoming | None:
     """Reduce a raw update, or return `None` for one this adapter ignores."""
 
+    sequence = update.get("update_id")
+    sequence = int(sequence) if isinstance(sequence, int) else 0
     callback = update.get("callback_query")
     if callback:
         message = callback.get("message") or {}
@@ -92,6 +98,7 @@ def read_update(update: dict[str, Any]) -> Incoming | None:
             callback_id=str(callback.get("id", "")),
             callback_data=str(callback.get("data", "")),
             callback_message_id=int(message_id) if message_id is not None else None,
+            update_id=sequence,
         )
 
     message = update.get("message")
@@ -137,6 +144,7 @@ def read_update(update: dict[str, Any]) -> Incoming | None:
         telegram_user_id=int(sender["id"]),
         text=str(message.get("text") or message.get("caption") or ""),
         files=tuple(files),
+        update_id=sequence,
     )
 
 
@@ -169,6 +177,24 @@ def is_cancellation(incoming: Incoming) -> bool:
     """
 
     return incoming.callback_data is None and incoming.text.strip().lower() == "/stop"
+
+
+def travels_out_of_band(incoming: Incoming) -> bool:
+    """Must this update skip the queue that serializes a conversation?
+
+    Serializing a conversation is what stops two messages being answered out of
+    order, and it is exactly wrong for the updates that exist to act on what is
+    already running or beside it. `/stop` behind the turn it exists to stop
+    arrives to find nothing running; `/chats` behind a five-minute task is a
+    list of conversations that takes five minutes to open.
+
+    The rule is the one already drawn: an update that never reaches the model
+    is answered from wiring or storage in milliseconds, changes no conversation
+    history, and has nothing to be ordered against. Those go out of band, and
+    everything else keeps its place in the line.
+    """
+
+    return not needs_model(incoming)
 
 
 def needs_model(incoming: Incoming) -> bool:

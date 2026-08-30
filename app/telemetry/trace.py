@@ -218,35 +218,15 @@ class TurnTrace:
             **data,
         )
 
-    @contextmanager
-    def staged(self, stage: str, **data: Any) -> Iterator[None]:
-        """Bracket one stage of the bounded task path, and mark what it spends.
-
-        Everything emitted inside — model calls, tool calls, nested stages —
-        carries the stage and whatever else is passed here, typically the
-        attempt number. That is why a stage is not simply another `step`: the
-        useful question about a task is not how long planning took but which
-        stage spent the twenty tool calls, and only the events themselves can
-        answer it.
-        """
-
-        previous = self._context
-        self._context = {**previous, "stage": stage, **data}
-        try:
-            with self.step(f"task_{stage}"):
-                yield
-        finally:
-            self._context = previous
-
     # --- model calls ---------------------------------------------------------
 
     @contextmanager
     def model(self, purpose: str) -> Iterator["ModelCall"]:
         """Bracket one model call, whatever path it takes.
 
-        The router's single request and the graph's streamed one are both model
-        calls the turn paid for, so both are counted here. A turn that counted
-        only its visible answer would make the harness look cheaper than it is.
+        Every request a turn pays for is counted here, including the one it
+        spends wrapping up after its budget is gone. A turn that counted only
+        its visible answer would make the loop look cheaper than it is.
         """
 
         self.run.model_calls += 1

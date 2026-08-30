@@ -31,14 +31,12 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Understand current task/order | `ROADMAP.md` | linked reports |
 | Understand why a durable boundary exists | `DECISIONS.md` | the current owner in this map, linked evidence |
 | Change environment/config | `app/config.py` | `.env.example`, `ModelSettings`, `AgentSettings`, `TelegramSettings`, `WebSettings` |
-| Change ordinary agent loop | `app/agent/graph.py` | `build_agent`, `AgentState`, `interrupt`, `tests/test_agent_graph.py` |
+| Change the agent loop | `app/agent/graph.py` | `build_agent`, `AgentState`, `interrupt`, `tests/test_agent_graph.py` |
+| Change what one turn may spend | `app/agent/graph.py` | `TurnBudget`, `exceeded`, `BUDGET_EXHAUSTED`, `tests/test_turn_bounds.py` |
+| Change how a running turn is stopped | `app/agent/stop.py` | `StopRequests`, `MemoryStopRequests`, `PostgresStopRequests`, `asked_to_stop` |
+| Change which updates skip the conversation queue | `ui/telegram/wire.py` | `travels_out_of_band`, `needs_model`, `InboxJob.control` |
 | Change agent wiring/context/tools | `app/agent/runtime.py` | `Agent`, `create_agent`, `toolbox`, `_graph` |
 | Change how an answer streams as it is written | `app/agent/graph.py`, `ui/telegram/adapter.py` | `complete`, `ASSISTANT_DELTA`, `AssistantDelta`, `MessageProduced`, `AnswerPreview`, `StreamedCompletion` |
-| Change answer-vs-task routing | `app/agent/harness.py` | `GeneralHarness`, `HarnessDecision`, `ROUTER_SYSTEM_PROMPT` |
-| Change bounded task lifecycle | `app/agent/task_graph.py` | `TaskBudget`, `TaskPlan`, `TaskGrant`, `build_task_graph` |
-| Change task planner/implementation | `app/agent/task_worker.py` | `ModelTaskWorker`, `PLANNER_SYSTEM_PROMPT`, `IMPLEMENTER_SYSTEM_PROMPT` |
-| Change task validation | `app/agent/task_validator.py` | `ModelTaskValidator`, `VALIDATOR_SYSTEM_PROMPT`, `EVALUATOR_SYSTEM_PROMPT` |
-| Change task start/resume/cancel API | `app/agent/task_runtime.py` | `TaskRuntime`, `TaskView`, `TaskProgress` |
 | Change model-agnostic message types | `app/models/base.py` | `Message`, `ContentPart`, `ToolCall`, `ModelBackend` |
 | Change OpenAI/vLLM request translation | `app/models/openai_compatible.py` | `OpenAICompatibleBackend`, `build_messages`, `parse_completion` |
 | Change system prompt/context replay | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT`, `Context`, `ContextPolicy` |
@@ -46,9 +44,8 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change conversation/memory contract | `app/memory/base.py` | `ConversationStore`, `TurnContextRecords` |
 | Measure a turn: identity, timings, counts, outcome | `app/telemetry/` | `TurnTrace`, `Telemetry`, `TurnRun`, `TraceEvent`, `NO_TRACE`, `RUN_ID` |
 | Change where turn telemetry is stored | `app/telemetry/open.py` | `open_telemetry`, `SqliteTelemetry`, `PostgresTelemetry` |
-| Count model calls the task path spends | `app/telemetry/backend.py` | `TracedBackend`, `TaskRuntime._measuring` |
 | Read a measured turn back | `app/telemetry/inspect.py`, `tools/show_run.py` | `render_run`, `render_listing`, `recent_runs` |
-| Mark which stage of a task is spending | `app/telemetry/trace.py` | `TurnTrace.staged`, `resolve` |
+| Read the loop's steps back | `app/telemetry/inspect.py` | `steps`, `step_section`, `loop_step` |
 | Read the model server's engine metrics | `app/telemetry/vllm.py` | `parse_metrics`, `discover`, `restarted`, `summarize` |
 | Measure prefill, decode and prefix cache | `tools/vllm_baseline.py` | `plan`, `measure`, `report` |
 | Estimate GPU seconds and cost of a turn | `app/telemetry/cost.py` | `gpu_cost`, `IDLE_WINDOW_SECONDS`, `A10_USD_PER_SECOND` |
@@ -77,7 +74,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change deployed webhook handoff | `ui/telegram/webhook.py` | `TelegramWebhook`, `TelegramUpdateWorker` |
 | Change deployed Telegram inbox | `ui/telegram/inbox.py` | `PostgresUpdateInbox`, `UpdateInbox` |
 | Change local Telegram polling | `ui/telegram/run.py` | `PollingBot`, per-chat locks |
-| Change Chainlit adapter | `ui/chainlit_app.py` | `render`, `create_harness`, `to_message` |
+| Change Chainlit adapter | `ui/chainlit_app.py` | `render`, `create_runtime_with_stops`, `to_message` |
 | Change Chainlit persisted history | `ui/chainlit_history.py` | `MemoryStoreDataLayer` |
 | Change deployed CPU control plane | `deploy/modal/control_app.py` | `telegram_webhook`, `process_telegram_update`, `render_web_page`, images |
 | Change model deployment | `deploy/modal/model_app.py` | `Server`, `fetch_weights`, `preflight`, `SCALEDOWN_WINDOW` |
@@ -96,7 +93,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 
 ```text
 app/                 application domain and runtime
-  agent/             agent graphs, harness, bounded task runtime
+  agent/             the agent loop, its wiring, its budget and its stop
   context/           prompt context and compaction
   memory/            conversation/fact store contract + implementations
   telemetry/         turn records, traces and the recorder handed to the app
@@ -332,7 +329,7 @@ tests/test_browser_verifier.py
 tests/test_capabilities.py
 ```
 
-Additional tests exist for persistence/store contracts, Telegram, documents, web tools, model endpoint/deployment, task runtime/validation, checkpoints and operational behavior. When changing a symbol, search `tests/` for the symbol or public tool name and run the focused file first, then the full offline suite.
+Additional tests exist for persistence/store contracts, Telegram, documents, web tools, model endpoint/deployment, turn bounds, checkpoints and operational behavior. When changing a symbol, search `tests/` for the symbol or public tool name and run the focused file first, then the full offline suite.
 
 Useful searches:
 
@@ -343,7 +340,7 @@ rg "view_pages|read_document" tests
 rg "search_web|fetch_page|view_web_page" tests
 rg "PostgresStore|ConversationStore" tests
 rg "TelegramWebhook|PostgresUpdateInbox" tests
-rg "GeneralHarness|TaskRuntime" tests
+rg "TurnBudget|StopRequests" tests
 rg "OpenAICompatibleBackend|build_messages" tests
 ```
 
@@ -388,21 +385,21 @@ state or configuration — it is not serializable and a checkpoint would try.
 Code that asks for an unknown run gets `NO_TRACE`, which records nothing, so
 every path without telemetry keeps working unchanged.
 
-Objects built once and reused for every turn — `TracedBackend`,
-`ModelTaskWorker`, `ModelTaskValidator` — hold no run identity. They take a
-`Callable[[], TurnTrace]` and ask `resolve()` for the current turn when
-something happens, which keeps one source for that answer in the runtime that
-started the turn.
+Objects built once and reused for every turn — `TracedBackend` — hold no run
+identity. They take a `Callable[[], TurnTrace]` and ask `resolve()` for the
+current turn when something happens, which keeps one source for that answer in
+the runtime that started the turn.
 
-Two tool counts exist and mean different things. `TaskOutcome.tool_calls` is
-budget spent, including calls refused before they ran; `TurnRun.tool_calls` is
-calls that actually executed, counted where they executed. Never add them
-together.
+Two counts of tools exist and mean different things. `AgentState.tool_calls` is
+what the turn has spent against its budget; `TurnRun.tool_calls` is what
+actually executed, counted where it executed. They agree today because a
+refused call is not counted against either, and they are still not the same
+question.
 
 ### Conversation store is not checkpoint state
 
 If the requirement is durable chat/memory, start in `app/memory/`.
-If it is resumable in-flight LangGraph state, start in `app/checkpoints.py` and agent/task graph code.
+If it is resumable in-flight LangGraph state, start in `app/checkpoints.py` and `app/agent/graph.py`.
 
 ### Observation media is not delivery
 
@@ -416,9 +413,14 @@ If it is resumable in-flight LangGraph state, start in `app/checkpoints.py` and 
 
 Telegram uses `admit_uploads()` and saves supported documents into the user workspace. Chainlit currently uses `load_attachments()` and therefore follows the direct-media admission path. Inspect this before claiming upload parity or adding a second document parser.
 
-### Current task runtime is narrower than the normal agent
+### A control signal is not an ordinary update
 
-The normal agent's toolbox can contain documents, presentation and web. The bounded task worker currently builds a filesystem-oriented implementation toolbox and a limited validation toolbox. If a complex task cannot perform an operation that ordinary conversation can, inspect task wiring before creating another global capability.
+`/stop` and the storage-answered commands are marked `control` at the front
+door and skip the conversation's lease entirely — in the deployed queue by the
+column, locally by being handled beside the per-chat lock. Delivering them
+faster is only half of it: what ends a running turn is the loop reading
+`StopRequests` at its next step, which is why the two live in one sub-step and
+not one of them alone.
 
 ## Cheap exploration recipe
 

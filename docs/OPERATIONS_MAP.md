@@ -125,6 +125,7 @@ It prepares:
 ConversationStore/PostgresStore schema
 LangGraph PostgreSQL checkpoint tables
 Telegram `telegram_updates` inbox table
+`turn_stops`: where a request to stop a running turn is recorded
 Telemetry `turn_runs` and `trace_events` tables
 ```
 
@@ -139,6 +140,16 @@ to a conversation instead of to one update, so **a deployment that skips this
 step keeps answering a person's messages out of order**: rows without the key
 are claimed one at a time, exactly as before. Nothing is rewritten and no row is
 dropped.
+
+It then gains a `control BOOLEAN NOT NULL DEFAULT FALSE` column, which is the
+out-of-band lane: a control update is claimed on its own and is never what a
+conversation's lease takes. **A deployment that skips this step goes back to
+`/stop` waiting behind the turn it exists to stop**, and to `/chats` waiting
+behind a turn that may run for minutes. The default is what makes every existing row mean what it already
+meant. `turn_stops` is a new table, one row per conversation, holding the
+sequence number the last stop arrived with; without it a deployed `/stop` is
+delivered promptly and then acts on nothing, because the container running the
+turn has no other way to hear about it.
 
 The normal runtime intentionally does not run these migrations on each request.
 
@@ -155,6 +166,13 @@ deleted by hand. Nothing about the local or deployed store is reset from a
 worker starting up.
 
 Primary configuration comes from `AgentSettings` / `AGENT_DATABASE_URL`.
+
+What a turn may spend before it stops and says so is configuration too:
+`AGENT_TURN_MAX_STEPS` (12), `AGENT_TURN_MAX_TOOL_CALLS` (24) and
+`AGENT_TURN_MAX_SECONDS` (300). They are the only ceiling on an autonomous
+turn, and the right values differ between a personal machine, where the GPU is
+already paid for, and a deployment where every second is billed. Listed
+commented-out in `.env.example` with their defaults.
 
 The script also has an `--alternate` path for the configured alternate database used by latency comparison work.
 
@@ -395,10 +413,10 @@ Important behavior: a later `model_app.py` deploy resets the setting to the `SCA
 
 ```text
 conversation/memory        AGENT_DATABASE -> SQLite file
-ordinary checkpoints       AGENT_CHECKPOINTS -> SQLite file
-task checkpoints           AGENT_TASK_CHECKPOINTS/default task checkpoint file
+in-flight turns            AGENT_CHECKPOINTS -> SQLite file
 turn telemetry             AGENT_TELEMETRY_DATABASE -> SQLite file
 workspace                  AGENT_WORKSPACE -> local directory
+"stop what is running"     in memory: one process, so nothing durable is needed
 ```
 
 Telemetry is deliberately its own file: it is disposable in a way a conversation
@@ -488,7 +506,7 @@ afterwards (about every 25 events, and at the end).
 ```text
 turn_runs      one row per turn: outcome, status, route, model/tool counts,
                tokens, first model token, first visible response, total time
-trace_events   the ordered detail: turn, router, model, tool, approval,
+trace_events   the ordered detail: turn, loop steps, model, tool, approval,
                persistence and Telegram delivery boundaries
 ```
 
@@ -510,8 +528,7 @@ python tools/show_run.py <run_id>
 
 `--summary` reports **GPU active seconds per successful turn**, plus derived
 cost per turn and per user, model and tool calls per successful turn, and
-failures by type. Successful means the outcome was an answer, an approval or a
-task result; a turn that burned GPU and failed stays in the numerator and
+failures by type. Successful means the outcome was an answer or an approval; a turn that burned GPU and failed stays in the numerator and
 leaves the denominator, which is the point.
 
 It reads the same database the application writes: the local SQLite file by
@@ -521,8 +538,10 @@ is read-only — no migration, and nothing started. Rendering lives in
 
 A rendered run shows the queue wait, first model token and first visible
 response, then model calls with their tokens, tool calls with stage and path,
-task stages with their durations, the full event timeline at its offsets, the
-totals including time no measured step claimed, and a derived GPU section.
+the loop's steps with what the turn had spent reaching each — and the limit or
+the stop that ended it early, when one did — the full event timeline at its
+offsets, the totals including time no measured step claimed, and a derived GPU
+section.
 
 ### GPU seconds and cost per turn
 

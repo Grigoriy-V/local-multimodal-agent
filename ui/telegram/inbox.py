@@ -10,6 +10,11 @@ messages sent seconds apart used to be claimed by two containers and answered
 out of order, because each claim only asked whether *that* update was free. A
 claim now asks for the oldest unfinished update of the conversation the caller
 names, and refuses while another one of its updates is still running.
+
+Control updates are the exception, and are marked as such by the front door. A
+`/stop` queued behind the turn it exists to stop is not a slow stop but no stop
+at all, so a control row is claimed on its own, is never what a conversation's
+claim takes, and never holds a conversation up.
 """
 
 from __future__ import annotations
@@ -67,6 +72,9 @@ class InboxJob:
     # worker can ask for the next one without another lookup. Empty for a row
     # written before the column existed.
     conversation_key: str = ""
+    # A control update: answered beside the conversation rather than in it, and
+    # never part of the drain. A worker that claimed one does that one thing.
+    control: bool = False
 
 
 class UpdateInbox(Protocol):
@@ -76,6 +84,7 @@ class UpdateInbox(Protocol):
         payload: dict[str, Any],
         run_id: str = "",
         conversation_key: str = "",
+        control: bool = False,
     ) -> EnqueueResult: ...
 
     async def claim(self, update_id: int, lease_seconds: int = 900) -> InboxJob | None: ...
@@ -147,6 +156,17 @@ class PostgresUpdateInbox:
                     f"ALTER TABLE {self.table}"
                     " ADD COLUMN IF NOT EXISTS conversation_key TEXT"
                 )
+                # The out-of-band lane, as a column rather than as an absent
+                # conversation key: a row with no key means "queued before
+                # conversations existed", and a control update means the
+                # opposite of that — it knows its conversation and deliberately
+                # does not wait for it. A default rather than a nullable
+                # column, so an existing row is an ordinary update and the
+                # claim does not have to spell that out.
+                await cursor.execute(
+                    f"ALTER TABLE {self.table}"
+                    " ADD COLUMN IF NOT EXISTS control BOOLEAN NOT NULL DEFAULT FALSE"
+                )
                 # The claim's whole query: one conversation's unfinished
                 # updates, oldest first. Without it the lease scans the queue.
                 await cursor.execute(
@@ -160,6 +180,7 @@ class PostgresUpdateInbox:
         payload: dict[str, Any],
         run_id: str = "",
         conversation_key: str = "",
+        control: bool = False,
     ) -> EnqueueResult:
         from psycopg.types.json import Jsonb
 
@@ -168,10 +189,16 @@ class PostgresUpdateInbox:
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     f"INSERT INTO {self.table}"
-                    " (update_id, run_id, conversation_key, payload)"
-                    " VALUES (%s, %s, %s, %s)"
+                    " (update_id, run_id, conversation_key, control, payload)"
+                    " VALUES (%s, %s, %s, %s, %s)"
                     " ON CONFLICT (update_id) DO NOTHING RETURNING state",
-                    (update_id, run_id or None, conversation_key or None, Jsonb(payload)),
+                    (
+                        update_id,
+                        run_id or None,
+                        conversation_key or None,
+                        control,
+                        Jsonb(payload),
+                    ),
                 )
                 inserted = await cursor.fetchone()
                 if inserted is not None:
@@ -213,17 +240,20 @@ class PostgresUpdateInbox:
         async with connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
-                    f"SELECT conversation_key FROM {self.table} WHERE update_id = %s",
+                    f"SELECT conversation_key, control FROM {self.table}"
+                    " WHERE update_id = %s",
                     (update_id,),
                 )
                 row = await cursor.fetchone()
                 if row is None:
                     return None
                 key = row["conversation_key"] or ""
-                if key:
+                if key and not row["control"]:
                     return await self._claim_conversation(connection, key, lease_seconds)
-                # Queued before the column existed. One row, on its own, exactly
-                # as it was accepted.
+                # A control update, or one queued before the column existed.
+                # One row, on its own, exactly as it was accepted — which for a
+                # control update is the whole point: it must not wait behind the
+                # turn it is about.
                 return await self._lease(
                     connection,
                     f"WHERE update_id = %s AND {self.UNFINISHED}",
@@ -268,10 +298,12 @@ class PostgresUpdateInbox:
             return await self._lease(
                 connection,
                 "WHERE update_id = (SELECT update_id"
-                f" FROM {self.table} WHERE conversation_key = %s AND {self.UNFINISHED}"
+                f" FROM {self.table} WHERE conversation_key = %s AND NOT control"
+                f" AND {self.UNFINISHED}"
                 " ORDER BY update_id LIMIT 1)"
                 f" AND NOT EXISTS (SELECT 1 FROM {self.table} AS busy"
                 " WHERE busy.conversation_key = %s AND busy.state = 'running'"
+                " AND NOT busy.control"
                 " AND busy.lease_until >= CURRENT_TIMESTAMP)",
                 (conversation_key, conversation_key),
                 lease_seconds,
@@ -291,7 +323,7 @@ class PostgresUpdateInbox:
                 " lease_until = CURRENT_TIMESTAMP + (%s * INTERVAL '1 second'),"
                 " attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP"
                 f" {where}"
-                " RETURNING update_id, payload, run_id, conversation_key,"
+                " RETURNING update_id, payload, run_id, conversation_key, control,"
                 " EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) AS waited",
                 (token, lease_seconds, *values),
             )
@@ -305,6 +337,7 @@ class PostgresUpdateInbox:
             run_id=row["run_id"] or "",
             queued_ms=max(0, int(float(row["waited"] or 0.0) * 1000)),
             conversation_key=row["conversation_key"] or "",
+            control=bool(row["control"]),
         )
 
     async def complete(self, job: InboxJob) -> None:

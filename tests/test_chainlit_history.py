@@ -21,9 +21,7 @@ from ui.chainlit_history import MemoryStoreDataLayer
 def layer(tmp_path):
     store = SqliteStore(tmp_path / "memory.sqlite3")
     return MemoryStoreDataLayer(
-        store,
-        checkpoints=str(tmp_path / "checkpoints.sqlite3"),
-        task_checkpoints=str(tmp_path / "task-checkpoints.sqlite3"),
+        store, checkpoints=str(tmp_path / "checkpoints.sqlite3")
     )
 
 
@@ -163,13 +161,11 @@ async def test_native_delete_removes_chat_and_resumable_state_but_keeps_memory(
     layer,
 ) -> None:
     checkpoint_path = Path(layer.checkpoints)
-    task_checkpoint_path = Path(layer.task_checkpoints)
     layer.store.append(
         "chat", [Message(role="user", content=[ContentPart("text", text="remove")])], LOCAL_USER_ID)
     layer.store.remember("Keep this approved fact", LOCAL_USER_ID, thread_id="chat")
     await checkpoint(checkpoint_path, "chat")
     await checkpoint(checkpoint_path, "other")
-    await checkpoint(task_checkpoint_path, "task:chat")
 
     await layer.delete_thread("chat")
     # Chainlit may emit a final metadata callback for the view it just removed.
@@ -179,4 +175,3 @@ async def test_native_delete_removes_chat_and_resumable_state_but_keeps_memory(
     assert layer.store.search("approved", LOCAL_USER_ID) == ["Keep this approved fact"]
     assert not await has_checkpoint(checkpoint_path, "chat")
     assert await has_checkpoint(checkpoint_path, "other")
-    assert not await has_checkpoint(task_checkpoint_path, "task:chat")

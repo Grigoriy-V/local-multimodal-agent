@@ -32,8 +32,8 @@ Chainlit (thin adapter)
 
 Context is assembled from four layers, while SQLite stores canonical messages,
 summaries, approved memory and resumable graph state. The model selects governed
-capabilities from the task; workspace grants and destructive-action approval
-bound what those capabilities may do.
+capabilities from the request; a per-user workspace root, destructive-action
+approval and the turn's own budget bound what those capabilities may do.
 
 ## Layout
 
@@ -135,36 +135,32 @@ Open <http://127.0.0.1:8100>. Stop the UI with `Ctrl+C`; conversations remain
 in the local SQLite database and are restored on the next start.
 
 The product target is one general autonomous interface, not a menu of modes or
-individual tools. An ordinary request is answered directly when that is enough;
-otherwise the same harness plans, chooses governed filesystem/browser
-capabilities, validates the result and repairs or finalizes. Permission prompts
-approve scope or consequential effects, not an operating mode or tool choice.
+individual tools. Every ordinary message enters the same loop: the model
+answers, or calls a governed capability and keeps going until it can. There is
+no mode selector, and nothing chooses between two lifecycles — one route, one
+loop. Permission prompts approve consequential effects, not an operating mode
+or a tool choice.
 
-The rejected experimental `task`/`preview` controls and Snake-specific verifier
-are disconnected from the UI and application task runtime. The Version 1
-baseline exposes its conversational graph through a grant-filtered capability
-registry: read/write filesystem capabilities and the model-selected
-`inspect_page` browser capability. `inspect_page` opens a self-contained local
-HTML file in installed Chrome/Edge, blocks external network and file URLs, and
-returns visible text, console errors and a screenshot to both model and UI.
-Every ordinary message now enters the same general harness, which asks the model
-whether to answer through the normal agent or enter the bounded task lifecycle;
-there is no user-facing mode selector. On the task path, the model derives
-acceptance criteria and an evidence strategy, the approval prompt includes the
-required validation capabilities, and a separate evaluator judges real file or
-browser evidence before retrying or finalizing. Snake remains only a regression
-benchmark.
+Three things bound a turn. It stops when the model answers without asking for a
+tool; it stops when the person asks it to; and it stops when it reaches the
+budget it is allowed to spend, where it is told to answer with what it has
+rather than being cut off mid-sentence.
 
-For work requests, the native chat surface shows planning, approved scope and
-capabilities, live graph progress, validation evidence and downloadable output
-files when they exist. Chainlit's stop control records a durable cancelled
-outcome instead of leaving resumable work behind. Native chat deletion removes
-the conversation and its resumable checkpoints while preserving separately
-approved account-level memory.
+The Version 1 baseline exposes its conversational graph through a
+grant-filtered capability registry: read/write filesystem capabilities and the
+model-selected `inspect_page` browser capability. `inspect_page` opens a
+self-contained local HTML file in installed Chrome/Edge, blocks external
+network and file URLs, and returns visible text, console errors and a
+screenshot to both model and UI.
+
+Chainlit's stop control records a stop for the running turn, which the loop
+reads at its next step. Native chat deletion removes the conversation and its
+resumable checkpoints while preserving separately approved account-level
+memory.
 
 ## Start the Telegram bot
 
-The same harness is also reachable from Telegram. Put the bot token and the
+The same agent is also reachable from Telegram. Put the bot token and the
 numeric Telegram user ids allowed to use it in `.env`:
 
 ```text
@@ -186,7 +182,9 @@ choice is paid for by the owner.
 Conversations, memory and files are scoped to the mapped account. Each user gets
 their own directory inside `AGENT_WORKSPACE`, so two people never see each
 other's chats, saved facts or files; what they do share is the GPU. `/new`
-starts a fresh conversation and `/stop` cancels a task waiting in that chat.
+starts a fresh conversation and `/stop` ends whatever is running in it — it
+travels past the queue that orders the rest, so it does not wait for the turn it
+is about.
 
 A workspace created before user scope existed is moved under its owner once:
 
@@ -222,9 +220,10 @@ workspace, because that is the only place a stranger's JavaScript runs.
 
 ## Version 1.5 product evidence
 
-One ordinary request enters the same harness used for direct conversation. The
-model creates the plan and criteria, chooses governed tools, iterates when
-needed, evaluates real evidence and returns the resulting artifact.
+One ordinary request, answered by the same agent used for direct conversation.
+The model chose governed tools, iterated, checked real evidence and returned the
+resulting artifact. This was recorded under the bounded task lifecycle that
+Version 2 has since removed; the capability it demonstrates is the loop's.
 
 <p>
   <img src="reports/test_v1.5/1.png" width="240">
@@ -258,5 +257,3 @@ is still refused. If only a filename is supplied and its directory is unknown,
 the agent is instructed to ask for the location instead of guessing.
 It writes `AGENT_DATABASE`, the conversation, and `AGENT_CHECKPOINTS`, which
 holds turns still in flight and can be deleted without losing one.
-Task grants use the separate `AGENT_TASK_CHECKPOINTS` file, which defaults to
-`data/task-checkpoints.sqlite3`.

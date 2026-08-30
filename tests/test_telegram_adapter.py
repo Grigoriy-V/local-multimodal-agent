@@ -15,16 +15,8 @@ from typing import Any
 import httpx
 import pytest
 
-from app.agent.harness import GeneralHarness
 from app.agent.runtime import Agent
-from app.agent.task_graph import (
-    CheckResult,
-    ImplementationResult,
-    TaskOutcome,
-)
-# Aliased: pytest tries to collect any imported name starting with "Test".
-from app.agent.task_graph import TestReport as Report
-from app.agent.task_runtime import TaskRuntime, TaskView
+from app.agent.stop import MemoryStopRequests
 from app.config import AgentSettings, TelegramSettings
 from app.memory import SqliteStore
 from app.models import Completion, ContentPart, Message, ToolCall
@@ -42,7 +34,6 @@ from ui.telegram.adapter import (
     current_thread,
     spoken,
     start_thread,
-    task_result_text,
 )
 from ui.telegram.wire import (
     CHATS_CALLBACK_PREFIX,
@@ -68,13 +59,6 @@ from ui.telegram.api import (
 ALLOWED = 4242
 STRANGER = 9999
 CHAT = 1000
-
-
-def route(text: str = "", task: str = "") -> Completion:
-    """A router answer, which the harness always asks for first."""
-
-    payload = {"route": "act" if task else "answer", "task": task}
-    return Completion(text=json.dumps(payload), finish_reason="stop")
 
 
 class FakeTelegram:
@@ -142,7 +126,7 @@ BUILT: list[TelegramAdapter] = []
 async def close_adapters():
     """Close every adapter a test built.
 
-    An adapter owns a harness per user, and a harness owns SQLite connections
+    An adapter owns an agent per user, and an agent owns SQLite connections
     and a checkpoint file; leaving them open leaks worker threads into the next
     test and makes the suite's failures depend on its order.
     """
@@ -159,35 +143,31 @@ def build(
     settings: TelegramSettings,
     tmp_path: Path,
     backend: ScriptedBackend,
+    stops: MemoryStopRequests | None = None,
 ) -> TelegramAdapter:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     agent_settings = AgentSettings(
         database=str(tmp_path / "memory.sqlite3"),
         checkpoints=str(tmp_path / "checkpoints.sqlite3"),
-        task_checkpoints=str(tmp_path / "tasks.sqlite3"),
         workspace=str(workspace),
     )
+    stops = stops or MemoryStopRequests()
 
-    def factory(user_id: str) -> GeneralHarness:
-        agent = Agent(
+    def factory(user_id: str) -> Agent:
+        return Agent(
             backend,
             SqliteStore(agent_settings.database),
             workspace,
             checkpoints=agent_settings.checkpoints,
             user_id=user_id,
-        )
-        return GeneralHarness(
-            agent,
-            TaskRuntime(
-                backend=backend,
-                workspace=workspace,
-                checkpoints=agent_settings.task_checkpoints,
-            ),
+            stops=stops,
         )
 
     client = TelegramClient(settings, transport=telegram.transport())
-    adapter = TelegramAdapter(client, settings, agent_settings, harness_factory=factory)
+    adapter = TelegramAdapter(
+        client, settings, agent_settings, agent_factory=factory, stops=stops
+    )
     BUILT.append(adapter)
     return adapter
 
@@ -345,7 +325,7 @@ async def test_open_access_admits_a_stranger(
     telegram: FakeTelegram, tmp_path: Path
 ) -> None:
     opened = TelegramSettings(token="test-token", allowed_users="", open_access=True)
-    backend = ScriptedBackend(route(), says("Hello, stranger."), default=says("summary"))
+    backend = ScriptedBackend(says("Hello, stranger."), default=says("summary"))
     adapter = build(telegram, opened, tmp_path, backend)
 
     await adapter.handle_update(text_update("hello", sender=STRANGER))
@@ -360,8 +340,7 @@ async def test_open_access_still_separates_the_people_it_admits(
     """Admitting everyone is not the same as merging them."""
 
     opened = TelegramSettings(token="test-token", allowed_users="", open_access=True)
-    backend = ScriptedBackend(
-        route(), says("one"), route(), says("two"), default=says("summary")
+    backend = ScriptedBackend(says("one"), says("two"), default=says("summary")
     )
     adapter = build(telegram, opened, tmp_path, backend)
 
@@ -400,7 +379,7 @@ async def test_an_empty_allow_list_admits_nobody(
 async def test_an_ordinary_message_is_answered_into_the_chat(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(route(), says("Hello back."), default=says("summary"))
+    backend = ScriptedBackend(says("Hello back."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("hello"))
@@ -451,7 +430,7 @@ async def test_non_image_media_is_sent_as_a_document(
 async def test_the_conversation_is_stored_under_the_mapped_user(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(route(), says("Noted."), default=says("summary"))
+    backend = ScriptedBackend(says("Noted."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("remember this"))
@@ -468,8 +447,7 @@ async def test_the_conversation_is_stored_under_the_mapped_user(
 async def test_new_starts_a_separate_conversation(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(
-        route(), says("first"), route(), says("second"), default=says("summary")
+    backend = ScriptedBackend(says("first"), says("second"), default=says("summary")
     )
     adapter = build(telegram, settings, tmp_path, backend)
 
@@ -522,7 +500,7 @@ def threads_of(tmp_path: Path, sender: int = ALLOWED) -> list[Any]:
 async def test_chats_offers_this_person_s_conversations_newest_first(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(route(), says("first"), default=says("summary"))
+    backend = ScriptedBackend(says("first"), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("what is the plan"))
@@ -538,7 +516,7 @@ async def test_a_long_opening_is_cut_rather_than_squeezed(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
     opening = "the first sentence of a conversation that went on for a while"
-    backend = ScriptedBackend(route(), says("noted"), default=says("summary"))
+    backend = ScriptedBackend(says("noted"), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update(opening))
@@ -556,11 +534,8 @@ async def test_choosing_a_conversation_sends_the_next_message_to_it(
     """The acceptance the whole feature exists for."""
 
     backend = ScriptedBackend(
-        route(),
         says("first"),
-        route(),
         says("second"),
-        route(),
         says("third"),
         default=says("summary"),
     )
@@ -624,7 +599,7 @@ async def test_one_person_cannot_open_another_person_s_conversation(
     """A callback carries a thread id, which is an identifier from outside."""
 
     shared = TelegramSettings(token="test-token", allowed_users=f"{ALLOWED},{STRANGER}")
-    backend = ScriptedBackend(route(), says("first"), default=says("summary"))
+    backend = ScriptedBackend(says("first"), default=says("summary"))
     adapter = build(telegram, shared, tmp_path, backend)
 
     await adapter.handle_update(text_update("private matters"))
@@ -680,7 +655,7 @@ async def test_a_photo_becomes_model_input(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
     telegram.files["large"] = b"\x89PNG-bytes"
-    backend = ScriptedBackend(route(), says("A picture."), default=says("summary"))
+    backend = ScriptedBackend(says("A picture."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(
@@ -709,7 +684,7 @@ async def test_a_document_is_saved_and_named_rather_than_pasted_into_the_turn(
     """
 
     telegram.files["doc1"] = b"%PDF-1.7 pretend"
-    backend = ScriptedBackend(route(), says("Read it."), default=says("summary"))
+    backend = ScriptedBackend(says("Read it."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(
@@ -781,83 +756,13 @@ async def test_an_unsupported_upload_is_still_refused_before_the_model(
 # --- the act branch ----------------------------------------------------------
 
 
-async def test_a_work_request_asks_before_touching_the_workspace(
-    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
-) -> None:
-    plan = Completion(
-        text=json.dumps(
-            {
-                "summary": "Create the file",
-                "steps": ["write notes.txt"],
-                "acceptance_criteria": ["notes.txt exists"],
-                "validation_strategy": [
-                    {
-                        "criterion": "notes.txt exists",
-                        "evidence": "list the directory",
-                        "capabilities": ["filesystem.read"],
-                    }
-                ],
-            }
-        ),
-        finish_reason="stop",
-    )
-    backend = ScriptedBackend(route(task="create notes.txt"), plan, default=says("summary"))
-    adapter = build(telegram, settings, tmp_path, backend)
-
-    await adapter.handle_update(text_update("create notes.txt in the workspace"))
-
-    assert telegram.keyboards, "the workspace grant must be offered as a choice"
-    buttons = telegram.keyboards[-1]["inline_keyboard"][0]
-    assert [button["callback_data"] for button in buttons] == ["task:yes", "task:no"]
-    assert any("Acceptance criteria" in sent for sent in telegram.sent)
-
-
-async def test_declining_the_grant_stops_the_task(
-    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
-) -> None:
-    plan = Completion(
-        text=json.dumps(
-            {
-                "summary": "Create the file",
-                "steps": ["write notes.txt"],
-                "acceptance_criteria": ["notes.txt exists"],
-                "validation_strategy": [
-                    {
-                        "criterion": "notes.txt exists",
-                        "evidence": "list the directory",
-                        "capabilities": ["filesystem.read"],
-                    }
-                ],
-            }
-        ),
-        finish_reason="stop",
-    )
-    backend = ScriptedBackend(route(task="create notes.txt"), plan, default=says("summary"))
-    adapter = build(telegram, settings, tmp_path, backend)
-    await adapter.handle_update(text_update("create notes.txt"))
-
-    await adapter.handle_update(
-        {
-            "callback_query": {
-                "id": "cb1",
-                "from": {"id": ALLOWED},
-                "data": "task:no",
-                "message": {"chat": {"id": CHAT}},
-            }
-        }
-    )
-
-    assert any("declined" in sent.lower() for sent in telegram.sent)
-    assert not (tmp_path / "workspace" / "notes.txt").exists()
-
-
 # --- robustness --------------------------------------------------------------
 
 
 async def test_a_failing_turn_answers_instead_of_killing_the_bot(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(route(), RuntimeError("model exploded"))
+    backend = ScriptedBackend(RuntimeError("model exploded"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("hello"))
@@ -883,6 +788,51 @@ async def test_can_is_answered_from_the_wiring_and_never_by_the_model(
     assert "inspect_page" in answer
     assert "image/png" in answer
     assert "Ask first: write_file, edit_file" in answer
+
+
+async def test_stop_records_a_request_and_reaches_no_model(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """`/stop` is recorded, not executed.
+
+    The turn it is about is still running — in another container, deployed —
+    and what ends it is the loop reading this at its next step. So the chat
+    says what is true, and a message claiming the work has already stopped
+    would not be.
+    """
+
+    stops = MemoryStopRequests()
+    backend = ScriptedBackend()
+    adapter = build(telegram, settings, tmp_path, backend, stops=stops)
+
+    await adapter.handle_update(text_update("/stop", update_id=40))
+
+    assert backend.requests == []
+    assert await stops.requested(canonical_user_id(ALLOWED), 39) is True
+    assert await stops.requested(canonical_user_id(ALLOWED), 41) is False
+    assert "Stopping" in telegram.sent[0]
+
+
+async def test_a_stop_ends_the_turn_that_was_already_running(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """The two halves together: `/stop` is delivered, and the loop acts on it.
+
+    The turn here is driven after the stop is recorded rather than beside it,
+    because the durable record is the whole mechanism — a running turn in
+    another container reads this and nothing else.
+    """
+
+    stops = MemoryStopRequests()
+    backend = ScriptedBackend(calls("list_files", path="."), says("unreachable"))
+    adapter = build(telegram, settings, tmp_path, backend, stops=stops)
+
+    await adapter.handle_update(text_update("/stop", update_id=40))
+    await adapter.handle_update(text_update("list the workspace", update_id=39))
+
+    assert "Stopped at your request." in telegram.sent
+    # The tool the model asked for never ran, and the model was not asked again.
+    assert len(backend.requests) == 1
 
 
 async def test_a_batch_of_tool_calls_arrives_as_one_message_of_readable_labels(
@@ -941,53 +891,6 @@ async def test_a_formatted_message_too_long_to_send_whole_arrives_plain(
     assert telegram.sent[0].startswith("Result\nline 0")
 
 
-def test_the_finished_task_leads_with_the_result_then_its_evidence() -> None:
-    view = TaskView(
-        subdirectory=".",
-        grant=None,
-        plan=None,
-        implementation=ImplementationResult("wrote square.html", tool_calls=3),
-        outcome=TaskOutcome(
-            status="completed",
-            summary="all criteria passed",
-            iterations=1,
-            tool_calls=7,
-            elapsed_seconds=1.0,
-            artifacts=("square.html",),
-        ),
-        report=Report(
-            checks=(
-                CheckResult(name="the file exists", passed=True, detail="listed"),
-                CheckResult(name="it is green", passed=False, detail="not observed"),
-            )
-        ),
-    )
-
-    shown = task_result_text(view, "unused")
-
-    assert isinstance(shown, Formatted)
-    assert shown.plain.startswith("Result\nwrote square.html")
-    assert "✓ the file exists" in shown.plain
-    assert "✗ it is green" in shown.plain
-    assert "square.html" in shown.plain
-    assert "completed · 1 iteration(s) · 7 tool call(s)" in shown.plain
-
-
-def test_a_task_that_produced_no_outcome_still_says_something() -> None:
-    view = TaskView(
-        subdirectory=".",
-        grant=None,
-        plan=None,
-        implementation=None,
-        outcome=None,
-        report=None,
-    )
-
-    assert task_result_text(view, "the task produced no result") == (
-        "the task produced no result"
-    )
-
-
 def test_a_long_answer_is_split_rather_than_refused() -> None:
     text = "\n".join(f"line {index}" for index in range(1200))
 
@@ -1031,7 +934,7 @@ async def test_a_turn_that_reaches_the_model_says_it_is_working(
     """Most of a cold turn is spent waiting for a GPU, where the only honest
     thing to show is that the assistant is still there."""
 
-    backend = ScriptedBackend(route(), says("Hello."), default=says("summary"))
+    backend = ScriptedBackend(says("Hello."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("hello"))
@@ -1058,7 +961,7 @@ async def test_the_indicator_stops_when_the_turn_fails(
     """A renewing task outliving its turn is a leak in a container about to be
     frozen, and the failing path is where that is easiest to forget."""
 
-    backend = ScriptedBackend(route(), RuntimeError("model exploded"))
+    backend = ScriptedBackend(RuntimeError("model exploded"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("hello"))
@@ -1229,7 +1132,7 @@ print("hello")
 async def test_an_ordinary_markdown_answer_reaches_the_chat_as_telegram_markup(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(route(), says(ANSWER), default=says("summary"))
+    backend = ScriptedBackend(says(ANSWER), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("tell me"))
@@ -1251,7 +1154,7 @@ async def test_the_store_keeps_the_model_text_and_not_the_telegram_rendering(
 ) -> None:
     """Rendering is presentation. The canonical answer stays ordinary Markdown."""
 
-    backend = ScriptedBackend(route(), says(ANSWER), default=says("summary"))
+    backend = ScriptedBackend(says(ANSWER), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("tell me"))
@@ -1330,7 +1233,7 @@ async def test_every_tool_the_agent_can_call_has_a_readable_label(
     """`Working…` is the safety net, not the plan for tools that already exist."""
 
     adapter = build(telegram, settings, tmp_path, ScriptedBackend())
-    agent = adapter.harness(canonical_user_id(ALLOWED)).agent
+    agent = adapter.agent(canonical_user_id(ALLOWED))
     thread = current_thread(agent.store, canonical_user_id(ALLOWED))
 
     for name in agent.toolbox(thread).names:
@@ -1382,14 +1285,18 @@ async def test_consecutive_tool_calls_reuse_one_transient_status_message(
     assert methods.index("deleteMessage") < methods.index("sendMessage", 1)
     assert telegram.sent == ["Searching the web…", "Done."]
     edited = [payload for method, payload in telegram.calls if method == "editMessageText"]
-    assert edited[-1]["text"] == "Reading page…"
+    # The second batch of calls is the loop's second step, and says so: on a
+    # long turn the useful question is not only what it is doing but how far in
+    # it is. The first step is not numbered, because "Step 1" of a turn that
+    # reads one file is noise.
+    assert edited[-1]["text"] == "Step 2 · Reading page…"
 
 
 async def test_a_whole_turn_that_uses_a_tool_never_shows_its_name(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
     backend = ScriptedBackend(
-        route(), calls("list_files", path="."), says("Nothing there yet."), default=says("summary")
+        calls("list_files", path="."), says("Nothing there yet."), default=says("summary")
     )
     adapter = build(telegram, settings, tmp_path, backend)
 
@@ -1468,42 +1375,30 @@ def test_a_conversation_button_is_model_free_at_the_front_door() -> None:
     assert needs_model(Incoming(CHAT, ALLOWED, "/chats")) is False
 
 
-def plan_completion() -> Completion:
-    return Completion(
-        text=json.dumps(
-            {
-                "summary": "Create the file",
-                "steps": ["write notes.txt"],
-                "acceptance_criteria": ["notes.txt exists"],
-                "validation_strategy": [
-                    {
-                        "criterion": "notes.txt exists",
-                        "evidence": "list the directory",
-                        "capabilities": ["filesystem.read"],
-                    }
-                ],
-            }
-        ),
-        finish_reason="stop",
-    )
-
-
 def settlements(telegram: FakeTelegram) -> list[dict[str, Any]]:
     return [
         payload for method, payload in telegram.calls if method == "editMessageReplyMarkup"
     ]
 
 
-async def test_a_rejected_plan_settles_the_same_message_to_one_status_button(
+# The approval that settles is now the loop's own: the model asks for a
+# destructive tool, the graph stops on it, and the two buttons are that
+# question. There is no second lifecycle with a plan to approve.
+WRITE = "call_write_file"
+
+
+def writes() -> Completion:
+    return calls("write_file", path="notes.txt", content="hello")
+
+
+async def test_a_rejected_call_settles_the_same_message_to_one_status_button(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(
-        route(task="create notes.txt"), plan_completion(), default=says("summary")
-    )
+    backend = ScriptedBackend(writes(), says("Not written."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
-    await adapter.handle_update(text_update("create notes.txt"))
+    await adapter.handle_update(text_update("write notes.txt"))
 
-    await adapter.handle_update(approval_update("task:no"))
+    await adapter.handle_update(approval_update(f"call:no:{WRITE}"))
 
     settled = settlements(telegram)
     assert len(settled) == 1
@@ -1515,16 +1410,14 @@ async def test_a_rejected_plan_settles_the_same_message_to_one_status_button(
     assert buttons[0][0]["style"] == "danger"
 
 
-async def test_an_approved_plan_settles_to_the_success_button(
+async def test_an_approved_call_settles_to_the_success_button(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(
-        route(task="create notes.txt"), plan_completion(), default=says("summary")
-    )
+    backend = ScriptedBackend(writes(), says("Written."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
-    await adapter.handle_update(text_update("create notes.txt"))
+    await adapter.handle_update(text_update("write notes.txt"))
 
-    await adapter.handle_update(approval_update("task:yes"))
+    await adapter.handle_update(approval_update(f"call:yes:{WRITE}"))
 
     settled = settlements(telegram)
     assert settled, "an accepted approval must show as accepted"
@@ -1533,6 +1426,7 @@ async def test_an_approved_plan_settles_to_the_success_button(
     assert button["callback_data"] == SETTLED_APPROVED
     assert button["style"] == "success"
     assert settled[-1]["message_id"] == 500
+    assert (tmp_path / "workspace" / "notes.txt").exists()
 
 
 async def test_a_transition_that_failed_is_never_shown_as_settled(
@@ -1540,31 +1434,26 @@ async def test_a_transition_that_failed_is_never_shown_as_settled(
 ) -> None:
     """The button is evidence of a state change, not decoration over one.
 
-    Note what this does *not* claim. Settlement follows the approval being
-    accepted, so a task that resumes and then fails on its own work is still
+    Note what this does *not* claim. Settlement follows the resume producing
+    something, so a turn that resumes and then fails on its own work is still
     genuinely approved and says so. What must never settle is the transition
     itself failing, which is what is forced here.
     """
 
-    backend = ScriptedBackend(
-        route(task="create notes.txt"), plan_completion(), default=says("summary")
-    )
+    backend = ScriptedBackend(writes(), says("Written."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
-    await adapter.handle_update(text_update("create notes.txt"))
+    await adapter.handle_update(text_update("write notes.txt"))
 
     async def refuse(*_arguments: Any, **_keywords: Any) -> Any:
-        raise RuntimeError("the task could not be resumed")
+        raise RuntimeError("the turn could not be resumed")
         yield  # pragma: no cover - never reached, but makes this a generator
 
-    adapter.harness(canonical_user_id(ALLOWED)).resume_task_with_progress = refuse
+    adapter.agent(canonical_user_id(ALLOWED)).resume_events = refuse
 
-    await adapter.handle_update(approval_update("task:yes"))
+    await adapter.handle_update(approval_update(f"call:yes:{WRITE}"))
 
     assert settlements(telegram) == []
     assert any("failed" in sent.lower() for sent in telegram.sent)
-    # Nor may the chat itself carry the claim the button was denied: progress
-    # text before the first proof of resume says only that the press arrived.
-    assert not any("approved" in sent.lower() for sent in telegram.sent)
 
 
 async def test_pressing_a_settled_button_changes_nothing(
@@ -1638,7 +1527,7 @@ def texts(telegram: FakeTelegram, method: str) -> list[str]:
 async def test_an_answer_is_previewed_once_and_finished_in_the_same_message(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    backend = ScriptedBackend(route(), says(LONG_ANSWER), default=says("summary"))
+    backend = ScriptedBackend(says(LONG_ANSWER), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("tell me about paris"))
@@ -1657,7 +1546,7 @@ async def test_a_short_answer_arrives_whole_rather_than_previewed(
 ) -> None:
     """A preview holding one word that is about to be replaced helps nobody."""
 
-    backend = ScriptedBackend(route(), says("Yes."), default=says("summary"))
+    backend = ScriptedBackend(says("Yes."), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("is it true"))
@@ -1672,7 +1561,6 @@ async def test_a_tool_step_previews_only_the_answer(
     """A model turn that only calls a tool has nothing to show yet."""
 
     backend = ScriptedBackend(
-        route(),
         calls("list_files", path="."),
         says(LONG_ANSWER),
         default=says("summary"),
@@ -1710,7 +1598,7 @@ async def test_a_failed_final_edit_delivers_the_answer_and_clears_the_preview(
         return httpx.Response(200, json={"ok": True, "result": {}})
 
     client = TelegramClient(settings, transport=httpx.MockTransport(handle))
-    backend = ScriptedBackend(route(), says(LONG_ANSWER), default=says("summary"))
+    backend = ScriptedBackend(says(LONG_ANSWER), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
     await adapter.client.aclose()
     adapter.client = client
