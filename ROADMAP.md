@@ -5,11 +5,13 @@
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** 4.4, `todo` as agent state. 4.3 and 4.3.5 were both
-closed on 2026-08-30 with one thing deliberately not achieved, recorded below
-and moved into its own queue item: **proportional validation was never
-demonstrated.** The assistant makes the artifact and then describes it without
-looking, and having looked at a different page it invented details of a source
-it had not read. Closing them is a scope decision, not a claim: the remaining
+closed on 2026-08-30 with one thing deliberately not settled, recorded below
+and moved into its own queue item: **proportional validation is demonstrated
+but not dependable.** The first live session after the workspace path left the
+prompt inspected the artifact before answering, both times, unprompted; the
+scenario runner on the same prompt does not. And having inspected a different
+page the assistant invented details of a source it never read. Closing them is
+a scope decision, not a claim: the remaining
 lever inside those two steps was the wording of a prompt, three rounds of which
 produced better and worse in turn, while the real levers — a source-plus-render
 observation, and a production source of steering — belong to later steps. 4.4
@@ -281,10 +283,14 @@ Verified platform facts and cold-start evidence remain in
      asked permission before safe inspection. PDF creation is not acceptance
      until the sandbox exists.
 
-     **What the seam does is done; what it was hoped to cause is not.** The
-     model still describes an artifact it has not opened, and there is no
-     production source of steering — by design, since a validator was refused
-     and `todo` is meant to be that source. Asked to look, it looks. Closed
+     **What the seam does is done; what it was hoped to cause is inconsistent.**
+     In the first live session after the workspace path left the prompt, both
+     artifact turns called `inspect_page` between writing the file and
+     answering — the model's own trajectory, no steering, no validator. The
+     scenario runner's `castle`, on the same prompt, still does not. So it is
+     demonstrated, not dependable, and there is no production source of
+     steering — by design, since a validator was refused and `todo` is meant to
+     be that source. Closed
      rather than kept open because the only lever left inside this step was
      prompt wording, and three rounds of that produced better and worse in
      turn. The behaviour is now one queue item below, after 4.4.
@@ -397,6 +403,18 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
 
 Recorded, not approved, not begun, and not in the order above. One line each.
 
+- **The assistant does not hand over what it made.** Live on 2026-08-30, with
+  standing instructions that said not to send code into the chat: asked for an
+  HTML page it wrote `house.html`, inspected it, and answered with the literal
+  text `[house.html](house.html)` — twice, in two separate messages. The
+  Markdown renderer is right to leave that as text, because only http, https,
+  tg and mailto become links and a relative path leads nowhere; the model is
+  trying to deliver a file *in prose*, and believes it has. The screenshot and
+  then the file itself each arrived only when asked for directly. So the
+  missing step is not a decision to withhold — it is that handing something
+  over is `send_file`, and the model reaches for a link instead. Related to
+  4.5.5 and not the same: that one is about claiming what was not seen, this
+  one about not delivering what was made.
 - **Latency to the first visible word**, to give 4.1 a "before" number:
   `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
 - **Throttle the edits that write a streamed answer.** Seven long answers in

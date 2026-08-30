@@ -141,6 +141,43 @@ so no such escapes exist. The morning's `read_file` answer had found both real
 defects. This is the sharpest form of the residual: not merely describing
 without looking, but describing a thing it did not look at as though it had.
 
+## The first live session with instructions in place
+
+Five turns, immediately after the deploy that removed the workspace path. The
+standing instructions read: *отвечай коротко. не присылай код в чат, если нужно
+присылай файлами. визуальная проверка при задачах важна.*
+
+```text
+09:10:16  1 model, no tools, 718 out              a star, written into the chat as code
+09:10:46  4 model  write_file → inspect_page → send_file(star-….png)
+09:12:41  3 model  write_file house.html → inspect_page house.html → stop
+09:13:22  2 model  send_file(house-….png)         after "а скрин?"
+09:13:34  2 model  send_file(house.html)          after "а файл"
+```
+
+**Proportional validation did happen.** In both turns that made an artifact,
+`inspect_page` sits between the write and the final answer, chosen by the model,
+with no steering and no validator — the acceptance `DECISIONS.md` described.
+Note that the 09:10:46 turn had 2,588 input tokens on its first call, the same
+as a scenario run with no overlay, so this began before the instructions were
+saved: it is the deployed brief without the path, not the overlay. The overlay
+appears from 09:12:41, where the first call carries 105 tokens more.
+
+It is not consistent, though. The scenario runner's `castle`, same prompt, does
+not inspect. Demonstrated live, not reproduced on demand.
+
+**What did not happen is delivery.** Asked for a page, the model wrote it,
+looked at it, and answered with the literal text `[house.html](house.html)` —
+twice, in two messages. `ui/telegram/markdown.py` renders a link only for http,
+https, tg and mailto, because a rendered link promises the tap goes somewhere
+and a relative path goes nowhere; leaving it literal is correct. The fault is
+that the model tried to hand over a file *in prose* and believed it had. The
+screenshot, and later the file, each came only when asked for by name.
+
+So the standing instruction — do not send code into the chat, send files — was
+heard and then executed with the wrong instrument. Recorded in `ROADMAP.md`
+under "Not started".
+
 ## Why 4.3 and 4.3.5 were closed anyway
 
 Both steps' own deliverables are done, deployed and measured. What is not
