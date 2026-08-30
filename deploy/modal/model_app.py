@@ -65,13 +65,34 @@ TRANSFORMERS_VERSION = "5.14.1"
 VLLM_PORT = 8000
 MINUTES = 60
 
-# The hard context ceiling. It reserves KV cache at start-up, so it cannot be
-# changed on a running server — but the application reads it from `/v1/models`
-# and spends only `AGENT_CONTEXT_FRACTION` of it, which means experiments with
-# effective context are an `.env` edit rather than a deploy. Kept at the
-# validated 16384 for the first deploy; raise it once the GPU has reported how
-# much KV cache actually fits.
-MAX_MODEL_LEN = 16384
+# The hard context ceiling: the longest single sequence the engine will accept.
+# It does not size the KV cache — `GPU_MEMORY_UTILIZATION` does that, and the
+# pool is the same whatever this says. It is only checked against the pool at
+# start-up, so raising it costs no VRAM; it costs concurrency, because fewer
+# sequences that long share one pool. For a handful of people that is not a
+# constraint, and the real price of a long context here is prefill time, which
+# is measured superlinear.
+#
+# It cannot change on a running server: vLLM takes it as an argument to
+# `vllm serve`, and the GPU snapshot holds an engine already built with it. So it
+# is set once, as high as the pool validates, rather than used as a dial — the
+# dial is `AGENT_CONTEXT_FRACTION`, an `.env` edit with no restart. Read
+# `Available KV cache memory` from a boot log before changing it: a ceiling the
+# pool cannot hold is a refused boot, and a refused boot costs a boot.
+#
+# 65536 since 2026-08-30, and the boot that raised it also refuted the
+# arithmetic it was raised on. Measured at this value: 11.13 GiB of pool holding
+# 256,669 tokens, and vLLM's own `Maximum concurrency for 65,536 tokens per
+# request: 3.92x`.
+#
+# Predicted beforehand from the 16k boot logs was 1.32x, by treating KV per token
+# as a constant. It is not one for this model: the same ~11 GiB held 86,664
+# tokens at a 16k ceiling and 256,669 at a 64k one. Gemma's attention is not
+# uniform across layers, so what a longer ceiling costs is not what dividing the
+# pool by a per-token figure says it costs. Do not re-derive that constant from
+# one boot and plan with it; read the two lines above from the boot that actually
+# ran. `reports/2026-08-30_v2_context_memory_plan.md`.
+MAX_MODEL_LEN = 65536
 
 # Sleep mode's price, discovered by paying it. `--enable-sleep-mode` switches
 # vLLM onto the cumem allocator, which maps and unmaps physical pages so that
@@ -237,6 +258,22 @@ image = (
             # snapshot creation and names this as the mitigation; their vLLM
             # snapshot example sets it too.
             "TORCHINDUCTOR_COMPILE_THREADS": "1",
+            # The single-node rendezvous, pinned to loopback. vLLM builds a
+            # PyTorch process group even at `world_size=1`, and it picks the
+            # address for `distributed_init_method` from `VLLM_HOST_IP`. Left
+            # unset it takes the container's own address, which the snapshot
+            # captures and a restored container no longer owns — so the NCCL
+            # heartbeat monitor polls a socket with no peer and prints
+            # `Broken pipe` about once a second for the life of the container.
+            # Diagnosed in `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`
+            # and deliberately not fixed then, because it is warning-only and a
+            # snapshot must not be rebuilt to clean up logs. This is the deploy
+            # that report said to carry it on. It has to be here rather than in
+            # the enter hook: all three are read while the process group is
+            # constructed, which is before the snapshot exists.
+            "VLLM_HOST_IP": "127.0.0.1",
+            "NCCL_SOCKET_IFNAME": "lo",
+            "GLOO_SOCKET_IFNAME": "lo",
         }
     )
 )
@@ -426,7 +463,14 @@ def preflight() -> None:
     enable_memory_snapshot=True,
     experimental_options={"enable_gpu_snapshot": True},
 )
-@modal.concurrent(max_inputs=32)
+# Eight, down from 32 on 2026-08-30 with the ceiling. Thirty-two was chosen when
+# a sequence could reach 16k and the pool held five of them; at 64k it holds
+# about 1.3, so the same number now describes a container that accepts far more
+# long work than it can hold and resolves the difference by preempting — and a
+# preempted sequence pays its prefill again, which is the expensive half. Eight
+# still exceeds the concurrent users this private deployment has, and the
+# requests beyond it queue at Modal instead of thrashing inside vLLM.
+@modal.concurrent(max_inputs=8)
 class Server:
     """vLLM's own OpenAI-compatible server, unmodified, snapshotted asleep.
 

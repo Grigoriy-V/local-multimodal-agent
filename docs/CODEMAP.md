@@ -30,7 +30,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Understand current architecture | `docs/PROJECT_MAP.md` | this file |
 | Understand current task/order | `ROADMAP.md` | linked reports |
 | Understand why a durable boundary exists | `DECISIONS.md` | the current owner in this map, linked evidence |
-| Change environment/config | `app/config.py` | `.env.example`, `ModelSettings`, `AgentSettings`, `TelegramSettings`, `WebSettings` |
+| Change environment/config | `app/config.py` | `env.example`, `ModelSettings`, `AgentSettings`, `TelegramSettings`, `WebSettings` |
 | Change the agent loop | `app/agent/graph.py` | `build_agent`, `AgentState`, `interrupt`, `tests/test_agent_graph.py` |
 | Change what one turn may spend | `app/agent/graph.py` | `TurnBudget`, `exceeded`, `BUDGET_EXHAUSTED`, `tests/test_turn_bounds.py` |
 | Change how a running turn is stopped | `app/agent/stop.py` | `StopRequests`, `MemoryStopRequests`, `PostgresStopRequests`, `asked_to_stop` |
@@ -41,6 +41,9 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change OpenAI/vLLM request translation | `app/models/openai_compatible.py` | `OpenAICompatibleBackend`, `build_messages`, `parse_completion` |
 | Change system prompt/context replay | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT`, `Context`, `ContextPolicy` |
 | Change context folding/summary | `app/context/summary.py`, `app/context/persistence.py` | `fold_older_messages`, `load_turn_context` |
+| Change when a conversation is folded | `app/agent/graph.py` | `fitted`, `context_folded` |
+| Estimate how large a request is | `app/models/base.py`, `app/models/openai_compatible.py` | `estimate_tokens`, `measure_request`, `CHARS_PER_TOKEN`, `MEDIA_TOKENS`, `_calibrate` |
+| Change how much context a request may use | `app/agent/runtime.py`, `app/config.py` | `Agent.budget`, `context_fraction`, `context_tokens` |
 | Change conversation/memory contract | `app/memory/base.py` | `ConversationStore`, `TurnContextRecords` |
 | Measure a turn: identity, timings, counts, outcome | `app/telemetry/` | `TurnTrace`, `Telemetry`, `TurnRun`, `TraceEvent`, `NO_TRACE`, `RUN_ID` |
 | Change where turn telemetry is stored | `app/telemetry/open.py` | `open_telemetry`, `SqliteTelemetry`, `PostgresTelemetry` |
@@ -134,7 +137,7 @@ TELEGRAM_*   -> TelegramSettings
 WEB_*        -> WebSettings
 ```
 
-`.env.example` documents local names and defaults.
+`env.example` documents local names and defaults.
 
 A deployed variable may intentionally use a different source name locally. Example: `DEPLOY_WEB_RENDERER_URL` in `.env` is published as `WEB_RENDERER_URL` by `tools/sync_control_secret.py` so the local profile does not accidentally use the deployed renderer.
 

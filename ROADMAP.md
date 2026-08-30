@@ -4,9 +4,13 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. Sub-step 4.1 is done and accepted live, in the
-deployed profile as well as locally; 4.2, the tool execution seam, is next and
-needs approval. `reports/2026-08-30_v2_one_loop.md`.
+**Current approved step:** 4.1.5, real context capacity. The endpoint half is
+live: the ceiling is 65,536 and three real Telegram turns went through it
+unchanged. The application half — folding before the request, the request-size
+estimate, the per-user budget — is implemented and green offline but **not
+deployed**; `assistant-control` still runs the pre-4.1.5 build. Deploying it is
+the remaining gate. `reports/2026-08-30_v2_context_capacity.md`,
+`reports/2026-08-30_v2_context_memory_plan.md`.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -32,9 +36,10 @@ documents.
   Deployed database is **Neon**, reached through its pooled endpoint.
 - `assistant-llm-v2` at
   `https://grigoriy-v--assistant-llm-v2-server-serve.modal.run` is the primary
-  model deployment, reached with `MODEL_AUTH_STYLE=modal_proxy`. The original
-  `assistant-llm` stays deployed as rollback only; retiring it is a destructive
-  human gate.
+  model deployment, reached with `MODEL_AUTH_STYLE=modal_proxy`. Its context
+  ceiling is 65,536 since 2026-08-30, at 0.80 utilization and unquantized KV.
+  The original `assistant-llm` stays deployed as rollback only; retiring it is a
+  destructive human gate.
 - `assistant-control` serves the Telegram webhook and the update worker. Idle
   windows: 60 s on both CPU functions, 12 s on the GPU. The GPU value is live
   through `deploy/modal/autoscale.py` and matches `SCALEDOWN_WINDOW`, so a
@@ -43,9 +48,11 @@ documents.
   auth. It has run both in the deployed self-test and in a real Telegram turn.
   The web keys are in the `assistant-control` secret, published from the owner's
   own `.env` by `tools/sync_control_secret.py`.
-- Owed to the next `assistant-llm-v2` deploy, and not a reason to create one:
-  the NCCL loopback rendezvous fix before snapshot creation.
-  `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`.
+- The NCCL loopback rendezvous went in with the 2026-08-30 ceiling boot and the
+  warning storm is gone: no `Broken pipe` line at or after that boot, where the
+  previous revision produced one a second for a container's whole life.
+  `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`,
+  `reports/2026-08-30_v2_context_capacity.md`.
 
 ## Closed stages
 
@@ -192,6 +199,37 @@ Verified platform facts and cold-start evidence remain in
      that conversation for ever. The acknowledgement can no longer fail a turn,
      and the queue gives up on an update after three attempts.
 
+   - **4.1.5 Real context capacity.** The effective limit today is 9,830 tokens
+     — 16,384 spent at `AGENT_CONTEXT_FRACTION` 0.6 — and one loop can now spend
+     many steps inside a single turn. Raise the engine ceiling to **65,536** on
+     the boot already owed the NCCL fix; keep one threshold rather than two;
+     measure context pressure before the model call instead of from the previous
+     turn's reported usage; and make the per-request budget per-user in
+     mechanism without exposing a choice yet. Not the context engine: no
+     pruning, no summarizer schema, no new tables. It comes before 4.2 because
+     4.2 deliberately increases how many tool results a turn accumulates.
+     `DECISIONS.md` 2026-08-30, both entries of that date on context;
+     `reports/2026-08-30_v2_context_memory_plan.md` for the KV arithmetic.
+
+     **The boot ran on 2026-08-30 and the ceiling is live at 65,536.** It cost
+     299.7 s to first serving, text, image and audio all answered on the new
+     revision, and the NCCL loopback rendezvous owed since 2026-08-28 went in
+     with it and silenced the warning storm. `GPU_MEMORY_UTILIZATION` stayed
+     0.80 and there is no KV-cache quantization; `max_inputs` went from 32 to 8.
+     Measured: 11.13 GiB of KV pool, 256,669 tokens, 3.92x concurrency at full
+     length — about three times the room predicted, because KV per token is not
+     constant across ceilings for this model. That refutes the "128k is
+     unreachable on an A10" reasoning recorded earlier the same day.
+
+     The application side is implemented and green offline: the request about to
+     be sent is estimated before every model step and an over-budget
+     conversation folds before it is sent, the estimate lives behind the model
+     boundary and calibrates itself from reported token counts, and the budget
+     takes a chosen `AGENT_CONTEXT_TOKENS` clamped to the server's limit ahead
+     of the fraction. None of it is deployed: `assistant-control` was not
+     rebuilt, so the three live turns exercised the new endpoint with the old
+     application. Deploying it, and then seeing a fold happen, is what closes
+     this sub-step. `reports/2026-08-30_v2_context_capacity.md`.
    - **4.2 Tool execution seam.** One `pre_execute → execute → post_execute`
      path for every tool, holding consent policy, validation and telemetry.
      Where autonomy inside the workspace is implemented; `DECISIONS.md`
@@ -202,13 +240,30 @@ Verified platform facts and cold-start evidence remain in
      document and deliver it — as a harness test, never a PDF workflow.
    - **4.4 `todo` as agent state, not a mode**, surviving folding and restart.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
-   - **4.6 Cache-friendly context assembly.** Per-turn retrieved facts sit in
-     front of the conversation today and invalidate the prefix cache from there
-     down.
+   - **4.6a Context engine.** Context preparation before every model step rather
+     than folding after a turn: measure the surface, shorten old tool results
+     first, summarize only if that was not enough, and record what was done
+     durably. Cache-friendly assembly lands here, since it is the same
+     assembly — per-turn retrieved facts sit in front of the conversation today
+     and invalidate the prefix cache from there down. Bounded by the
+     history/projection decision of `DECISIONS.md` 2026-08-30.
+
+     The person's own choice of context size belongs here too, not earlier: a
+     smaller budget is only a good trade once compaction is what enforces it,
+     and 4.1.5 still folds a turn late. The offered sizes are derived from the
+     engine's real ceiling rather than listed, and the choice is presented as a
+     trade — more context is slower and costs more, because prefill is
+     superlinear. It shares the schema-3 migration with the compaction records,
+     which is one human gate on the populated database instead of two.
+   - **4.6b Exact recovery from archived history.** A search over what was
+     actually said, returning real messages and tool results rather than another
+     summary, so a detail a summary lost is recoverable. Full-text in both
+     profiles; it joins the `ConversationStore` contract suite. No vector store.
    - **4.7 Restart, resume and the scenario suite**, asserting on harness events
      and outcomes rather than model wording, and compared against item 3's
-     numbers. Live suites run as one warm window and only with explicit
-     permission, because every run wakes a GPU.
+     numbers, including that a turn continues correctly across a compaction.
+     Live suites run as one warm window and only with explicit permission,
+     because every run wakes a GPU.
 
 5. **Isolated execution.** A sandbox backend behind the 4.2 seam: shell, Python
    and package installation in a restricted workspace holding no control-plane
@@ -243,10 +298,27 @@ assistant is idle — and the same `app/` still serves the local profile.
 
 Fine-tuning, multi-agent orchestration, a vector database before text retrieval
 works, Open WebUI as the main UI, and the superseded policy-platform/MCP version
-of Version 2. A separate 64k/128k context and VRAM experiment remains deferred
-unless explicit GPU approval and a concrete product trigger make it current.
-Changing scope requires an edit here, and a `DECISIONS.md` entry when the change
-is architecturally durable.
+of Version 2. Changing scope requires an edit here, and a `DECISIONS.md` entry
+when the change is architecturally durable.
+
+A larger context was deferred here until a concrete product trigger made it
+current. The trigger arrived on 2026-08-30: the one loop of 4.1 can spend a
+turn's worth of steps against an effective 9,830 tokens. It is now 4.1.5 in the
+queue, at 64k. It was also deferred as a "VRAM experiment", which the ceiling is
+not — see `DECISIONS.md` 2026-08-30. Each boot it needs is still its own GPU
+gate.
+
+**A different endpoint for 128k**, recorded 2026-08-30 and not begun: L40S with
+Qwen3-8B, a 128k ceiling and KV-cache quantization, as its own measured
+comparison rather than a continuation of the A10. Any such run needs its own
+approval, and quantized KV on an already 4-bit QAT checkpoint needs a quality
+comparison, not just a successful boot.
+
+This was recorded as a different endpoint because 128k looked unreachable on the
+A10. The 64k boot showed that reasoning was wrong — 3.92x concurrency at full
+length, not the 1.32x predicted — so 128k on the current hardware is now an open
+question rather than a settled no. It stays out of scope until someone wants it:
+prefill, not memory, is what a long context costs here.
 
 ## How this file is kept
 

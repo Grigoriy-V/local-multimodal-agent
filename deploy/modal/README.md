@@ -92,7 +92,7 @@ MODEL_API_KEY=wk-....ws-...
 MODEL_AUTH_STYLE=modal_proxy
 ```
 
-Never commit the token. `.env` is ignored; `.env.example` holds the shape only.
+Never commit the token. `.env` is ignored; `env.example` holds the shape only.
 
 ## What costs what
 
@@ -103,10 +103,17 @@ Never commit the token. `.env` is ignored; `.env.example` holds the shape only.
 | `MAX_MODEL_LEN`, GPU type | seconds — deploy, no image rebuild, weights stay |
 | vLLM version, weights | minutes — image rebuild or Volume refill |
 
-`MAX_MODEL_LEN` reserves KV cache at start-up and therefore cannot change on a
-running server. The application reads the ceiling from `/v1/models` and spends
-`AGENT_CONTEXT_FRACTION` of it, so experiments with effective context stay on
-the free row of that table.
+`MAX_MODEL_LEN` does not reserve KV cache; `GPU_MEMORY_UTILIZATION` does. The
+pool is the same size whatever the ceiling, and the ceiling is only validated
+against it at start-up — one sequence that long has to fit. Raising it therefore
+costs no VRAM, it costs concurrency: fewer long sequences share the same pool.
+
+What it does cost is a boot. vLLM takes it as an argument to `vllm serve`, so it
+cannot change in a live process, and the GPU snapshot holds an engine already
+built with it — a new value means one uncached first boot before the snapshot is
+useful again. So it is set once, as high as the pool validates, and not used as
+a dial. The dial is `AGENT_CONTEXT_FRACTION`: the application reads the ceiling
+from `/v1/models` and spends a fraction of it, which is the free row above.
 
 `autoscale.py` changes revert to `SCALEDOWN_WINDOW` in `model_app.py` on the
 next deploy. That constant is the decision; the script is for experiments.

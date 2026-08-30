@@ -135,7 +135,7 @@ class PollingBot:
 async def main() -> None:
     settings = TelegramSettings()
     if not settings.token:
-        raise SystemExit("TELEGRAM_TOKEN is not set; see .env.example")
+        raise SystemExit("TELEGRAM_TOKEN is not set; see env.example")
     if not settings.allowed and not settings.open_access:
         raise SystemExit(
             "TELEGRAM_ALLOWED_USERS is empty and TELEGRAM_OPEN_ACCESS is off, so "

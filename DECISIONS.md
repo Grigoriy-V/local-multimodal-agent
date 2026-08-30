@@ -575,3 +575,76 @@ Supersedes / Superseded by
 Narrows the guarantee recorded on 2026-08-30 in
 `reports/2026-08-30_v2_conversation_serialization.md`: a conversation's
 *messages* are serialized, not everything a person sends it.
+
+## 2026-08-30 — Stored history is canonical; what the model sees is a projection
+
+Decision
+
+The conversation as stored is lossless and is never rewritten or deleted by
+anything that makes a request smaller. Summarizing, shortening a tool result or
+dropping media produces a *model-visible surface* derived from that history, and
+a derived surface may be rebuilt, rebuilt differently, or rebuilt by a different
+model without the conversation changing. Compaction is always in place: a
+`thread_id` before it is the same `thread_id` after it. Anything the product
+depends on — the current goal, a pending decision, what has already been done —
+lives in structured state, not only in the text of the surface, so no summarizer
+has to guess it back.
+
+Why
+
+The one loop from 4.1 can spend many steps inside a single turn, so a turn can
+now outgrow the request it is being assembled into before it ends. Every way of
+making a request smaller is lossy, and the moment a lossy step is allowed to
+write back to the store, the loss is permanent and the assistant's memory
+becomes an artefact of whichever summarizer ran that day. Keeping the two apart
+is what makes a summary safe to be wrong: it can be regenerated, and the exact
+wording, error or filename is still recoverable from what was actually said.
+
+Consequences
+
+Folding writes a summary and the position it covers, never a deletion — which is
+what `app/context/summary.py` already does, and is now a rule rather than an
+implementation detail. Shortening a tool result on the surface leaves the full
+result in history. Compaction gets a durable record of its own, in the memory
+schema rather than in telemetry, because it is a source of what the model was
+shown and not a measurement of a turn. `todo` and a pending `ask_user` are
+structured state for this reason, which binds sub-steps 4.4 and 4.5.
+
+Supersedes / Superseded by
+
+None.
+
+## 2026-08-30 — The engine's context ceiling is set once; context is spent by the application
+
+Decision
+
+`MAX_MODEL_LEN` is chosen once, as high as the measured KV pool validates, and
+is not a tuning dial. How much context a turn actually uses is decided in the
+application: it reads the ceiling from `/v1/models` and spends a fraction of it,
+and later the context engine decides what fills that room. Changing how much
+context the assistant uses must never require a deploy.
+
+Why
+
+The repository documented this backwards — that the ceiling "reserves KV cache
+at start-up" — and the plan was nearly built on it. `GPU_MEMORY_UTILIZATION`
+sizes the pool; the ceiling is only validated against it, so raising it costs no
+VRAM at all. It costs concurrency, which for a handful of people is not a
+constraint. What it does cost is one uncached boot, because vLLM builds the
+engine with it and the GPU snapshot captures that engine — which is an argument
+for setting it high once, not for leaving it low.
+
+Consequences
+
+The 16,384 ceiling stops being an architectural limit and becomes a value to
+raise on the next `assistant-llm-v2` boot, which is already owed the NCCL fix.
+The number comes from `Available KV cache memory` in a boot log, because a
+ceiling the pool cannot hold is a refused boot. `AGENT_CONTEXT_FRACTION` remains
+the only everyday control and stays a single threshold — a second fraction on
+top of it would silently multiply. Raising the ceiling does not reduce the need
+for compaction: prefill is measured dominant and superlinear, so a long context
+is paid for in seconds per turn even when it fits.
+
+Supersedes / Superseded by
+
+None.

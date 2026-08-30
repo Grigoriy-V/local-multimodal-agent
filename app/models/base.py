@@ -13,6 +13,22 @@ from typing import Any, Literal
 Role = Literal["system", "user", "assistant", "tool"]
 
 
+# Characters per token before any request has been observed. Four is the usual
+# figure for English prose; this assistant is talked to in Russian and carries
+# JSON tool arguments and file contents, both of which tokenize worse than
+# prose. Three is deliberately the pessimistic end, because the two errors are
+# not symmetric: overestimating folds a conversation earlier than it had to,
+# while underestimating sends a request the server refuses.
+CHARS_PER_TOKEN = 3.0
+
+# What one non-text part costs. An image becomes a fixed-length sequence, so a
+# constant is the right shape for it; audio scales with duration, which the part
+# alone does not reveal, so this is an upper estimate of a short clip rather
+# than a measurement. Neither is corrected by calibration, which only watches
+# text — see `OpenAICompatibleBackend.estimate_tokens`.
+MEDIA_TOKENS = {"image": 320, "audio": 1500, "file": 0}
+
+
 class BackendError(RuntimeError):
     """The model endpoint was reached but its answer cannot be used."""
 
@@ -75,6 +91,31 @@ class Message:
         object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
         if not self.content and not self.tool_calls:
             raise ValueError("a message requires content or tool calls")
+
+
+def measure_request(messages: Sequence[Message]) -> tuple[int, int]:
+    """Characters of text, and tokens of everything that is not text.
+
+    The two are kept apart because only the first can be calibrated: a
+    completion reports how many tokens a request became, which says what text
+    is worth, and says nothing usable about an image that was in it too.
+
+    Tool calls count. A model asking to write a file carries the file in its
+    arguments, and a turn that measured only the prose would miss the largest
+    thing in the request.
+    """
+
+    chars = 0
+    media = 0
+    for message in messages:
+        for part in message.content:
+            if part.kind == "text":
+                chars += len(part.text or "")
+            else:
+                media += MEDIA_TOKENS.get(part.kind, 0)
+        for call in message.tool_calls:
+            chars += len(call.name) + len(str(call.arguments))
+    return chars, media
 
 
 @dataclass(frozen=True)
@@ -168,3 +209,22 @@ class ModelBackend(ABC):
         """
 
         return None
+
+    def estimate_tokens(self, messages: Sequence[Message]) -> int:
+        """About how large this request would be, without sending it.
+
+        Here rather than in `app/context/` because it is model-shaped: the same
+        text is a different number of tokens for a different model, and the
+        decision that keeps every tokenizer inside this package applies to
+        estimates of one as much as to one itself.
+
+        Deliberately an estimate. The exact answer needs the model's own
+        tokenizer, which would be a dependency and a cold start on every worker
+        for a number whose only job is to decide whether to fold a conversation
+        *before* asking rather than after. The fraction of the context window
+        the application actually spends is the margin that makes an approximate
+        answer safe.
+        """
+
+        chars, media = measure_request(messages)
+        return int(chars / CHARS_PER_TOKEN) + media

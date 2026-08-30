@@ -182,8 +182,19 @@ class AgentSettings(BaseSettings):
     # The share of the model's own context a request may occupy. The limit
     # itself is read from the server, never copied here: two copies of one
     # number are one number and one lie waiting to happen. The headroom is what
-    # lets the fold react to a measured overshoot instead of guessing ahead.
+    # absorbs the difference between an estimated request size and the real one.
     context_fraction: float = 0.6
+    # A budget in tokens, when someone has chosen one, instead of the share
+    # above. Always clamped to what the server actually accepts, so a choice can
+    # only ever ask for less than the model allows and never for more than it
+    # can serve. Unset by default, which means the fraction decides.
+    #
+    # Per-person by construction: an `Agent` belongs to one user, so this is
+    # already the place a chosen size would land. Nothing stores or offers that
+    # choice yet — the command and the per-user column are 4.6a, where
+    # compaction is good enough to make a smaller budget a real trade rather
+    # than a way to lose history faster.
+    context_tokens: int | None = None
     # Record what each turn cost and where its time went. On by default because
     # a turn nobody measured is a turn nobody can improve, and off is a
     # redeployed setting rather than a reverted release. When it is off the

@@ -10,7 +10,6 @@ htmlcov/
 # Credentials and local configuration
 .env
 .env.*
-!.env.example
 .claude/settings.local.json
 
 # Model weights and local model cache

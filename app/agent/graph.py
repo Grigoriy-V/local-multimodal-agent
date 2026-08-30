@@ -379,9 +379,10 @@ def build_agent(
                 return Message(role="assistant", content=message.content)
             return message
 
+        prepared = await fitted(state, trace)
         try:
             completion = await complete(
-                state.context.prompt(state.messages), writer, trace, offered
+                prepared.prompt(state.messages), writer, trace, offered
             )
         except ContextOverflowError:
             try:
@@ -409,7 +410,52 @@ def build_agent(
                 "messages": [produced(completion)],
                 "usage": completion.usage,
             }
-        return {"messages": [produced(completion)], "usage": completion.usage}
+        return {
+            "context": prepared,
+            "messages": [produced(completion)],
+            "usage": completion.usage,
+        }
+
+    async def fitted(state: AgentState, trace: TurnTrace) -> Context:
+        """Fold before asking, if what is about to be sent is already too big.
+
+        The fold used to happen in `persist`, from the size the *previous*
+        request reported. That was exact and one turn late: the request that
+        overshot was still sent, and with one loop able to spend many steps
+        inside a single turn, "next turn" can be a long way past the point where
+        the conversation stopped fitting.
+
+        Measuring here means the oversized request is not sent at all. The cost
+        is that the size is an estimate rather than a report — see
+        `ModelBackend.estimate_tokens` — and the fraction of the window the
+        application spends is what makes that trade safe.
+
+        Only stored history folds. The current turn's own messages have not been
+        written yet, so a turn that grew large by accumulating tool results is
+        not what this shortens; shortening those is 4.6a's work, and until then
+        `ContextOverflowError` remains the backstop underneath this.
+        """
+
+        if policy.max_input_tokens is None:
+            return state.context
+        estimated = backend.estimate_tokens(state.context.prompt(state.messages))
+        if estimated <= policy.max_input_tokens:
+            return state.context
+        folded = await fold_older_messages(
+            backend, store, state.thread_id, policy, force=True
+        )
+        if folded is None:
+            # Nothing left to fold: the size is the current turn, not the
+            # history behind it. Send it and let the overflow path answer.
+            return state.context
+        context = assemble_context(state)
+        trace.event(
+            "context_folded",
+            estimated=estimated,
+            budget=policy.max_input_tokens,
+            now=backend.estimate_tokens(context.prompt(state.messages)),
+        )
+        return context
 
     async def asked_to_stop(state: AgentState) -> bool:
         """Whether the person has asked for this turn to end. Never raises.

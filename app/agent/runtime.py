@@ -117,6 +117,7 @@ class Agent:
         checkpoints: str | Path | None = None,
         checkpoint_database_url: str = "",
         context_fraction: float = 0.6,
+        context_tokens: int | None = None,
         capability_registry: CapabilityRegistry | None = None,
         capability_grant: CapabilityGrant | None = None,
         user_id: str = LOCAL_USER_ID,
@@ -148,6 +149,7 @@ class Agent:
         self.delivery = delivery
         self.checkpoints = checkpoints
         self.context_fraction = context_fraction
+        self.context_tokens = context_tokens
         self.capability_registry = capability_registry or CapabilityRegistry(self.workspace)
         if capability_grant is None:
             capabilities = DEFAULT_CAPABILITIES
@@ -181,12 +183,24 @@ class Agent:
         Asked once. The model behind an agent does not change while it runs, and
         a limit that arrived late would not match the graphs already compiled
         with the earlier one.
+
+        A chosen `context_tokens` wins over the share, and is clamped to what
+        the server said it accepts. The clamp is the whole point of asking the
+        server rather than configuring the number: a person, or a stale setting,
+        can ask for less than the model allows, never for more than it can
+        serve. With no limit reported there is nothing to clamp against and
+        nothing to take a fraction of, so an unknown model stays unbounded here
+        and is bounded by the overflow path instead.
         """
 
         if not self._asked_the_limit:
             self._limit = await self.backend.context_limit()
             self._asked_the_limit = True
-        return int(self._limit * self.context_fraction) if self._limit else None
+        if not self._limit:
+            return None
+        if self.context_tokens:
+            return min(self.context_tokens, self._limit)
+        return int(self._limit * self.context_fraction)
 
     async def fill(self) -> Fill | None:
         """How full the last request was, or `None` before there was one."""
@@ -498,6 +512,7 @@ def create_agent(
         checkpoints=agent_settings.checkpoints,
         checkpoint_database_url=agent_settings.database_url,
         context_fraction=agent_settings.context_fraction,
+        context_tokens=agent_settings.context_tokens,
         user_id=user_id,
         delivery=delivery,
         stream_answers=agent_settings.stream_answers,

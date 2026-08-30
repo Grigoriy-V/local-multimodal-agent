@@ -18,6 +18,7 @@ import httpx
 
 from app.config import ModelSettings
 from app.models.base import (
+    CHARS_PER_TOKEN,
     BackendError,
     Completion,
     CompletionDone,
@@ -29,7 +30,25 @@ from app.models.base import (
     TextDelta,
     ToolCall,
     Usage,
+    measure_request,
 )
+
+# How far one observation moves the ratio the estimate uses. Small on purpose:
+# the number decides when a conversation is folded, so it should follow what
+# this endpoint is really like and not what the last message happened to be.
+CALIBRATION_WEIGHT = 0.25
+
+# Short requests are mostly the fixed overhead of the chat template rather than
+# the text, so they say very little about what text is worth and would drag the
+# ratio down. Anything conversational clears this.
+CALIBRATION_MIN_CHARS = 500
+
+# The ratio stays inside a range no real tokenizer leaves. The floor keeps a
+# broken report from making every request look enormous; the ceiling is the one
+# that matters, because a ratio that drifted too high would estimate every
+# request as small and quietly stop folding anything.
+CHARS_PER_TOKEN_FLOOR = 1.0
+CHARS_PER_TOKEN_CEILING = 6.0
 
 AUDIO_FORMATS = {
     "audio/wav": "wav",
@@ -345,6 +364,7 @@ class OpenAICompatibleBackend(ModelBackend):
             headers=headers,
             transport=transport,
         )
+        self._chars_per_token = CHARS_PER_TOKEN
 
     async def warm(self) -> bool:
         """Ask the endpoint to start, without waiting for it to finish starting.
@@ -441,7 +461,11 @@ class OpenAICompatibleBackend(ModelBackend):
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> Completion:
-        return parse_completion(await self._completion(self._body(messages, tools, response_format)))
+        completion = parse_completion(
+            await self._completion(self._body(messages, tools, response_format))
+        )
+        self._calibrate(messages, completion.usage)
+        return completion
 
     async def stream(
         self,
@@ -480,7 +504,43 @@ class OpenAICompatibleBackend(ModelBackend):
                 text = streamed.add(chunk)
                 if text:
                     yield TextDelta(text)
-        yield CompletionDone(streamed.result())
+        finished = streamed.result()
+        self._calibrate(messages, finished.usage)
+        yield CompletionDone(finished)
+
+    def estimate_tokens(self, messages: Sequence[Message]) -> int:
+        """The inherited estimate, at the ratio this endpoint has been observed at.
+
+        Every completion reports how many tokens the request became, so the
+        conversion the estimate needs is arriving for free on traffic that was
+        being sent anyway. Nothing is measured on purpose and no extra request
+        is made.
+        """
+
+        chars, media = measure_request(messages)
+        return int(chars / self._chars_per_token) + media
+
+    def _calibrate(self, messages: Sequence[Message], usage: Usage) -> None:
+        """Learn what text is worth here, from a request that was sent anyway.
+
+        Skipped when the request carried media, because the reported total then
+        includes an image whose token cost this ratio must not absorb — that is
+        what `MEDIA_TOKENS` is for, and folding it in here would make the ratio
+        drift with how many pictures a conversation happened to contain.
+
+        Smoothed rather than replaced, so one odd request cannot move the
+        threshold that decides when a conversation is folded, and clamped so
+        that a nonsensical report cannot widen it far enough to disable folding
+        altogether.
+        """
+
+        chars, media = measure_request(messages)
+        reported = usage.input_tokens
+        if media or not reported or chars < CALIBRATION_MIN_CHARS:
+            return
+        observed = chars / reported
+        blended = self._chars_per_token + CALIBRATION_WEIGHT * (observed - self._chars_per_token)
+        self._chars_per_token = min(max(blended, CHARS_PER_TOKEN_FLOOR), CHARS_PER_TOKEN_CEILING)
 
     async def context_limit(self) -> int | None:
         """Ask the server how long a request it will take.

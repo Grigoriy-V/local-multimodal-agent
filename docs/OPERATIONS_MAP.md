@@ -52,7 +52,7 @@ All normal application environment configuration belongs to one of these setting
 | `TELEGRAM_` | `TelegramSettings` | Bot API, webhook secret, access policy |
 | `WEB_` | `WebSettings` | search, direct fetch, renderer/browser configuration |
 
-Local example/defaults: `.env.example`.
+Local example/defaults: `env.example`.
 
 `AGENT_STREAM_ANSWERS` is on by default: the conversational model call is
 streamed, and Telegram shows the answer in one message while it is written.
@@ -69,9 +69,10 @@ of its own. Telemetry holds timings, counts and technical metadata only — neve
 message text, attachments, prompts, tool results or streamed deltas — and it can
 never fail a turn: every recorder call swallows its own errors.
 
-`.env.example` does not yet document `AGENT_TELEMETRY` or
-`AGENT_TELEMETRY_DATABASE`; editing it was refused in the session that added
-them. Both default to a working configuration, so nothing depends on it.
+`env.example` documents both, along with `AGENT_STREAM_ANSWERS`, since
+2026-08-30. It was named `.env.example` until then, which the agent permission
+rule denying `.env.*` also caught, so sessions that added settings could not
+edit it; the file was renamed rather than the rule weakened.
 
 Application code should not invent a second environment-loading path when the value belongs in one of these classes.
 
@@ -79,7 +80,7 @@ Application code should not invent a second environment-loading path when the va
 
 ### Local source
 
-The project's local configuration is `.env` (not committed). `.env.example` documents names and safe defaults/placeholders.
+The project's local configuration is `.env` (not committed). `env.example` documents names and safe defaults/placeholders.
 
 ### Deployed control-plane secret synchronization
 
@@ -172,7 +173,7 @@ What a turn may spend before it stops and says so is configuration too:
 `AGENT_TURN_MAX_SECONDS` (300). They are the only ceiling on an autonomous
 turn, and the right values differ between a personal machine, where the GPU is
 already paid for, and a deployment where every second is billed. Listed
-commented-out in `.env.example` with their defaults.
+commented-out in `env.example` with their defaults.
 
 The script also has an `--alternate` path for the configured alternate database used by latency comparison work.
 
@@ -361,16 +362,32 @@ served name: gemma-4-12b-it
 vLLM: 0.26.0
 transformers: 5.14.1
 GPU: A10
-max model length: 16384
+max model length: 65536
 GPU memory utilization: 0.80
 multimodal per-prompt limits: image=4, audio=1
 min containers: 0
 max containers: 1
 scaledown window default: 12 s
-concurrent inputs per GPU container: 32
+concurrent inputs per GPU container: 8
 ```
 
 The model endpoint requires Modal proxy authentication at the edge.
+
+`MAX_MODEL_LEN` does not size the KV cache — `GPU_MEMORY_UTILIZATION` does — so
+raising it costs concurrency rather than VRAM. It cannot change on a running
+server and a new value invalidates the GPU snapshot, so it is set once rather
+than used as a dial; the dial is `AGENT_CONTEXT_FRACTION`, which needs no
+restart. Measured at 65536 on 2026-08-30: 11.13 GiB of KV pool, 256,669 tokens,
+3.92x concurrency at full request length. Read those two lines from the boot log
+rather than deriving a per-token constant — it is not constant across ceilings
+for this model. `reports/2026-08-30_v2_context_memory_plan.md`.
+
+The single-node rendezvous is pinned to loopback (`VLLM_HOST_IP=127.0.0.1`,
+`NCCL_SOCKET_IFNAME=lo`, `GLOO_SOCKET_IFNAME=lo`) in the image environment, not
+in an enter hook: all three are read while the process group is constructed,
+which happens before the snapshot exists. Without them a restored container
+polls a socket whose peer is gone and logs `Broken pipe` about once a second for
+its whole life.
 
 ### Model functions
 
@@ -427,7 +444,7 @@ workspace                  AGENT_WORKSPACE -> local directory
 Telemetry is deliberately its own file: it is disposable in a way a conversation
 is not, so deleting it costs nothing.
 
-Exact defaults live in `AgentSettings` and `.env.example`.
+Exact defaults live in `AgentSettings` and `env.example`.
 
 ### Deployed profile
 
@@ -623,7 +640,7 @@ Human-readable implementation evidence belongs in `reports/` rather than in the 
 
 | Need | Existing owner |
 |---|---|
-| Add/change env setting | `app/config.py` + `.env.example` |
+| Add/change env setting | `app/config.py` + `env.example` |
 | Publish control secret from `.env` | `tools/sync_control_secret.py` |
 | Create/migrate deployed DB/checkpoints/inbox | `tools/setup_control_plane.py` |
 | Register/remove/show Telegram webhook | `tools/telegram_webhook.py` |

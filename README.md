@@ -71,7 +71,7 @@ response forces one fold and one retry; if the request still cannot fit, the
 agent returns and stores a readable refusal.
 
 The model server is infrastructure and lives outside this repository; the
-project reaches it over `MODEL_ENDPOINT` only. Copy `.env.example` to `.env` to
+project reaches it over `MODEL_ENDPOINT` only. Copy `env.example` to `.env` to
 point somewhere else.
 
 ## Install the application
@@ -82,7 +82,7 @@ The tested application environment is Windows with Python 3.12 and `uv`:
 git clone https://github.com/Grigoriy-V/local-multimodal-agent.git
 cd local-multimodal-agent
 uv sync --all-groups
-Copy-Item .env.example .env
+Copy-Item env.example .env
 ```
 
 Model weights and the vLLM environment are intentionally not part of this

@@ -329,16 +329,54 @@ def seed_old_turns(store: SqliteStore, thread_id: str = "t1") -> None:
     store.append(thread_id, messages, LOCAL_USER_ID)
 
 
+async def test_a_conversation_over_budget_folds_before_the_request_is_sent(
+    database: Path, workspace: Path
+) -> None:
+    """The fold moved in front of the model call, which is the point of it.
+
+    Nothing overflows here and the endpoint refuses nothing. The size of what is
+    about to be sent is estimated first, so the oversized request is the one
+    that never gets made — where it used to be sent, refused, and recovered
+    from, or worse, sent successfully and folded only on the turn after.
+    """
+
+    store = SqliteStore(database)
+    seed_old_turns(store)
+    backend = ScriptedBackend(
+        says("compressed older turns"),
+        says("an answer"),
+        limit=1_000,
+    )
+    policy = ContextPolicy(keep_recent=2, summarize_after=100)
+    agent = Agent(backend, store, workspace, policy, context_fraction=0.6)
+
+    produced = await agent.answer("t1", user("new question"))
+
+    assert body(produced[-1]) == "an answer"
+    # The summary, then the answer. No refusal and no retry in between.
+    assert len(backend.requests) == 2
+    assert agent.store.summary("t1")[0] == "compressed older turns"
+    assert "old turn 0" not in prompt_text(backend.requests[-1])
+
+
 async def test_context_overflow_folds_then_retries_once(
     database: Path, workspace: Path
 ) -> None:
+    """The backstop under the estimate: the server refuses anyway.
+
+    The budget is deliberately far larger than this conversation, so the
+    pre-request fold does not fire and the overflow arrives unannounced — which
+    is exactly the case an estimate cannot rule out and this path still has to
+    survive.
+    """
+
     store = SqliteStore(database)
     seed_old_turns(store)
     backend = ScriptedBackend(
         ContextOverflowError("too large"),
         says("compressed older turns"),
         says("recovered answer", input_tokens=40),
-        limit=100,
+        limit=100_000,
     )
     policy = ContextPolicy(keep_recent=2, summarize_after=100)
     agent = Agent(backend, store, workspace, policy, context_fraction=0.6)
@@ -360,7 +398,7 @@ async def test_a_second_context_overflow_returns_a_clear_refusal(
         ContextOverflowError("first overflow"),
         says("compressed older turns"),
         ContextOverflowError("still too large"),
-        limit=100,
+        limit=100_000,
     )
     policy = ContextPolicy(keep_recent=2, summarize_after=100)
     agent = Agent(backend, store, workspace, policy, context_fraction=0.6)
@@ -396,7 +434,7 @@ async def test_overflow_while_summarizing_stops_with_a_refusal(
     backend = ScriptedBackend(
         ContextOverflowError("original request overflow"),
         ContextOverflowError("summary also overflowed"),
-        limit=100,
+        limit=100_000,
     )
     policy = ContextPolicy(keep_recent=2, summarize_after=100)
     agent = Agent(backend, store, workspace, policy, context_fraction=0.6)

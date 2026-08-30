@@ -144,6 +144,10 @@ The effective system prompt also receives a generated capability brief based on 
 
 Media replay is bounded (`image` and `audio` budgets). Explicit outbound media is not replayed as fresh visual/audio evidence; it becomes a textual placeholder in later context.
 
+How much of the model's window a request may occupy is `Agent.budget()`: the limit read from the server, spent at `AGENT_CONTEXT_FRACTION`, or a chosen `AGENT_CONTEXT_TOKENS` clamped to that limit. The budget belongs to one user, because an `Agent` does; no interface offers the choice yet.
+
+The size of the request about to be sent is estimated before every model step (`fitted` in `app/agent/graph.py`), and a conversation over budget is folded before it is sent rather than after the endpoint refuses it. The estimate lives behind the model boundary (`ModelBackend.estimate_tokens`) and calibrates itself from the token counts completions already report. Only stored history folds; shortening the current turn's own accumulated tool results is not implemented, and `ContextOverflowError` remains the backstop under all of it.
+
 ### Durable conversation and facts
 
 `app/memory/base.py` defines `ConversationStore`.
@@ -377,7 +381,7 @@ Current shape:
 - Gemma 4 12B QAT checkpoint;
 - OpenAI-compatible vLLM server;
 - A10 GPU;
-- 16,384-token server context limit;
+- 65,536-token server context limit, raised from 16,384 on 2026-08-30;
 - image/audio multimodal limits;
 - scale-to-zero;
 - CPU+GPU memory snapshots around a warmed sleeping vLLM process;
