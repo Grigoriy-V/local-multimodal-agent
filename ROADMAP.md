@@ -299,6 +299,17 @@ Recorded, not approved, not begun, and not in the order above. One line each.
   four and a half minutes rate-limited the bot on 2026-08-30. Waiting out the
   limit is now handled; being chatty enough to earn it is not, and how often to
   edit is a measurement rather than a constant to pick.
+- **Keep a picture someone sends.** A document is written into the person's
+  workspace and survives; a photo, voice message or image is passed straight
+  into that turn as content and never written anywhere, so `/new` loses it and
+  the assistant can never look at it again or send it back. Verified against the
+  deployed volume on 2026-08-30: 22 entries, every one a document or an
+  agent-made artifact, no image among them. The split is in `admit_uploads` and
+  nothing about it is visible to the person, who reasonably thinks what they
+  sent is in their workspace. It also sits badly with 4.2, which gives the
+  assistant autonomy inside a workspace that its pictures are not in. Saving the
+  file is the easy half; deciding when the model is shown the image itself and
+  when it is shown a filename is the part worth designing.
 - **Answer a Telegram album as one turn.** Four documents in one message reach
   the bot as four updates sharing a `media_group_id`, with the caption on one of
   them, and become four turns and four answers. Coalescing them means a turn
