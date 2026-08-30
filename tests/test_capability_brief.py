@@ -223,6 +223,22 @@ def test_observation_guidance_appears_only_with_the_tool(
     assert "inspect_page" not in capability_brief(reading_only)
 
 
+def test_planning_guidance_appears_only_with_the_tool(
+    registry: CapabilityRegistry,
+) -> None:
+    """And it says the one thing the schema cannot: what reads the list."""
+
+    from app.tools import todo_tools
+
+    planning = registry.toolbox(registry.grant(capabilities=(FILESYSTEM_READ,)), todo_tools())
+
+    guided = capability_brief(planning)
+
+    assert "todo_write holds your own plan" in guided
+    assert "a reason you will be asked to carry on" in guided
+    assert "todo_write" not in capability_brief(everything(registry))
+
+
 def test_standing_instructions_are_never_memory(registry: CapabilityRegistry) -> None:
     """The boundary is stated where `remember_fact` is, because that is the
     tool a model would otherwise reach for to keep a preference."""

@@ -152,6 +152,23 @@ SCENARIOS: tuple[Scenario, ...] = (
             "тому, кто действительно открыл страницу"
         ),
     ),
+    # Work with more than one step in it, which is the only situation a plan is
+    # for. What the plan is used for is deliberately not an expectation: whether
+    # a list helps is the model's decision, and hard-coding it here would be
+    # measuring obedience instead of behaviour. The expectation is the outcome.
+    Scenario(
+        name="plan",
+        request=(
+            "Сделай страницу с прайс-листом на три услуги, посмотри на неё "
+            "и почини, если что-то не так."
+        ),
+        expected_tools=("write_file", "inspect_page"),
+        look_for=(
+            "работа в несколько шагов: завёл ли он список дел, держал ли его "
+            "в актуальном состоянии и закрыл ли пункты перед ответом — "
+            "и не появился ли список там, где хватило бы одного шага"
+        ),
+    ),
     Scenario(
         name="standing_instructions",
         request="Привет. Что ты умеешь? Коротко.",

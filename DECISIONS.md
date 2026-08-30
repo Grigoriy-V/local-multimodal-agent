@@ -783,3 +783,50 @@ Supersedes / Superseded by
 Supersedes the single hand-written `DEFAULT_SYSTEM_PROMPT` of every version up
 to 2026-08-30, including the 4.3 correction to it. Does not change the 4.3
 stopping seam.
+
+## 2026-08-31 — The agent's plan is the state of one turn, and lives in that turn
+
+Decision
+
+`todo_write` gives the model a whole-list plan it owns, and the plan is the
+state of **one unfinished turn**: it survives compaction, an interrupt, a resume
+and a restarted worker, and it does not exist for the next thing the person
+asks. It gets no table, no schema version and no store of its own. The list is
+the arguments of the model's own last accepted call, inside the turn's messages,
+which are checkpointed and are cleared by the `extend` reducer when a user
+message begins a turn. Whole-list replacement is the only operation, items have
+no identity, and at most one may be `in_progress`.
+
+An unfinished plan is the first production extension in the turn-stopping seam.
+It refuses one ending, names the open items, and offers the alternative that
+costs nothing: update the list to say what actually happened.
+
+Why
+
+The lifetime asked for is exactly the lifetime the loop already gives its own
+messages, so a second copy in a database would be a second thing to keep true
+and a populated-database migration bought with nothing. Carrying a plan between
+finished turns is a different product and was explicitly not wanted.
+
+Planning is state the model decides to use, never a mode the harness switches
+into: nothing classifies a request as complex, and an agent that wrote no plan
+is never interrupted, so the ordinary answer still costs one model call. The
+objection is capped at one per turn because a stale list must not become an
+unbounded bill, and being made to be honest about the plan is an acceptable
+outcome alongside being made to finish it.
+
+Consequences
+
+`Candidate` gains `steerings`, because a steered draft is deliberately never
+appended to the turn's messages and an extension therefore cannot count its own
+objections; any capped extension needs that number. `create_agent` wires the
+extension while `Agent` does not, so the product finishes what it planned and
+the bare mechanism still stops when the model stops. The capability brief states
+what reads the list, since a tool schema cannot. `todo_write` is declared
+model-free of any workspace root: it reaches nothing and is granted to every
+agent, like memory.
+
+Supersedes / Superseded by
+
+Fills the seam left deliberately empty by 2026-08-30, "Whether a turn may end is
+a seam, not a policy". Does not change what that seam does or its default.

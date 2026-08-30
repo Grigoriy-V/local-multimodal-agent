@@ -35,6 +35,13 @@ class Candidate:
     rather than being handed a sentence out of context. It is the turn's own
     messages, not the stored conversation: an extension is deciding about this
     turn.
+
+    `steerings` is how many times this turn has already been refused an ending.
+    It is here because an extension cannot count its own objections from the
+    messages: a steered draft and its instruction are shown to the model and
+    never appended to the turn, precisely so neither reaches the conversation.
+    Without this number the only bound on an extension that keeps objecting is
+    the turn's budget, which is a ceiling on cost rather than a decision.
     """
 
     message: Message
@@ -42,6 +49,7 @@ class Candidate:
     steps: int = 0
     tool_calls: int = 0
     spent_seconds: float = 0.0
+    steerings: int = 0
 
     @property
     def text(self) -> str:

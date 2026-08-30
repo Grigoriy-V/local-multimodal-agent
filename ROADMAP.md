@@ -4,7 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.4, `todo` as agent state. 4.3 and 4.3.5 were both
+**Current approved step:** 4.4, `todo` as agent state — code, tests and
+documents done on 2026-08-31; **live acceptance is the open half**, and it needs
+one GPU scenario run, which is its own permission. 4.3 and 4.3.5 were both
 closed on 2026-08-30 with one thing deliberately not settled, recorded below
 and moved into its own queue item: **proportional validation is demonstrated
 but not dependable.** The first live session after the workspace path left the
@@ -340,9 +342,33 @@ Verified platform facts and cold-start evidence remain in
      internal one, which cost a refused `write_file` and a local path handed to
      a web tool. Measured without it — same shape on all nine scenarios, every
      call by plain name, and the run $0.0726 against $0.0794.
-   - **4.4 `todo` as agent state, not a mode**, surviving folding and restart.
-     It is also the first production source of steering for the 4.3 seam: state
-     that holds unfinished items is what can object to a turn ending.
+   - **4.4 `todo` as agent state, not a mode — implemented and tested offline,
+     live acceptance not yet run.** Scope narrowed by the human on 2026-08-31:
+     this is the state of **one unfinished turn**. It survives compaction, an
+     interrupt and a restarted worker, and it is gone from the next thing the
+     person asks; carrying a plan between finished turns is explicitly not
+     wanted, so no store table and no schema 3.
+
+     That lifetime already existed and did not have to be built. The plan is the
+     arguments of the model's own last accepted `todo_write` call, which live in
+     the turn's messages: checkpointed, and cleared by the `extend` reducer when
+     a user message starts a turn. `app/tools/todo.py` validates a whole list
+     and stores nothing; `current` folds the standing plan back out.
+
+     `app/agent/todo.py` is the first production extension in the 4.3 seam: an
+     open item refuses one ending, naming the items and offering the free way
+     out — update the list to say what actually happened. Capped at one
+     objection per turn, which needed `Candidate.steerings`, because a steered
+     draft is deliberately never appended to the turn's messages and an
+     extension could not otherwise count itself. An agent that wrote no plan
+     never meets any of this, so an ordinary answer still costs one model call.
+
+     Reference read directly, not from the plan document:
+     `deepseek-ai/deepseek-harness`, `packages/todo/tool-todo`. Whole-list
+     replacement, no item identity, three statuses, at most one active as a
+     deployment policy rather than a stored rule, and the same lifetime rule —
+     their standing plan clears on the next `turn/start`, not on `turn/end`, so
+     the finished checklist stays readable while the person reads the answer.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
    - **4.5.5 Saying only what was observed.** One product question with two
      measured faces: the assistant makes an artifact and describes how it looks

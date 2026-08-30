@@ -138,6 +138,7 @@ TOOL_ACTIVITY = {
     "write_file": "Writing file…",
     "edit_file": "Editing file…",
     "send_file": "Sending file…",
+    "todo_write": "Planning…",
     "remember_fact": "Saving to memory…",
     "search_memory": "Searching memory…",
 }

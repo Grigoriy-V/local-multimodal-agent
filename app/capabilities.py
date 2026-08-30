@@ -156,6 +156,26 @@ def _observation_lines(tools: Toolbox) -> list[str]:
     ]
 
 
+def _planning_lines(tools: Toolbox) -> list[str]:
+    """That the list is worth keeping current, and what reads it.
+
+    The schema owns how to call it. What belongs here is the consequence, which
+    a schema cannot state: the list is read when a turn tries to end, so leaving
+    it stale is not free. Saying so is fairer than letting the model discover it
+    as an interruption it cannot account for.
+    """
+
+    if "todo_write" not in tools.names:
+        return []
+    return [
+        "- todo_write holds your own plan for work that takes several steps: write "
+        "it before you start, keep it current as you go, and leave nothing open "
+        "that is actually done. It is read when you try to finish, so an item still "
+        "open is a reason you will be asked to carry on. Work that is one step needs "
+        "no list."
+    ]
+
+
 def _memory_lines(tools: Toolbox) -> list[str]:
     if not ({"remember_fact", "search_memory"} & set(tools.names)):
         return []
@@ -273,6 +293,7 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
                     "had checked the page."
                 )
     lines += _observation_lines(tools)
+    lines += _planning_lines(tools)
     lines += _memory_lines(tools)
     asking = needs_approval(tools)
     if asking:

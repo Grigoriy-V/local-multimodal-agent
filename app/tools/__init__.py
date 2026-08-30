@@ -19,6 +19,7 @@ from app.tools.execution import PreparedToolCall, ToolExecutor
 from app.tools.filesystem import filesystem_tools
 from app.tools.memory import memory_tools
 from app.tools.presentation import presentation_tools, send_file
+from app.tools.todo import todo_tools
 from app.tools.web import web_fetch_tools, web_search_tools, web_tools, web_view_tools
 
 __all__ = [
@@ -48,6 +49,7 @@ __all__ = [
     "memory_tools",
     "presentation_tools",
     "send_file",
+    "todo_tools",
     "tool_failed",
     "web_fetch_tools",
     "web_search_tools",

@@ -26,6 +26,7 @@ from app.agent.graph import (
 )
 from app.agent.stop import NO_STOPS, StopRequests
 from app.agent.stopping import STOP_ON_ANSWER, TurnStopping
+from app.agent.todo import FinishesItsOwnList
 from app.checkpoints import CheckpointHandle
 from app.capabilities import (
     CHAT_DELIVERY,
@@ -49,6 +50,7 @@ from app.tools import (
     CapabilityRegistry,
     Toolbox,
     memory_tools,
+    todo_tools,
 )
 
 # The checkpoint holds this project's own dataclasses, so LangGraph is told
@@ -253,7 +255,15 @@ class Agent:
 
         return self.capability_registry.toolbox(
             self.capability_grant,
-            memory_tools(self.store, self.user_id, thread_id, self.policy.retrieved_facts),
+            [
+                *memory_tools(
+                    self.store, self.user_id, thread_id, self.policy.retrieved_facts
+                ),
+                # Planning is not a granted capability: it reaches nothing, costs
+                # nothing to hold and has no root to be confined to. It is part
+                # of what an agent is here, in the way memory is.
+                *todo_tools(),
+            ],
         )
 
     def capabilities(self, thread_id: str) -> str:
@@ -388,6 +398,7 @@ class Agent:
             "spent_seconds": 0.0,
             "stopping": "",
             "steered": None,
+            "steerings": 0,
         }
         async for event in self._run(thread_id, command, trace):
             yield event
@@ -520,10 +531,17 @@ def create_agent(
     delivery: Delivery = CHAT_DELIVERY,
     telemetry: Telemetry | None = None,
     stops: StopRequests = NO_STOPS,
-    stopping: TurnStopping = STOP_ON_ANSWER,
+    stopping: TurnStopping | None = None,
     system_prompt: str | None = None,
 ) -> Agent:
     """Build the default agent from configuration.
+
+    `stopping` defaults here rather than on `Agent`, and the two defaults differ
+    on purpose. `Agent` is the mechanism and stops when the model stops, so a
+    test or a tool that builds one gets the loop with nothing added. This
+    function is the product, and the product's agent finishes what it said it
+    would do: an unfinished todo list refuses one ending. An agent that wrote no
+    list never meets it.
 
     `delivery` is the caller's statement of what its interface can put in front
     of a person. It controls whether the explicit presentation capability is
@@ -570,5 +588,5 @@ def create_agent(
             max_seconds=agent_settings.turn_max_seconds,
         ),
         stops=stops,
-        stopping=stopping,
+        stopping=stopping if stopping is not None else FinishesItsOwnList(),
     )

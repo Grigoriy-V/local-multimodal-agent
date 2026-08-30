@@ -97,7 +97,16 @@ accepts the answer immediately, while explicit structured `Steering` carries a
 candidate and an instruction into one more model step. The candidate stays out
 of conversation persistence and finished-message delivery; an interface that
 already showed its streamed text receives `AnswerWithdrawn` and removes the
-preview. Nothing chooses between two lifecycles, and no second lifecycle exists:
+preview.
+
+The product wires one extension into that seam: `app/agent/todo.py` refuses one
+ending while the agent's own `todo_write` plan still has open items. The plan is
+not stored anywhere of its own — it is the arguments of the model's own last
+accepted call, inside the turn's messages, so it is checkpointed with the turn
+and cleared by the `extend` reducer when the next user message begins one. That
+gives it the lifetime of one unfinished turn: it survives an interrupt, a resume
+and a restarted worker, and never reaches the next thing the person asks.
+Nothing chooses between two lifecycles, and no second lifecycle exists:
 the router and the bounded plan/implement/test/evaluate task path were removed
 in roadmap sub-step 4.1.
 

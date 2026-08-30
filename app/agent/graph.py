@@ -135,6 +135,9 @@ class AgentState:
     the next model step and no further. It is deliberately not in `messages`:
     what is in `messages` is what the store keeps and what an interface is told
     about, and a candidate that was steered into another step is neither.
+    `steerings` counts how often that has happened, and is the turn's own spend
+    in the same way the other counters are: it is what lets an extension refuse
+    to object twice about the same thing.
     """
 
     thread_id: str = "default"
@@ -147,6 +150,7 @@ class AgentState:
     spent_seconds: float = 0.0
     stopping: str = ""
     steered: Steered | None = None
+    steerings: int = 0
 
 
 def assistant_message(completion: Completion) -> Message:
@@ -512,6 +516,7 @@ def build_agent(
                     steps=priced.steps,
                     tool_calls=priced.tool_calls,
                     spent_seconds=priced.spent_seconds,
+                    steerings=state.steerings,
                 )
             )
         except Exception as error:  # noqa: BLE001 - an extension may not fail a turn
@@ -524,7 +529,11 @@ def build_agent(
             return {**keep, "messages": [message]}
         # Who objected and where. Nothing the person or the model wrote.
         trace.event("turn_steered", source=steering.source, step=priced.steps)
-        return {**keep, "steered": Steered(candidate=message, steering=steering)}
+        return {
+            **keep,
+            "steered": Steered(candidate=message, steering=steering),
+            "steerings": state.steerings + 1,
+        }
 
     async def fitted(
         state: AgentState, turn: list[Message], trace: TurnTrace
