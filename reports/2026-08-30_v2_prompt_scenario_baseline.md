@@ -3,7 +3,7 @@
 **Date:** 2026-08-30
 **Agent:** Claude, direct session
 **Status:** first measured comparison; one attribution in the 4.3 report is
-withdrawn
+withdrawn and the real cause is isolated
 
 ## What was run
 
@@ -69,18 +69,50 @@ all in an empty workspace is the case where the model has nothing established
 and no question is asked either — it simply stops treating the outcome as a
 file.
 
-That is a hypothesis with a cheap test: the same request in a thread where a
-file was written first, and the same request naming a file explicitly. It has
-not been run — every run wakes the GPU and is its own gate.
+## The cause, isolated
+
+That hypothesis was then run. Four cases, same request, same prompt, one warm
+window — `reports/prompt_runs/2026-08-30_0736_castle_causes/`:
+
+| case | what is established | result |
+| --- | --- | --- |
+| `castle` | nothing | 1 model, **no tools** |
+| `castle_named` | the request names `castle.html` | 2 model, `write_file` |
+| `castle_seeded` | an HTML file is already in the workspace | 1 model, **no tools** |
+| `castle_after` | the previous turn in the thread created a file | 2 model, `write_file` |
+
+The deciding factor is whether a place for the file is **established in what
+the model can see**: named in the request, or made by the turn before. A file
+merely lying in the workspace changes nothing, because in that case the model
+never calls `list_files` and so never learns it is there.
+
+This matches a sentence that predates 4.3 entirely: *"If the user names only a
+file, such as snake.html, and its directory is not already established, ask
+where it is instead of inventing a location."* Written for the case where a
+filename arrives without a directory, it is being generalised to *no filename →
+invent nothing → write nothing*. And the model does not do the one thing that
+sentence actually asks for: it never asks where the file should go. It silently
+stops treating the outcome as a file.
+
+Cost of the isolation: **$0.0594**, four turns.
+
+## What still fails when the write succeeds
+
+Both working cases wrote the file and then described the result — towers, a
+flag, the sky — with no `inspect_page` call. `castle_named` ends by telling the
+person to open the file in a browser. So the write is only half of 4.3's
+acceptance, and the other half — inspect before claiming how something looks —
+fails identically whether or not the file gets written.
 
 ## A finding about the instrument, not the agent
 
 `broken_page` was scored "off" in both runs because it expected `inspect_page`
 and the agent used `read_file`. Reading the source of a six-line page is the
 proportional choice, and both runs found both defects from it — the white-on-
-white price and the `textContnet` typo. The expectation is wrong, not the
-trajectory. A scenario that needs rendering to answer has to be one whose
-answer is not in the source; this one is being rewritten before it is trusted.
+white price and the `textContnet` typo. The scenario is deliberately left as it
+is: whether the agent chooses to look is the question it exists to ask, and an
+expectation it keeps missing is a question to read rather than a verdict to
+act on.
 
 `castle` and `note` also spend a `list_files` call before writing. That is the
 same "establish where the file goes" instinct, and it costs a model step.

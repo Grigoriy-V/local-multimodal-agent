@@ -70,6 +70,11 @@ class Scenario:
     seed: tuple[tuple[str, str], ...] = ()
     look_for: str = ""
     external: bool = False
+    # A turn taken in the same thread before the measured one. What the agent
+    # did a turn ago is part of the situation it answers in, and a scenario
+    # that always starts from nothing can only ever measure the empty case.
+    # It is not measured itself: only the turn after it is.
+    prelude_request: str = ""
 
 
 BROKEN_PAGE = """<!doctype html>
@@ -107,6 +112,33 @@ SCENARIOS: tuple[Scenario, ...] = (
         look_for=(
             "сама регрессия: сделал ли он файл вместо кода в чате, "
             "осмотрел ли результат сам, спросил ли разрешения"
+        ),
+    ),
+    # Three ways the same request stops being about an empty room. The live
+    # turns that did write the file ran where a file already existed, so what
+    # is being separated here is: the request naming one, the workspace holding
+    # one, and the conversation having just made one.
+    Scenario(
+        name="castle_named",
+        request="Создай HTML с средневековым замком в файле castle.html.",
+        expected_tools=("write_file",),
+        look_for="меняет ли что-то названный файл в самом запросе",
+    ),
+    Scenario(
+        name="castle_seeded",
+        request="Создай HTML с средневековым замком.",
+        seed=(("index.html", "<!doctype html>\n<title>Заготовка</title>\n<h1>Тут пусто</h1>\n"),),
+        expected_tools=("write_file",),
+        look_for="меняет ли что-то файл, который уже лежит в рабочей папке",
+    ),
+    Scenario(
+        name="castle_after",
+        request="Создай HTML с средневековым замком.",
+        prelude_request="Создай hello.html с приветствием.",
+        expected_tools=("write_file",),
+        look_for=(
+            "воспроизведение живого случая: предыдущий ход уже создал файл, "
+            "и только после этого просят замок"
         ),
     ),
     Scenario(
@@ -253,6 +285,10 @@ async def run_one(
         source="scenario",
         source_update_id=scenario.name,
     )
+    if scenario.prelude_request:
+        # Untraced and unreported: it is the situation, not the measurement.
+        async for _ in agent.events(thread_id, text_message(scenario.prelude_request)):
+            pass
     trace = telemetry.start(run)
     result = Result(scenario=scenario, run_id=run.run_id)
     answers: list[str] = []

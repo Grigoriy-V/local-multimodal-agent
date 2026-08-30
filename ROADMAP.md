@@ -12,6 +12,8 @@ text neither produced autonomous inspection nor turned out to be what changed
 the behaviour. The first measured comparison ran the same requests against the
 prompt before and after that correction and got the same shape from both,
 including the failure it was blamed for; the earlier attribution is withdrawn.
+What decides that failure is whether a place for the file is established in
+what the model can see — named in the request or made by the previous turn.
 4.3 stays open and its live acceptance is re-run after 4.3.5, against that
 comparison rather than single chat messages.
 `reports/2026-08-30_v2_prompt_scenario_baseline.md`. 4.2, tool execution seam, remains
