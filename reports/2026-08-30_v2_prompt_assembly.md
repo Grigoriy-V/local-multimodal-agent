@@ -97,6 +97,58 @@ printing a check mark to a cp1252 console — the image had already built — an
 succeeded unchanged with `PYTHONUTF8=1`. Worth knowing on this machine; it is
 not a property of the deployment.
 
-`/agents` has not yet been used in the real Telegram chat. Everything above is
-the same agent and the same code path, driven from the scenario runner rather
-than from a phone.
+## First real use, and what it corrected
+
+`/agents` was used in the real chat the same day and found two things the
+scenario runner could not.
+
+**The command was typed `/agent`.** The singular missed the dispatch, went to
+the model as ordinary text, and the model answered it conversationally — one
+model call, no tools, nothing written. The person came away believing their
+instructions were saved; the volume had no `AGENTS.md` at all, at the root or
+under `.agent/`. Both spellings are now the same command, `set` is an optional
+word the command strips rather than acts on, only `clear` is a keyword, and the
+argument splits on any whitespace so the text may start on the next line. A
+near miss on a command that writes a file has to reach the command.
+
+**Naming the workspace path was a mistake.** It fixed what it was written for
+and immediately caused worse: told an absolute path, the model built absolute
+paths everywhere, and in the deployed profile that path is the volume's
+internal one. It guessed a shorter absolute path and had a `write_file`
+refused — 32 s of model time — and later handed a local path to a tool that
+accepts only http addresses. `/check` passed all nine probes, so neither
+failure was the environment.
+
+Removed, since there is exactly one directory and a path into it is never
+needed. Measured immediately, nine scenarios:
+
+```text
+                    with the path      without it
+shape, all nine     identical          identical
+paths in calls      /__modal/volumes/… castle.html, notes.txt, price.html, .
+castle output       1581 tokens        1301 tokens
+whole run           $0.0794            $0.0726
+```
+
+So the writing behaviour came from "the workspace is yours" and "choose a name",
+not from knowing where it is. The path carried only harm.
+
+**And one thing got worse.** In the same run `broken_page` invented content:
+it reported escape sequences in the source and a script addressing an `id` that
+does not exist, attributing both to what it had seen through `inspect_page` —
+which returns a render, not a source, and serializes with `ensure_ascii=False`
+so no such escapes exist. The morning's `read_file` answer had found both real
+defects. This is the sharpest form of the residual: not merely describing
+without looking, but describing a thing it did not look at as though it had.
+
+## Why 4.3 and 4.3.5 were closed anyway
+
+Both steps' own deliverables are done, deployed and measured. What is not
+achieved is proportional validation, and the only lever remaining inside these
+two steps was the wording of a prompt — three rounds of which produced better
+and worse in turn, at real cost, without settling anything. The levers that are
+not wording belong to later steps: a source-plus-render observation, and a
+production source of steering, which is what 4.4's `todo` is for.
+
+Closed with that stated rather than implied, and the behaviour moved to its own
+queue item, 4.5.5. `ROADMAP.md`.

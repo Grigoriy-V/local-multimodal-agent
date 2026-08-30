@@ -4,18 +4,16 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.3.5, prompt assembly and user instructions —
-implemented, measured live and deployed on 2026-08-30. The prompt is now
-assembled from layers with a core that names no tool, the agent is told where
-its own workspace is, and each person has one `AGENTS.md` overlay. The failure
-that blocked 4.3 is gone: a request that names no file now produces the file.
-The earlier attribution of that failure to the 4.3 prompt correction was
-measured and withdrawn — the same shape came from both prompts, and what
-decides it is whether a place for the file is established in what the model
-can see. **4.3 stays open on its other half**: the artifact is still described
-without being looked at. The same run also found that inspecting a page
-replaced reading it and lost both real defects, which is a new question rather
-than a regression of this step.
+**Current approved step:** 4.4, `todo` as agent state. 4.3 and 4.3.5 were both
+closed on 2026-08-30 with one thing deliberately not achieved, recorded below
+and moved into its own queue item: **proportional validation was never
+demonstrated.** The assistant makes the artifact and then describes it without
+looking, and having looked at a different page it invented details of a source
+it had not read. Closing them is a scope decision, not a claim: the remaining
+lever inside those two steps was the wording of a prompt, three rounds of which
+produced better and worse in turn, while the real levers — a source-plus-render
+observation, and a production source of steering — belong to later steps. 4.4
+is where the stopping seam finally gets something to say no with.
 `reports/2026-08-30_v2_prompt_scenario_baseline.md`,
 `reports/2026-08-30_v2_prompt_assembly.md`. 4.2, tool execution seam, remains
 deployed and accepted live, including the correction for narrated tool calls
@@ -269,8 +267,8 @@ Verified platform facts and cold-start evidence remain in
      2026-08-30. Live write/edit/read runs each had one update, one run and one
      final Telegram delivery after the narrated-tool correction.
      `reports/2026-08-30_v2_tool_execution_seam.md`.
-   - **4.3 Turn stopping and proportional validation — seam deployed, live
-     acceptance blocked on 4.3.5.** A minimal extension seam instead of a mandatory
+   - **4.3 Turn stopping — done, deployed. Proportional validation not
+     demonstrated.** A minimal extension seam instead of a mandatory
      repair lifecycle: stop by default, and continue only through explicit
      structured steering. A rejected streamed candidate is withdrawn from the
      interface and is neither persisted nor delivered as a first answer. The
@@ -283,11 +281,14 @@ Verified platform facts and cold-start evidence remain in
      asked permission before safe inspection. PDF creation is not acceptance
      until the sandbox exists.
 
-     What remains after 4.3.5 is one thing, and it is smaller than it looked:
-     the artifact gets made and then described without being looked at. Asked
-     to look, the model looks — `broken_page` calls `inspect_page` — so this is
-     not a missing capability or a missing instruction, and there is still no
-     production source of steering. `reports/2026-08-30_v2_turn_stopping.md`,
+     **What the seam does is done; what it was hoped to cause is not.** The
+     model still describes an artifact it has not opened, and there is no
+     production source of steering — by design, since a validator was refused
+     and `todo` is meant to be that source. Asked to look, it looks. Closed
+     rather than kept open because the only lever left inside this step was
+     prompt wording, and three rounds of that produced better and worse in
+     turn. The behaviour is now one queue item below, after 4.4.
+     `reports/2026-08-30_v2_turn_stopping.md`,
      `reports/2026-08-30_v2_prompt_assembly.md`.
    - **4.3.5 Prompt assembly and user instructions — done, measured live,
      deployed.** The system prompt is an assembled layer instead of one
@@ -305,8 +306,9 @@ Verified platform facts and cold-start evidence remain in
      fact extraction, project hierarchy or second store.
      `docs/v2_4_3_prompt_assembly_agents_handoff.md`.
 
-     A scenario runner is the instrument for both this step and 4.3's blocked
-     acceptance: fixed natural requests through the same agent the bot uses,
+     A scenario runner is the instrument for this step and for anything later
+     that changes how the agent decides: fixed natural requests through the
+     same agent the bot uses,
      recording tools called, model calls, tokens, seconds and the full answer
      against a named prompt variant, so two variants are compared in one warm
      window. Judgement stays human; nothing asserts on wording. It is not part
@@ -319,11 +321,33 @@ Verified platform facts and cold-start evidence remain in
      `note` got a model call cheaper because the workspace no longer has to be
      looked for. The overlay demonstrably reaches the model and is partly
      obeyed — a small model matched the question's language over a standing
-     instruction to answer in another. `/agents` has not yet been used from a
-     real phone. `reports/2026-08-30_v2_prompt_assembly.md`, `DECISIONS.md`
-     2026-08-30.
+     instruction to answer in another. `reports/2026-08-30_v2_prompt_assembly.md`,
+     `DECISIONS.md` 2026-08-30.
+
+     Corrected the same day after the first real use. `/agent`, the singular a
+     person actually types, missed the command and went to the model as
+     ordinary text, so instructions were never saved and the reply read like
+     success; both spellings are now the same command, `set` is an optional
+     word it strips rather than acts on, and only `clear` is a keyword. The
+     workspace path was removed from the guidance: naming it taught the model
+     to build paths, and in the deployed profile that path is the volume's
+     internal one, which cost a refused `write_file` and a local path handed to
+     a web tool. Measured without it — same shape on all nine scenarios, every
+     call by plain name, and the run $0.0726 against $0.0794.
    - **4.4 `todo` as agent state, not a mode**, surviving folding and restart.
+     It is also the first production source of steering for the 4.3 seam: state
+     that holds unfinished items is what can object to a turn ending.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
+   - **4.5.5 Saying only what was observed.** One product question with two
+     measured faces: the assistant makes an artifact and describes how it looks
+     without opening it, and having opened a different page it invented details
+     of a source it never read — while the same page read as source gave both
+     of its real defects. So `inspect_page` returning a render without the
+     source is a candidate cause, not only a prompt matter, and the steering
+     that could refuse such an answer arrives in 4.4. Deliberately after those,
+     because three rounds of prompt wording moved this back and forth and
+     settled nothing. Includes the residual acceptance 4.3 did not demonstrate.
+     `reports/2026-08-30_v2_prompt_assembly.md`.
    - **4.6a Context engine.** Context preparation before every model step rather
      than folding after a turn: measure the surface, shorten old tool results
      first, summarize only if that was not enough, and record what was done
@@ -373,15 +397,6 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
 
 Recorded, not approved, not begun, and not in the order above. One line each.
 
-- **Looking at a page is not reading it.** Measured 2026-08-30: the same
-  seeded page with a white-on-white price and a `textContnet` typo gave both
-  defects when the model read the source and neither when it called
-  `inspect_page`. The typo is a silent no-op rather than a console error, and
-  the invisible text is invisible in rendered text by construction. Current
-  guidance encourages inspection as though it contained reading. Either the
-  tool returns the source alongside what it rendered, or the guidance says
-  both are needed for a question about what is wrong with a page — that choice
-  is the work. `reports/2026-08-30_v2_prompt_assembly.md`.
 - **Latency to the first visible word**, to give 4.1 a "before" number:
   `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
 - **Throttle the edits that write a streamed answer.** Seven long answers in

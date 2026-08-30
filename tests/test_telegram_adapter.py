@@ -941,7 +941,8 @@ async def test_agents_shows_how_to_start_when_there_are_none(
 
     [said] = telegram.sent
     assert "no standing instructions" in said
-    assert "/agents set" in said
+    assert "Send /agents followed by" in said
+    assert "as you wrote them" in said or "as you wrote it" in said
 
 
 async def test_agents_set_writes_the_workspace_file_itself(
@@ -956,6 +957,75 @@ async def test_agents_set_writes_the_workspace_file_itself(
     saved = tmp_path / "workspace" / INSTRUCTIONS_FILE
     assert saved.read_text(encoding="utf-8") == "Отвечай по-русски и коротко."
     assert "Saved" in telegram.sent[0]
+
+
+async def test_the_instructions_may_follow_the_command_on_a_new_line(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """How people actually type a multi-line instruction."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/agents set\nОтвечай по-русски.\nБез воды."))
+
+    saved = tmp_path / "workspace" / INSTRUCTIONS_FILE
+    assert saved.read_text(encoding="utf-8") == "Отвечай по-русски.\nБез воды."
+
+
+async def test_the_singular_spelling_is_the_same_command(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """`/agent set …` is what a person types. On 2026-08-30 it missed the
+    command, went to the model as ordinary text, and the instructions were
+    never saved — with a reply that read like success."""
+
+    backend = ScriptedBackend()
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("/agent set делай визуальную проверку"))
+
+    assert backend.requests == []
+    saved = tmp_path / "workspace" / INSTRUCTIONS_FILE
+    assert saved.read_text(encoding="utf-8") == "делай визуальную проверку"
+
+
+def test_both_spellings_are_model_free_at_the_front_door() -> None:
+    assert needs_model(Incoming(CHAT, ALLOWED, "/agent set что-нибудь")) is False
+    assert needs_model(Incoming(CHAT, ALLOWED, "/agents set что-нибудь")) is False
+
+
+async def test_the_word_set_is_optional(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Anything that is not `clear` is the instructions themselves.
+
+    The alternative silently shows help, and a person walks away believing
+    they saved something that was never written — which is what happened live
+    on 2026-08-30.
+    """
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/agents Отвечай по-русски."))
+
+    saved = tmp_path / "workspace" / INSTRUCTIONS_FILE
+    assert saved.read_text(encoding="utf-8") == "Отвечай по-русски."
+
+
+async def test_instructions_are_stored_exactly_and_never_reach_the_model(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """`ScriptedBackend()` has nothing scripted, so any model call raises."""
+
+    backend = ScriptedBackend()
+    adapter = build(telegram, settings, tmp_path, backend)
+    typed = "Всегда:\n- отвечай по-русски\n- показывай план\n\nНикогда не выдумывай факты."
+
+    await adapter.handle_update(text_update(f"/agents set {typed}"))
+
+    assert backend.requests == []
+    saved = tmp_path / "workspace" / INSTRUCTIONS_FILE
+    assert saved.read_text(encoding="utf-8") == typed
 
 
 async def test_agents_set_keeps_the_case_the_person_typed(

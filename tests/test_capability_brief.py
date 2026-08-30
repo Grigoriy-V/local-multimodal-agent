@@ -171,46 +171,42 @@ def test_a_declared_kind_reaches_the_model(registry: CapabilityRegistry) -> None
 # --- what the wiring says, that no fixed prompt could ------------------------
 
 
-def test_the_brief_tells_the_agent_where_its_workspace_is(
-    registry: CapabilityRegistry, tmp_path
+def test_the_brief_says_there_is_a_workspace_and_never_where(
+    registry: CapabilityRegistry, workspace: Path
 ) -> None:
-    """It was never told. An agent given autonomy inside a directory it cannot
-    name will not use it, which is what the 2026-08-30 measurement found."""
+    """An agent that does not know it has somewhere to put a file writes none.
+    An agent told the exact path starts building paths — and in the deployed
+    profile that path is the volume's internal one, which cost two refused
+    calls on 2026-08-30. It needs the first fact and not the second."""
 
-    brief = capability_brief(everything(registry), root=tmp_path)
-
-    assert str(tmp_path) in brief
-    assert "without asking first" in brief
-
-
-def test_the_root_is_absent_when_there_is_none_to_name(
-    registry: CapabilityRegistry,
-) -> None:
     brief = capability_brief(everything(registry))
 
-    assert "one directory granted to you" in brief
+    assert "one workspace directory and it is yours" in brief
+    assert "without asking first" in brief
+    assert "by its plain name" in brief
+    assert str(workspace) not in brief
 
 
 def test_the_brief_says_to_choose_a_name_rather_than_write_nothing(
-    registry: CapabilityRegistry, tmp_path
+    registry: CapabilityRegistry,
 ) -> None:
     """The measured failure: asked for a page and given no filename, the model
     wrote it into the chat and told the person to save it themselves."""
 
-    brief = capability_brief(everything(registry), root=tmp_path)
+    brief = capability_brief(everything(registry))
 
     assert "choose a sensible name" in brief
     assert "instead of explaining what you could do" in brief
 
 
 def test_a_reading_grant_is_not_told_to_create_files(
-    registry: CapabilityRegistry, tmp_path
+    registry: CapabilityRegistry,
 ) -> None:
     reading_only = registry.toolbox(registry.grant(capabilities=(FILESYSTEM_READ,)))
 
-    brief = capability_brief(reading_only, root=tmp_path)
+    brief = capability_brief(reading_only)
 
-    assert str(tmp_path) in brief
+    assert "one workspace directory" in brief
     assert "choose a sensible name" not in brief
 
 
@@ -253,14 +249,14 @@ def test_an_agent_without_tools_is_not_told_to_reach_for_them() -> None:
 
 
 def test_the_system_message_is_the_core_then_the_wiring(
-    registry: CapabilityRegistry, tmp_path
+    registry: CapabilityRegistry,
 ) -> None:
     tools = everything(registry)
 
-    whole = system_message(tools, root=tmp_path)
+    whole = system_message(tools)
 
     assert whole.startswith(DEFAULT_SYSTEM_PROMPT)
-    assert capability_brief(tools, root=tmp_path) in whole
+    assert capability_brief(tools) in whole
 
 
 # --- the hand-written prompt cannot outlive its tools -------------------------

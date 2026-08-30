@@ -101,13 +101,22 @@ def _work_sentence(tools: Toolbox) -> str:
     )
 
 
-def _workspace_lines(tools: Toolbox, root: Path | None) -> list[str]:
-    """Where the agent is, and what it may do there without asking.
+def _workspace_lines(tools: Toolbox) -> list[str]:
+    """That the agent has a workspace and may work in it, without naming it.
 
-    The workspace root was never told to the model at all: it was in the
-    report a person reads and in the tool descriptions as "the allowed
-    workspace", which names no place. An agent given autonomy inside a
-    directory it cannot name will not use it.
+    An earlier version of this printed the resolved root. It fixed the thing it
+    was written for — an agent that does not know it has somewhere to put a
+    file writes no file — and immediately caused a worse one: told an absolute
+    path, the model started using absolute paths everywhere. In the deployed
+    profile the resolved root is the volume's internal path, so it first
+    guessed a shorter absolute path and had a `write_file` refused, and then
+    passed a local path to a tool that accepts only http addresses. Both cost a
+    model call apiece.
+
+    There is exactly one directory, so a path into it is never needed. Saying
+    "you have a workspace and everything you can reach is in it" carries what
+    the model has to know; the resolved location carries nothing it can use.
+    `/can` still shows the person the real root, because a person can act on it.
 
     The naming rule is the other half of the same measurement. An older
     instruction said to ask rather than invent a location for a file whose
@@ -117,11 +126,13 @@ def _workspace_lines(tools: Toolbox, root: Path | None) -> list[str]:
 
     if not ({"list_files", "read_file", "write_file", "edit_file"} & set(tools.names)):
         return []
-    where = f"exactly {root}" if root is not None else "one directory granted to you"
     lines = [
-        f"- Your workspace is {where}. It is yours: read, create and change files "
-        "there as the work needs, without asking first. Nothing outside it is "
-        "reachable, and a path may be absolute inside that root or relative to it.",
+        "- You have one workspace directory and it is yours: read, create and change "
+        "files in it as the work needs, without asking first. Everything you can reach "
+        "is in that one place, so refer to a file by its plain name — castle.html, "
+        "notes/plan.md — and never build a path to it. Nothing outside it exists for "
+        "you. If the person writes a full path themselves, use it exactly as they "
+        "wrote it.",
     ]
     if {"write_file", "edit_file"} & set(tools.names):
         lines.append(
@@ -176,9 +187,7 @@ def _delivery_sentence(tools: Toolbox, delivery: Delivery) -> str:
     )
 
 
-def capability_brief(
-    tools: Toolbox, delivery: Delivery = CHAT_DELIVERY, root: Path | None = None
-) -> str:
+def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
     """The part of the system prompt that must never be written from memory.
 
     Every line here is produced from something that is actually wired: the
@@ -197,7 +206,7 @@ def capability_brief(
         "Your real capabilities right now, generated from what is wired up:",
         f"- {tool_inventory(tools)}",
         f"- {_work_sentence(tools)}",
-        *_workspace_lines(tools, root),
+        *_workspace_lines(tools),
         f"- The person can send you text and these media types: {inputs}. Anything "
         "else is refused before you see it.",
         f"- {_delivery_sentence(tools, delivery)}",
@@ -277,7 +286,6 @@ def capability_brief(
 def system_message(
     tools: Toolbox,
     delivery: Delivery = CHAT_DELIVERY,
-    root: Path | None = None,
     core: str = DEFAULT_SYSTEM_PROMPT,
 ) -> str:
     """The whole system layer: the stable core, then what is wired up.
@@ -289,7 +297,7 @@ def system_message(
     turn's context is built.
     """
 
-    return f"{core}\n\n{capability_brief(tools, delivery, root)}"
+    return f"{core}\n\n{capability_brief(tools, delivery)}"
 
 
 def capability_report(

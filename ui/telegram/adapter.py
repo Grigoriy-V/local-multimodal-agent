@@ -57,6 +57,7 @@ from ui.telegram.api import (
 from ui.telegram.wire import (
     CHATS_CALLBACK_PREFIX,
     CHATS_CLOSE,
+    INSTRUCTION_COMMANDS,
     SETTLED_CALLBACK_PREFIX,
     Incoming,
     canonical_user_id,
@@ -318,6 +319,32 @@ class AnswerPreview:
         self.message_id = None
         self._edited_at = 0.0
         self._stood_aside = False
+
+
+def _split_argument(argument: str) -> tuple[str, str]:
+    """What `/agents` was asked to do, and the text it was given.
+
+    Split on any whitespace, because `set` and the instructions after it are
+    very often on separate lines. And `set` is optional: anything that is not
+    `clear` is taken as the instructions themselves.
+
+    That last rule is deliberate. Recognising one exact form and quietly
+    showing help for everything else is how a person ends up believing they
+    saved instructions that were never written — which is exactly what
+    happened on 2026-08-30, with no file on the volume to show for it.
+    """
+
+    text = argument.strip()
+    if not text:
+        return "show", ""
+    parts = text.split(maxsplit=1)
+    head = parts[0].lower()
+    rest = parts[1] if len(parts) > 1 else ""
+    if head == "clear":
+        return "clear", ""
+    if head == "set":
+        return "set", rest
+    return "set", text
 
 
 def current_thread(store: ConversationStore, user_id: str) -> str:
@@ -608,7 +635,7 @@ class TelegramAdapter:
             await self._show_conversations(store, user_id, incoming.chat_id)
             return
         head, _, argument = incoming.text.strip().partition(" ")
-        if head.lower() == "/agents":
+        if head.lower() in INSTRUCTION_COMMANDS:
             # Read from the raw text rather than the lowercased command: what
             # follows `set` is the person's own writing and must survive.
             await self._on_instructions(agent, incoming.chat_id, argument.strip())
@@ -677,10 +704,17 @@ class TelegramAdapter:
 
         Replacement rather than appending: one message is the whole file. What
         does not fit in a message is what `edit_file` is for.
+
+        Anything that is not `clear` is the instructions themselves, with a
+        leading `set` dropped if it is there. Nothing here interprets the text:
+        `set` is a word this command removes, not a word it acts on, and what
+        is stored is exactly what was typed. The alternative — recognising one
+        exact form and silently showing help for everything else — is how a
+        person ends up believing they saved instructions that were never
+        written.
         """
 
-        action, _, body = argument.partition(" ")
-        action = action.strip().lower()
+        action, body = _split_argument(argument)
         workspace = agent.workspace
 
         if action == "set":
@@ -691,8 +725,8 @@ class TelegramAdapter:
                 return
             await self.client.send_message(
                 chat_id,
-                f"Saved {len(saved)} characters to {INSTRUCTIONS_FILE}. "
-                "They apply from your next message.",
+                f"Saved {len(saved)} characters to {INSTRUCTIONS_FILE}, exactly as you "
+                "wrote them. They apply from your next message.",
             )
             return
 
@@ -710,17 +744,18 @@ class TelegramAdapter:
         if not current:
             await self.client.send_message(
                 chat_id,
-                "You have no standing instructions. Send /agents set followed by "
-                "how you want me to work — for example, which language to answer "
-                f"in, or how much detail you want. It is kept as {INSTRUCTIONS_FILE} "
-                "in your workspace, so you can also ask me to edit it. "
-                "/agents clear removes it.",
+                "You have no standing instructions. Send /agents followed by how you "
+                "want me to work — for example, which language to answer in, or how "
+                "much detail you want. Whatever you write is stored as you wrote it; "
+                "I do not read it until the next message. It is kept as "
+                f"{INSTRUCTIONS_FILE} in your workspace, so you can also ask me to "
+                "edit it. /agents clear removes it.",
             )
             return
         await self.client.send_message(
             chat_id,
             f"Your standing instructions, from {INSTRUCTIONS_FILE}:\n\n{current}\n\n"
-            "/agents set … replaces this, /agents clear removes it.",
+            "/agents followed by new text replaces this, /agents clear removes it.",
         )
 
     async def _show_conversations(

@@ -291,11 +291,10 @@ class Agent:
         if thread_id not in self._graphs:
             toolbox = self.toolbox(thread_id)
             # The model is told what it actually has. Left to its own account it
-            # denies abilities it has and invents tools it does not — and until
-            # 2026-08-30 it was never told where its own workspace was.
-            prompt = system_message(
-                toolbox, self.delivery, self.workspace, self.system_prompt
-            )
+            # denies abilities it has and invents tools it does not. What it is
+            # deliberately not told is where the workspace is: there is one, and
+            # naming it taught the model to build paths into it.
+            prompt = system_message(toolbox, self.delivery, self.system_prompt)
             self._graphs[thread_id] = build_agent(
                 self.backend,
                 toolbox,

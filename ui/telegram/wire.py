@@ -50,10 +50,16 @@ MODEL_FREE_COMMANDS = frozenset(
     {"/start", "/help", "/new", "/chats", "/can", "/check", "/stop"}
 )
 
-# The one command that carries its own text and still never reaches the model.
-# `/agents set …` writes a file and answers from it; matching it only when it
-# stands alone would wake an A10 to save a sentence.
-MODEL_FREE_WITH_ARGUMENTS = ("/agents",)
+# Commands that carry their own text and still never reach the model. `/agents`
+# writes a file and answers from it; matching it only when it stands alone
+# would wake an A10 to save a sentence.
+#
+# Both spellings, because the singular is what a person types. On 2026-08-30
+# `/agent set …` fell through to the model, which answered as if it were being
+# chatted to, and the instructions were silently never saved. A near miss on a
+# command that writes a file has to hit the command, not the GPU.
+INSTRUCTION_COMMANDS = frozenset({"/agents", "/agent"})
+MODEL_FREE_WITH_ARGUMENTS = tuple(sorted(INSTRUCTION_COMMANDS))
 
 # Buttons that are answered from storage. A settled status button describes
 # something that already happened; a conversation button changes which thread

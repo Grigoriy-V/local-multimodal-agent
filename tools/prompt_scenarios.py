@@ -242,7 +242,7 @@ def assembled(agent: Agent, prompt: str, thread_id: str) -> str:
     what a comparison is comparing even when only the core changed.
     """
 
-    return system_message(agent.toolbox(thread_id), agent.delivery, agent.workspace, prompt)
+    return system_message(agent.toolbox(thread_id), agent.delivery, prompt)
 
 
 def sealed(root: Path) -> AgentSettings:
