@@ -116,7 +116,7 @@ class Agent:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         checkpoints: str | Path | None = None,
         checkpoint_database_url: str = "",
-        context_fraction: float = 0.6,
+        context_fraction: float = 0.8,
         context_tokens: int | None = None,
         capability_registry: CapabilityRegistry | None = None,
         capability_grant: CapabilityGrant | None = None,

@@ -8,7 +8,8 @@
 live. An article pushed at the bot produced seven turns up to 28,113 tokens,
 with a single request of 15,699 against an old budget of 9,830, and no fold was
 needed. One defect found in the same session — a Telegram rate limit discarding
-a finished answer — is fixed and tested but **not yet deployed**.
+a finished answer — is fixed, tested and deployed. The edit frequency that
+provoked the limit remains queued separately.
 `reports/2026-08-30_v2_context_capacity.md`,
 `reports/2026-08-30_v2_context_memory_plan.md`.
 
@@ -199,9 +200,10 @@ Verified platform facts and cold-start evidence remain in
      that conversation for ever. The acknowledgement can no longer fail a turn,
      and the queue gives up on an update after three attempts.
 
-   - **4.1.5 Real context capacity.** The effective limit today is 9,830 tokens
-     — 16,384 spent at `AGENT_CONTEXT_FRACTION` 0.6 — and one loop can now spend
-     many steps inside a single turn. Raise the engine ceiling to **65,536** on
+   - **4.1.5 Real context capacity.** The effective limit at the start of this
+     step was 9,830 tokens — 16,384 spent at `AGENT_CONTEXT_FRACTION` 0.6 — and
+     one loop can now spend many steps inside a single turn. Raise the engine
+     ceiling to **65,536** on
      the boot already owed the NCCL fix; keep one threshold rather than two;
      measure context pressure before the model call instead of from the previous
      turn's reported usage; and make the per-request budget per-user in
@@ -232,10 +234,16 @@ Verified platform facts and cold-start evidence remain in
      article stayed in context whole instead of being summarized away.
      `reports/2026-08-30_v2_context_capacity.md`.
 
+     The approved everyday default is now `AGENT_CONTEXT_FRACTION=0.8`, which
+     gives a 52,428-token request budget at the live 65,536-token ceiling. The
+     repository default and `env.example` were updated and the control plane was
+     deployed with that default on 2026-08-30.
+
      The acceptance found a delivery defect and it is fixed here: a Telegram
      `429` discarded a finished 770-token answer, and because a failed delivery
      fails the turn, the retry would have re-run both model calls rather than
-     re-sending what it already had. `retry_after` is now waited out, bounded.
+     re-sending what it already had. `retry_after` is now waited out, bounded,
+     and the fix is deployed.
      Not fixed, and queued below: the edit frequency that provoked the limit.
    - **4.2 Tool execution seam.** One `pre_execute → execute → post_execute`
      path for every tool, holding consent policy, validation and telemetry.
