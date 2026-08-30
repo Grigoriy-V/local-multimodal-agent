@@ -348,9 +348,11 @@ Verified platform facts and cold-start evidence remain in
      measured faces: the assistant makes an artifact and describes how it looks
      without opening it, and having opened a different page it invented details
      of a source it never read — while the same page read as source gave both
-     of its real defects. So `inspect_page` returning a render without the
-     source is a candidate cause, not only a prompt matter, and the steering
-     that could refuse such an answer arrives in 4.4. Deliberately after those,
+     of its real defects. `inspect_page` returning a render without the source
+     is a candidate cause and is deliberately not patched: the browser
+     capability below replaces it, so a fix here would be written against a
+     tool that is going away. The steering that could refuse such an answer
+     arrives in 4.4. Deliberately after those,
      because three rounds of prompt wording moved this back and forth and
      settled nothing. Includes the residual acceptance 4.3 did not demonstrate.
      `reports/2026-08-30_v2_prompt_assembly.md`.
@@ -406,15 +408,29 @@ Recorded, not approved, not begun, and not in the order above. One line each.
 - **The assistant does not hand over what it made.** Live on 2026-08-30, with
   standing instructions that said not to send code into the chat: asked for an
   HTML page it wrote `house.html`, inspected it, and answered with the literal
-  text `[house.html](house.html)` — twice, in two separate messages. The
-  Markdown renderer is right to leave that as text, because only http, https,
-  tg and mailto become links and a relative path leads nowhere; the model is
-  trying to deliver a file *in prose*, and believes it has. The screenshot and
-  then the file itself each arrived only when asked for directly. So the
-  missing step is not a decision to withhold — it is that handing something
-  over is `send_file`, and the model reaches for a link instead. Related to
-  4.5.5 and not the same: that one is about claiming what was not seen, this
-  one about not delivering what was made.
+  text `[house.html](house.html)` — twice in the same session. The Markdown
+  renderer is right to leave that as text, because only http, https, tg and
+  mailto become links and a relative path leads nowhere; the model is trying to
+  deliver a file *in prose*, and believes it has. The screenshot and then the
+  file itself each arrived only when asked for by name. So the missing step is
+  not a decision to withhold — it is that handing something over is
+  `send_file`, and the model reaches for a link instead. Related to 4.5.5 and
+  not the same: that one is about claiming what was not seen, this one about
+  not delivering what was made.
+  `reports/2026-08-30_v2_prompt_assembly.md`, section "The first live session
+  with instructions in place".
+- **One browser capability instead of `inspect_page`.** A named set rather than
+  a single call that renders and returns everything at once: `browser_open` /
+  `navigate`, `browser_snapshot`, `browser_screenshot`, `browser_click`,
+  `browser_type`, `browser_evaluate`. It absorbs two open questions rather than
+  answering them separately — a snapshot is the page as text where a screenshot
+  is the page as pixels, which is what "looking is not reading" was asking for;
+  and clicking and typing are what a generated page cannot be judged by looking
+  alone. Until it exists, `inspect_page` is left as it is on purpose: patching
+  the tool that is being replaced spends the work twice. The same trust
+  boundary applies — a local artifact renders where the agent runs, a page from
+  the internet goes to the isolated renderer, and `WEB_LOCAL_BROWSER=0` still
+  means this container may not open one itself.
 - **Latency to the first visible word**, to give 4.1 a "before" number:
   `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
 - **Throttle the edits that write a streamed answer.** Seven long answers in
