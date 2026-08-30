@@ -294,6 +294,90 @@ async def test_an_update_queued_before_the_control_lane_existed_is_ordinary(
     assert claimed.control is False
 
 
+async def test_a_conversation_already_running_does_not_ask_for_another_worker(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """A burst must not ask for a container per message.
+
+    Live on 2026-08-30: two Telegram albums of four documents arrived as eight
+    updates 1.2 s apart and every one of them asked for a worker. Seven found
+    the conversation held and exited without claiming anything, so the spawns
+    were work that could not have happened.
+    """
+
+    await queue(inbox, 5)
+    running = await inbox.claim(5)
+    assert running is not None
+
+    following = await inbox.enqueue(7, payload(7), conversation_key=ALICE)
+
+    assert following.should_spawn is False
+    # Queued all the same: what is suppressed is the container, never the row.
+    assert await inbox.claim_next(ALICE) is None
+    await inbox.complete(running)
+    drained = await inbox.claim_next(ALICE)
+    assert drained is not None and drained.update_id == 7
+
+
+async def test_a_conversation_whose_worker_died_still_asks_for_one(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """The lease has to be live, or a dead container silences the conversation.
+
+    A running row with an expired lease is exactly what a killed worker leaves
+    behind, and it is the case that most needs a new one started.
+    """
+
+    await queue(inbox, 5)
+    lost = await inbox.claim(5, lease_seconds=1)
+    assert lost is not None
+    await asyncio.sleep(1.2)
+
+    following = await inbox.enqueue(7, payload(7), conversation_key=ALICE)
+
+    assert following.should_spawn is True
+
+
+async def test_another_person_is_not_held_up_by_a_running_conversation(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    await queue(inbox, 5, key=ALICE)
+    running = await inbox.claim(5)
+    assert running is not None
+
+    theirs = await inbox.enqueue(7, payload(7), conversation_key=BOB)
+
+    assert theirs.should_spawn is True
+
+
+async def test_a_control_update_always_asks_for_a_worker(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """`/stop` must not be the thing that waits for the turn it is about."""
+
+    await queue(inbox, 5)
+    running = await inbox.claim(5)
+    assert running is not None
+
+    control = await inbox.enqueue(8, payload(8), conversation_key=ALICE, control=True)
+
+    assert control.should_spawn is True
+
+
+async def test_an_update_with_no_conversation_still_asks_for_a_worker(
+    inbox: PostgresUpdateInbox,
+) -> None:
+    """Rows queued before the key existed are answered one at a time, as before."""
+
+    await inbox.enqueue(5, payload(5))
+    running = await inbox.claim(5)
+    assert running is not None
+
+    following = await inbox.enqueue(7, payload(7))
+
+    assert following.should_spawn is True
+
+
 async def test_setting_the_queue_up_twice_changes_nothing(
     inbox: PostgresUpdateInbox,
 ) -> None:

@@ -142,6 +142,13 @@ step keeps answering a person's messages out of order**: rows without the key
 are claimed one at a time, exactly as before. Nothing is rewritten and no row is
 dropped.
 
+A worker is asked for only when the conversation is not already being worked on:
+`enqueue` suppresses the spawn while another row of the same conversation is
+`running` with a live lease, because such a worker would claim nothing and exit.
+The row is queued either way and the worker holding the lease drains it, so this
+changes what is started, never what is answered. Control updates are exempt.
+`reports/2026-08-30_v2_album_burst_incident.md`.
+
 It then gains a `control BOOLEAN NOT NULL DEFAULT FALSE` column, which is the
 out-of-band lane: a control update is claimed on its own and is never what a
 conversation's lease takes. **A deployment that skips this step goes back to

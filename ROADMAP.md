@@ -4,12 +4,12 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.1.5, real context capacity. The endpoint half is
-live: the ceiling is 65,536 and three real Telegram turns went through it
-unchanged. The application half — folding before the request, the request-size
-estimate, the per-user budget — is implemented and green offline but **not
-deployed**; `assistant-control` still runs the pre-4.1.5 build. Deploying it is
-the remaining gate. `reports/2026-08-30_v2_context_capacity.md`,
+**Current approved step:** 4.1.5, real context capacity — deployed and accepted
+live. An article pushed at the bot produced seven turns up to 28,113 tokens,
+with a single request of 15,699 against an old budget of 9,830, and no fold was
+needed. One defect found in the same session — a Telegram rate limit discarding
+a finished answer — is fixed and tested but **not yet deployed**.
+`reports/2026-08-30_v2_context_capacity.md`,
 `reports/2026-08-30_v2_context_memory_plan.md`.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
@@ -226,10 +226,17 @@ Verified platform facts and cold-start evidence remain in
      conversation folds before it is sent, the estimate lives behind the model
      boundary and calibrates itself from reported token counts, and the budget
      takes a chosen `AGENT_CONTEXT_TOKENS` clamped to the server's limit ahead
-     of the fraction. None of it is deployed: `assistant-control` was not
-     rebuilt, so the three live turns exercised the new endpoint with the old
-     application. Deploying it, and then seeing a fold happen, is what closes
-     this sub-step. `reports/2026-08-30_v2_context_capacity.md`.
+     of the fraction. Deployed and accepted live the same day: an article
+     pushed at the bot produced seven turns, the largest single request 15,699
+     tokens against an old budget of 9,830, and **no fold was needed** — the
+     article stayed in context whole instead of being summarized away.
+     `reports/2026-08-30_v2_context_capacity.md`.
+
+     The acceptance found a delivery defect and it is fixed here: a Telegram
+     `429` discarded a finished 770-token answer, and because a failed delivery
+     fails the turn, the retry would have re-run both model calls rather than
+     re-sending what it already had. `retry_after` is now waited out, bounded.
+     Not fixed, and queued below: the edit frequency that provoked the limit.
    - **4.2 Tool execution seam.** One `pre_execute → execute → post_execute`
      path for every tool, holding consent policy, validation and telemetry.
      Where autonomy inside the workspace is implemented; `DECISIONS.md`
@@ -288,6 +295,19 @@ Recorded, not approved, not begun, and not in the order above. One line each.
 
 - **Latency to the first visible word**, to give 4.1 a "before" number:
   `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
+- **Throttle the edits that write a streamed answer.** Seven long answers in
+  four and a half minutes rate-limited the bot on 2026-08-30. Waiting out the
+  limit is now handled; being chatty enough to earn it is not, and how often to
+  edit is a measurement rather than a constant to pick.
+- **Answer a Telegram album as one turn.** Four documents in one message reach
+  the bot as four updates sharing a `media_group_id`, with the caption on one of
+  them, and become four turns and four answers. Coalescing them means a turn
+  whose identity is not one update — which 4.0 held back deliberately, because
+  every recorded number counts turns that way — and waiting out an album that
+  has no end marker. Design it rather than patch it; the assistant handed four
+  documents and no instruction also has a missing decision, which is 4.5's
+  `ask_user`, not a permission prompt.
+  `reports/2026-08-30_v2_album_burst_incident.md`.
 
 **Closing criterion:** through Telegram, a normal conversational request is
 answered and a work request completes end to end for two different users without

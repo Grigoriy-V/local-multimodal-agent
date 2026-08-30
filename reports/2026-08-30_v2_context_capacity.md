@@ -135,10 +135,11 @@ tables, no second threshold beside `AGENT_CONTEXT_FRACTION`.
 ## Checks
 
 ```text
-python -m pytest -q          728 passed, 22 skipped
+python -m pytest -q          742 passed, 22 skipped
 ```
 
-Up from 710. New: `tests/test_request_size.py`, 17 tests over the measurement,
+Up from 710. New: `tests/test_telegram_rate_limit.py`, 14 tests over waiting out
+a `429`; `tests/test_request_size.py`, 17 tests over the measurement,
 the calibration and its clamps, and the budget's precedence and clamp. Changed:
 three overflow tests in `tests/test_agent_session.py` now use a budget far larger
 than their conversation, so that the pre-request fold does not fire and the
@@ -173,17 +174,92 @@ changed. Nothing observable distinguishes that at ~3,000 input tokens, and the
 budget is not recorded in telemetry, so these traces cannot confirm it either
 way. That is a gap in what is measured, not a doubt about the code.
 
+## Accepted live, 2026-08-30
+
+`assistant-control` was deployed with the application half at 02:2x, and the
+human then pushed an article at the bot. Seven turns:
+
+| started | calls | input tokens |
+|---|---|---|
+| 02:25:09 | 3 model, 2 tool | 15,960 |
+| 02:25:51 | 2 model, 1 tool | 17,681 |
+| 02:26:31 | 1 model | 6,751 |
+| 02:27:04 | 2 model, 1 tool | 17,703 |
+| 02:27:57 | 1 model | 11,051 |
+| 02:28:47 | 1 model | 11,754 |
+| 02:29:25 | 2 model, 1 tool | 28,113 |
+
+The largest single request was **15,699 tokens**. The budget before this
+sub-step was 9,830, against a hard ceiling of 16,384 — so this conversation
+would have been folded repeatedly on the way through, and the turn after it
+would have met the ceiling itself.
+
+**No `context_folded` event was recorded**, because no single request came near
+39,321. That is the product outcome the sub-step existed for: the article stayed
+in context whole instead of being summarized away underneath the person reading
+it. The ceiling is in use, and the fold that now guards it did not need to fire.
+
+## The defect this acceptance found
+
+The last of those seven turns failed:
+
+```text
+telegram refused sendMessage: Too Many Requests: retry after 32
+```
+
+The model had already finished — 770 output tokens over 22.5 s — and the answer
+was discarded on delivery. Seven long answers in four and a half minutes, each
+written into the chat by repeated edits, is enough to be rate limited, and edits
+count toward the limit.
+
+What that cost, before the fix:
+
+- a finished answer thrown away after it was paid for;
+- the update back to `pending` with `attempts=1`, and **nothing to respawn a
+  worker for it** — the control function has no retry configured, so it waits
+  for the next message to arrive and be claimed behind it;
+- three attempts and then abandonment, if the flood persisted.
+
+**Corrected the same day.** This report first claimed the retry would re-run the
+whole turn, model calls included, at about 24 s of GPU. It does not, and the
+record says so: when the update was finally reclaimed at 02:39:15 it finished
+`answer_delivered` with **0 model calls and 0 tokens**, 614.66 s after the
+person sent it. The checkpointer had the completed graph, so the resume
+delivered the answer that already existed rather than producing it again. The
+defect is that the answer waited ten minutes for an unrelated message to arrive,
+not that it was paid for twice.
+
+That run is also a second sighting of 4.1's reading trap: a retried update keeps
+its `run_id` and `started_at` is rewritten to the new claim, so the first
+attempt's events render at negative offsets — here from `-568.21s`.
+
+And Telegram had said exactly how long to wait, in a structured field, which the
+client ignored.
+
+`TelegramClient._call` now reads `parameters.retry_after`, waits it out — half a
+second over, because arriving on the boundary is how a flood wait gets extended
+— and tries again, at most twice, and never for a wait longer than 60 s. Nothing
+else is retried: a rate limit is the one refusal that carries its own remedy,
+and everything else would be guessing. `tests/test_telegram_rate_limit.py`
+covers the wait, the bound on the number of holds, the refusal of an
+unreasonable wait, that an ordinary refusal is not retried, and that a
+nonsensical `retry_after` — including `True`, which is an `int` in Python — is
+treated as an ordinary refusal rather than one second.
+
+Not addressed, and recorded as its own queue item: the edit frequency that
+provoked the limit. Streaming an answer is chatty by design, and throttling it
+is a measurement rather than a one-line change.
+
 ## What is not verified
 
-- **Anything of 4.1.5's application half, live.** It is asserted offline against
-  a scripted backend and has never run against the real endpoint. Closing this
-  needs a deploy of `assistant-control`, which is its own human gate.
-- **That the application observed the new ceiling.** True by construction and
-  unobservable in the current record: no event carries the budget. If that
-  matters, the cheap fix is a field on the turn rather than a probe that wakes a
-  GPU.
-- **A fold actually firing in production.** Nothing in the deployed
-  conversations is near 39,321 tokens yet.
+- **A fold actually firing in production.** The seven live turns went up to
+  15,699 tokens in one request, which is well inside 39,321. What the new
+  `fitted` path does when it does fire has only been exercised offline.
+- **The rate-limit fix, live.** It is written and tested and not deployed.
+- **That the application observed the new ceiling, directly.** It plainly did —
+  a 15,699-token request could not have been sent under the old budget — but no
+  event carries the budget itself. If that ever matters, the cheap fix is a
+  field on the turn rather than a probe that wakes a GPU.
 - **Restore-to-health for the new snapshot.** The 299.7 s above is snapshot
   *creation*. What a warm wake now costs will show on the next one.
 - **Whether the estimate's ratio settles anywhere sensible on real traffic.** It

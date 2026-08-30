@@ -28,6 +28,7 @@ rather than dropped.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 from html import escape
@@ -41,6 +42,25 @@ from ui.telegram.wire import SETTLED_APPROVED, SETTLED_REJECTED
 
 # Telegram refuses a longer message outright rather than truncating it.
 MAX_MESSAGE_CHARS = 4096
+
+# How long a rate limit may hold one call before it is treated as a failure, and
+# how many times a single call may be held. Telegram answers a flood with
+# `429 Too Many Requests` and `parameters.retry_after`, which is a "later", not a
+# "no" — and it says exactly how much later.
+#
+# Found live on 2026-08-30: seven long answers in four and a half minutes, each
+# written into the chat by repeated edits, and Telegram refused the eighth with
+# `retry after 32`. The turn had already spent 22 s of GPU producing a complete
+# 770-token answer, which was then thrown away, because a refused delivery fails
+# the turn — and a failed turn is re-run from the beginning, model calls
+# included, rather than having its answer re-sent.
+#
+# Sixty seconds because the waits Telegram asks for are seconds to a minute,
+# while the deployed worker is killed at 600 s and a turn may already have spent
+# 300 of them. Two holds, because a limit that survives being waited out twice
+# is a flood this turn cannot talk its way out of.
+MAX_RETRY_AFTER_SECONDS = 60.0
+MAX_RATE_LIMIT_HOLDS = 2
 # Documents Telegram will accept from a bot.
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 # Telegram's own cap for `sendPhoto`, which is much smaller than a document's.
@@ -181,6 +201,24 @@ def pack(blocks: Iterable[tuple[str, str]], limit: int = MAX_MESSAGE_CHARS) -> l
     return pieces
 
 
+def retry_after(body: dict[str, Any]) -> float | None:
+    """How long Telegram asked us to wait, if that is what it refused for.
+
+    Read from `parameters.retry_after`, which is where Telegram puts it, rather
+    than parsed out of the description text — the number is structured and the
+    sentence is not a contract. A rate limit with no usable number is treated as
+    an ordinary refusal, because waiting for an unknown time is not a plan.
+    """
+
+    parameters = body.get("parameters")
+    if not isinstance(parameters, dict):
+        return None
+    seconds = parameters.get("retry_after")
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+        return None
+    return float(seconds) if seconds > 0 else None
+
+
 def is_parse_refusal(error: Exception) -> bool:
     """Did Telegram reject the markup rather than the message itself?"""
 
@@ -302,6 +340,29 @@ class TelegramClient:
         )
 
     async def _call(self, method: str, payload: dict[str, Any]) -> Any:
+        """One Bot API call, waiting out a rate limit rather than failing on it.
+
+        Nothing else is retried here. A rate limit is the one refusal that
+        carries its own remedy — Telegram says how many seconds to wait — so
+        waiting is following the instruction, not guessing that another attempt
+        might work.
+        """
+
+        for hold in range(MAX_RATE_LIMIT_HOLDS + 1):
+            body = await self._post(method, payload)
+            if body.get("ok"):
+                return body.get("result")
+            pause = retry_after(body)
+            if pause is None or pause > MAX_RETRY_AFTER_SECONDS or hold == MAX_RATE_LIMIT_HOLDS:
+                raise TelegramError(
+                    f"telegram refused {method}: {body.get('description', 'no description')}"
+                )
+            # A shade over what was asked for. Waiting exactly the stated time
+            # and arriving on the boundary is how a flood wait gets extended.
+            await asyncio.sleep(pause + 0.5)
+        raise AssertionError("unreachable")
+
+    async def _post(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             response = await self._client.post(f"/{method}", json=payload)
         except httpx.HTTPError as error:
@@ -311,11 +372,9 @@ class TelegramClient:
             body = response.json()
         except ValueError as error:
             raise TelegramError(f"telegram returned no JSON for {method}") from error
-        if not body.get("ok"):
-            raise TelegramError(
-                f"telegram refused {method}: {body.get('description', response.status_code)}"
-            )
-        return body.get("result")
+        if not isinstance(body, dict):
+            raise TelegramError(f"telegram returned no object for {method}")
+        return body
 
     async def get_updates(self, offset: int | None = None) -> list[dict[str, Any]]:
         payload: dict[str, Any] = {

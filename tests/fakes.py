@@ -117,8 +117,9 @@ class QueuedInbox:
     the same rules against PostgreSQL itself. So this holds exactly the three
     that the worker depends on — one conversation runs one update at a time, the
     oldest unfinished one goes first, and a control update is claimed on its own
-    whatever the conversation is doing — and models a lease that never expires,
-    because nothing offline moves a clock forward.
+    whatever the conversation is doing — plus the rule that a conversation
+    already being worked on does not ask for another container. It models a
+    lease that never expires, because nothing offline moves a clock forward.
     """
 
     def __init__(self, queued_ms: int = 0) -> None:
@@ -150,9 +151,20 @@ class QueuedInbox:
             self.runs[update_id] = run_id
             self.keys[update_id] = conversation_key
             self.state[update_id] = "pending"
-        return EnqueueResult(
-            update_id, self.state[update_id] == "pending", self.runs[update_id]
-        )
+        spawn = self.state[update_id] == "pending"
+        key = self.keys[update_id]
+        if spawn and key and update_id not in self.control:
+            # A worker started while another holds the conversation would claim
+            # nothing and exit, so the spawn is suppressed rather than wasted.
+            # The lease here never expires, which is the offline simplification
+            # this class already makes elsewhere.
+            spawn = not any(
+                self.state.get(other) == "running"
+                and self.keys.get(other) == key
+                and other not in self.control
+                for other in self.payloads
+            )
+        return EnqueueResult(update_id, spawn, self.runs[update_id])
 
     async def claim(self, update_id: int, lease_seconds: int = 900) -> "InboxJob | None":
         if update_id not in self.payloads:

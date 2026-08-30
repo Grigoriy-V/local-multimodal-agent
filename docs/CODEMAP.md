@@ -74,6 +74,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change Telegram raw update parsing | `ui/telegram/wire.py` | `Incoming`, `read_update`, `needs_model` |
 | Change Telegram Markdown rendering | `ui/telegram/markdown.py` | `render`, `balanced` |
 | Change Telegram Bot API transport/presentation primitives | `ui/telegram/api.py` | `TelegramClient`, `Formatted`, `PRODUCT_COMMANDS` |
+| Change how a Telegram rate limit is handled | `ui/telegram/api.py` | `retry_after`, `MAX_RETRY_AFTER_SECONDS`, `MAX_RATE_LIMIT_HOLDS`, `_call` |
 | Change deployed webhook handoff | `ui/telegram/webhook.py` | `TelegramWebhook`, `TelegramUpdateWorker` |
 | Change deployed Telegram inbox | `ui/telegram/inbox.py` | `PostgresUpdateInbox`, `UpdateInbox` |
 | Change local Telegram polling | `ui/telegram/run.py` | `PollingBot`, per-chat locks |

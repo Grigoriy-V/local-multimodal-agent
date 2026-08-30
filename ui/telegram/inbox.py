@@ -208,20 +208,58 @@ class PostgresUpdateInbox:
                 )
                 inserted = await cursor.fetchone()
                 if inserted is not None:
-                    return EnqueueResult(update_id, True, run_id)
-                await cursor.execute(
-                    f"SELECT state, run_id, lease_until < CURRENT_TIMESTAMP AS expired"
-                    f" FROM {self.table} WHERE update_id = %s",
-                    (update_id,),
-                )
-                row = await cursor.fetchone()
-        should_spawn = bool(
-            row
-            and (row["state"] == "pending" or (row["state"] == "running" and row["expired"]))
+                    should_spawn, stored_run_id = True, run_id
+                else:
+                    await cursor.execute(
+                        f"SELECT state, run_id, lease_until < CURRENT_TIMESTAMP AS expired"
+                        f" FROM {self.table} WHERE update_id = %s",
+                        (update_id,),
+                    )
+                    row = await cursor.fetchone()
+                    should_spawn = bool(
+                        row
+                        and (
+                            row["state"] == "pending"
+                            or (row["state"] == "running" and row["expired"])
+                        )
+                    )
+                    # The stored run id wins over the one just generated. A
+                    # second delivery of one update is the same turn seen twice,
+                    # not two turns.
+                    stored_run_id = (row or {}).get("run_id") or ""
+                if should_spawn and conversation_key and not control:
+                    should_spawn = not await self._busy(cursor, conversation_key)
+        return EnqueueResult(update_id, should_spawn, stored_run_id)
+
+    async def _busy(self, cursor: Any, conversation_key: str) -> bool:
+        """Is a live worker already holding this conversation?
+
+        Asked so that a burst does not ask for a container per message. A worker
+        started while another holds the conversation claims nothing and exits —
+        `_claim_conversation` refuses while `busy.lease_until` is in the future —
+        so the spawn was always going to be wasted. Suppressing it changes what
+        is started, never what is answered: the row is queued either way, and
+        the worker that holds the lease drains it.
+
+        Found live on 2026-08-30: two Telegram albums of four documents arrived
+        as eight updates 1.2 s apart, each asking for its own container. Seven of
+        them had nothing to do.
+
+        A live lease, not merely `running`: the only thing that leaves a running
+        row behind with no worker is a container that died, and a conversation
+        whose lease has expired needs the spawn this would otherwise skip.
+
+        Control updates never reach here. They are the out-of-band lane, and one
+        waiting for the turn it is about to finish is the flaw that lane exists
+        to avoid.
+        """
+
+        await cursor.execute(
+            f"SELECT 1 FROM {self.table} WHERE conversation_key = %s AND NOT control"
+            " AND state = 'running' AND lease_until >= CURRENT_TIMESTAMP LIMIT 1",
+            (conversation_key,),
         )
-        # The stored run id wins over the one just generated. A second delivery
-        # of one update is the same turn seen twice, not two turns.
-        return EnqueueResult(update_id, should_spawn, (row or {}).get("run_id") or "")
+        return await cursor.fetchone() is not None
 
     # What a claim may take: never a finished update, and never one another
     # container is still working on. An expired lease is fair game, because the
