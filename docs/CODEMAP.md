@@ -40,7 +40,9 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change how an answer streams as it is written | `app/agent/graph.py`, `ui/telegram/adapter.py` | `complete`, `ASSISTANT_DELTA`, `AssistantDelta`, `MessageProduced`, `AnswerWithdrawn`, `AnswerPreview`, `StreamedCompletion` |
 | Change model-agnostic message types | `app/models/base.py` | `Message`, `ContentPart`, `ToolCall`, `ModelBackend` |
 | Change OpenAI/vLLM request translation | `app/models/openai_compatible.py` | `OpenAICompatibleBackend`, `build_messages`, `parse_completion` |
-| Change system prompt/context replay | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT`, `Context`, `ContextPolicy` |
+| Change the stable prompt core (names no tool) | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT` |
+| Change prompt layer order / context replay | `app/context/window.py` | `build_prelude`, `Context`, `ContextPolicy` |
+| Read or write a person's standing instructions | `app/instructions.py` | `AGENTS.md`, `read_instructions`, `write_instructions`, `instruction_message` |
 | Change context folding/summary | `app/context/summary.py`, `app/context/persistence.py` | `fold_older_messages`, `load_turn_context` |
 | Change when a conversation is folded | `app/agent/graph.py` | `fitted`, `context_folded` |
 | Estimate how large a request is | `app/models/base.py`, `app/models/openai_compatible.py` | `estimate_tokens`, `measure_request`, `CHARS_PER_TOKEN`, `MEDIA_TOKENS`, `_calibrate` |
@@ -61,7 +63,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change graph checkpoints | `app/checkpoints.py` | `CheckpointHandle`, `setup_postgres_checkpoints` |
 | Add/change a tool primitive or execution lifecycle | `app/tools/base.py`, `app/tools/execution.py` | `Tool`, `Toolbox`, `ToolExecutor`, `pre_execute`, `execute`, `post_execute` |
 | Add/change a capability/grant | `app/tools/capabilities.py` | `CapabilityRegistry`, `CapabilityGrant`, `DEFAULT_CAPABILITIES` |
-| Change what assistant says it can do | `app/capabilities.py` | `capability_brief`, `capability_report`, `tool_inventory` |
+| Change what assistant says it can do, or assemble its system message | `app/capabilities.py` | `system_message`, `capability_brief`, `capability_report`, `tool_inventory` |
 | Change filesystem tools/path scope | `app/tools/filesystem.py` | `resolve_in_root`, `filesystem_tools` |
 | Change attachment admission | `app/attachments.py` | `admit_uploads`, `load_attachments`, limits |
 | Change document parsing/rendering | `app/documents.py` | `read_sections`, `render_pages`, `media_type_for` |

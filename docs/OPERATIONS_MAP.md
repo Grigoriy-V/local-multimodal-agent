@@ -192,8 +192,8 @@ Telegram supports two transport modes that are mutually exclusive from Telegram'
 
 **Owner:** `tools/telegram_profile.py`.
 
-Preview the intended description and `/new`, `/chats`, `/can`, `/stop`, `/help`
-menu without contacting Telegram:
+Preview the intended description and `/new`, `/chats`, `/can`, `/agents`,
+`/stop`, `/help` menu without contacting Telegram:
 
 ```text
 .venv\Scripts\python.exe tools/telegram_profile.py
@@ -508,6 +508,27 @@ Owner path:
 ```text
 app/capabilities.py -> capability_report()
 ui/telegram/adapter.py -> /can dispatch
+```
+
+### `/agents`
+
+The person's own standing instructions for how the assistant should work. It
+does not call the model, and is declared model-free at the front door with its
+arguments included, so `/agents set …` cannot wake the GPU.
+
+Stored as `AGENTS.md` at the root of that person's workspace — the Modal volume
+in the deployed profile — and read again on every turn, so an edit applies to
+the next message with no redeploy. There is no database copy and no migration.
+It is a prompt overlay of lower authority than product and capability policy,
+never memory.
+
+Owner paths:
+
+```text
+app/instructions.py -> read/write/clear and the framed message
+app/context/window.py -> build_prelude places it after the system message
+ui/telegram/adapter.py -> /agents dispatch
+ui/telegram/wire.py -> MODEL_FREE_WITH_ARGUMENTS
 ```
 
 ### `/check`

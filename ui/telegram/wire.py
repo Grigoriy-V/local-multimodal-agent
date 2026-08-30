@@ -50,6 +50,11 @@ MODEL_FREE_COMMANDS = frozenset(
     {"/start", "/help", "/new", "/chats", "/can", "/check", "/stop"}
 )
 
+# The one command that carries its own text and still never reaches the model.
+# `/agents set …` writes a file and answers from it; matching it only when it
+# stands alone would wake an A10 to save a sentence.
+MODEL_FREE_WITH_ARGUMENTS = ("/agents",)
+
 # Buttons that are answered from storage. A settled status button describes
 # something that already happened; a conversation button changes which thread
 # the next message goes to. Neither reads a model, and neither may be paid for
@@ -204,9 +209,10 @@ def needs_model(incoming: Incoming) -> bool:
     still being scheduled. Those two took about 5.5 s and 4.9 s one after the
     other; overlapped, the second disappears into the first.
 
-    The comparison matches the adapter's own dispatch exactly — stripped and
-    lowercased, no arguments — because a command with anything after it already
-    falls through to the model there.
+    The comparison matches the adapter's own dispatch exactly: a bare command
+    from the set above, or one of the few that take an argument and are still
+    answered without a model. Anything else falls through to the model there,
+    and must be judged that way here.
     """
 
     if incoming.callback_data is not None:
@@ -214,4 +220,7 @@ def needs_model(incoming: Incoming) -> bool:
         # The prefixes above are the exceptions, and they are exceptions the
         # adapter answers entirely from storage.
         return not incoming.callback_data.startswith(MODEL_FREE_CALLBACK_PREFIXES)
-    return incoming.text.strip().lower() not in MODEL_FREE_COMMANDS
+    text = incoming.text.strip().lower()
+    if text in MODEL_FREE_COMMANDS:
+        return False
+    return text.partition(" ")[0] not in MODEL_FREE_WITH_ARGUMENTS

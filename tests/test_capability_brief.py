@@ -26,6 +26,7 @@ from app.capabilities import (
     capability_brief,
     capability_report,
     needs_approval,
+    system_message,
     tool_inventory,
 )
 from app.context.window import DEFAULT_SYSTEM_PROMPT
@@ -167,23 +168,144 @@ def test_a_declared_kind_reaches_the_model(registry: CapabilityRegistry) -> None
     assert "nothing else is sent automatically" in brief
 
 
+# --- what the wiring says, that no fixed prompt could ------------------------
+
+
+def test_the_brief_tells_the_agent_where_its_workspace_is(
+    registry: CapabilityRegistry, tmp_path
+) -> None:
+    """It was never told. An agent given autonomy inside a directory it cannot
+    name will not use it, which is what the 2026-08-30 measurement found."""
+
+    brief = capability_brief(everything(registry), root=tmp_path)
+
+    assert str(tmp_path) in brief
+    assert "without asking first" in brief
+
+
+def test_the_root_is_absent_when_there_is_none_to_name(
+    registry: CapabilityRegistry,
+) -> None:
+    brief = capability_brief(everything(registry))
+
+    assert "one directory granted to you" in brief
+
+
+def test_the_brief_says_to_choose_a_name_rather_than_write_nothing(
+    registry: CapabilityRegistry, tmp_path
+) -> None:
+    """The measured failure: asked for a page and given no filename, the model
+    wrote it into the chat and told the person to save it themselves."""
+
+    brief = capability_brief(everything(registry), root=tmp_path)
+
+    assert "choose a sensible name" in brief
+    assert "instead of explaining what you could do" in brief
+
+
+def test_a_reading_grant_is_not_told_to_create_files(
+    registry: CapabilityRegistry, tmp_path
+) -> None:
+    reading_only = registry.toolbox(registry.grant(capabilities=(FILESYSTEM_READ,)))
+
+    brief = capability_brief(reading_only, root=tmp_path)
+
+    assert str(tmp_path) in brief
+    assert "choose a sensible name" not in brief
+
+
+def test_observation_guidance_appears_only_with_the_tool(
+    registry: CapabilityRegistry,
+) -> None:
+    inspecting = registry.toolbox(registry.grant(capabilities=(BROWSER_INSPECT,)))
+    reading_only = registry.toolbox(registry.grant(capabilities=(FILESYSTEM_READ,)))
+
+    guided = capability_brief(inspecting)
+
+    assert "look at it before you describe it" in guided
+    assert "never ask them to open it for you" in guided
+    assert "inspect_page" not in capability_brief(reading_only)
+
+
+def test_standing_instructions_are_never_memory(registry: CapabilityRegistry) -> None:
+    """The boundary is stated where `remember_fact` is, because that is the
+    tool a model would otherwise reach for to keep a preference."""
+
+    store = SqliteStore(":memory:")
+    try:
+        with_memory = registry.toolbox(
+            registry.grant(capabilities=(FILESYSTEM_READ,)),
+            memory_tools(store, "someone", "thread", 5),
+        )
+    finally:
+        store.close()
+
+    brief = capability_brief(with_memory)
+
+    assert "standing instructions are their own file" in brief
+
+
+def test_an_agent_without_tools_is_not_told_to_reach_for_them() -> None:
+    brief = capability_brief(Toolbox())
+
+    assert "You have no tools here" in brief
+    assert "Treat the request as an outcome" not in brief
+
+
+def test_the_system_message_is_the_core_then_the_wiring(
+    registry: CapabilityRegistry, tmp_path
+) -> None:
+    tools = everything(registry)
+
+    whole = system_message(tools, root=tmp_path)
+
+    assert whole.startswith(DEFAULT_SYSTEM_PROMPT)
+    assert capability_brief(tools, root=tmp_path) in whole
+
+
 # --- the hand-written prompt cannot outlive its tools -------------------------
 
 
-def test_the_default_prompt_names_only_tools_that_exist(
+def test_the_core_prompt_names_no_tool_at_all(registry: CapabilityRegistry) -> None:
+    """The stable layer cannot know a tool exists.
+
+    Stronger than the rule it replaces, which allowed the core to name a tool
+    as long as that tool still existed. A grant can withhold any of them, so a
+    fixed sentence about one is either advertising a tool this agent does not
+    have or duplicating a sentence the brief already generates. Both are ways
+    for the prompt to outlive the wiring.
+    """
+
+    assert not re.findall(r"\b[a-z]+_[a-z_]+\b", DEFAULT_SYSTEM_PROMPT)
+
+
+def test_generated_guidance_names_only_tools_that_exist(
     registry: CapabilityRegistry,
 ) -> None:
-    """Guidance may name tools; it may not name ones that are gone.
+    """Guidance may name tools; it may not name ones that are gone."""
 
-    The prompt says which tool suits which job, which is worth keeping in
-    words. What is not worth keeping is a name that stops existing, so the only
-    snake_case words the prompt is allowed to contain are real tool names.
+    store = SqliteStore(":memory:")
+    try:
+        tools = registry.toolbox(
+            registry.grant(), memory_tools(store, "someone", "thread", 5)
+        )
+    finally:
+        store.close()
 
-    A tool a grant can withhold cannot be named here at all — a fixed sentence
-    would advertise it to an agent that does not have it, which is the same
-    dishonesty from the other direction. Its guidance belongs in the brief,
-    which is generated from the toolbox; the second assertion is that every
-    wired tool is guided by one of the two.
+    named = set(re.findall(r"\b[a-z]+_[a-z_]+\b", capability_brief(tools)))
+
+    assert named <= set(tools.names)
+
+
+def test_every_wired_tool_carries_its_own_description(
+    registry: CapabilityRegistry,
+) -> None:
+    """What each tool is for is owned by its schema, not by prose about it.
+
+    This is where the coverage the core prompt used to provide now lives: the
+    brief says what a capability is for and what may not be assumed, and the
+    schema the model receives beside it says what each call does. A tool with
+    no description would be reachable and unexplained.
     """
 
     store = SqliteStore(":memory:")
@@ -194,18 +316,9 @@ def test_the_default_prompt_names_only_tools_that_exist(
     finally:
         store.close()
 
-    mentioned = set(re.findall(r"\b[a-z]+_[a-z_]+\b", DEFAULT_SYSTEM_PROMPT))
-    # Everything except the exhaustive inventory line, which names every tool by
-    # construction and so would make this assertion say nothing.
-    guidance = "\n".join(
-        line
-        for line in capability_brief(tools).splitlines()
-        if "Your tools are exactly" not in line
-    )
-    guided = mentioned | set(re.findall(r"\b[a-z]+_[a-z_]+\b", guidance))
-
-    assert mentioned <= set(tools.names)
-    assert set(tools.names) <= guided, "a wired-up tool is guided by neither"
+    for schema in tools.schemas():
+        described = schema["function"]["description"]
+        assert described and described.strip(), schema["function"]["name"]
 
 
 def test_the_inventory_closes_the_list_wherever_tools_are_given() -> None:

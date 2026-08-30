@@ -21,7 +21,8 @@ from app.agent.stopping import STOP_ON_ANSWER, Candidate, Steering
 from app.config import AgentSettings, TelegramSettings
 from app.memory import SqliteStore
 from app.models import Completion, ContentPart, Message, ToolCall
-from tests.fakes import ScriptedBackend, calls, says
+from app.instructions import INSTRUCTIONS_FILE
+from tests.fakes import ScriptedBackend, calls, prompt_text, says
 from ui.telegram.adapter import (
     HELP,
     LABEL_CHARS,
@@ -928,6 +929,99 @@ async def test_every_command_declared_model_free_really_is(
     assert telegram.sent, f"{command} answered nothing"
 
 
+# --- standing instructions ----------------------------------------------------
+
+
+async def test_agents_shows_how_to_start_when_there_are_none(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/agents"))
+
+    [said] = telegram.sent
+    assert "no standing instructions" in said
+    assert "/agents set" in said
+
+
+async def test_agents_set_writes_the_workspace_file_itself(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """One file, so the command and `edit_file` cannot disagree."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/agents set Отвечай по-русски и коротко."))
+
+    saved = tmp_path / "workspace" / INSTRUCTIONS_FILE
+    assert saved.read_text(encoding="utf-8") == "Отвечай по-русски и коротко."
+    assert "Saved" in telegram.sent[0]
+
+
+async def test_agents_set_keeps_the_case_the_person_typed(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Command dispatch lowercases; the instructions are not the command."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/agents set Always Answer In English."))
+
+    saved = tmp_path / "workspace" / INSTRUCTIONS_FILE
+    assert saved.read_text(encoding="utf-8") == "Always Answer In English."
+
+
+async def test_agents_shows_what_was_saved(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/agents set Показывай план."))
+    await adapter.handle_update(text_update("/agents"))
+
+    assert "Показывай план." in telegram.sent[1]
+
+
+async def test_agents_clear_removes_the_file_and_says_so(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/agents set Что-нибудь."))
+    await adapter.handle_update(text_update("/agents clear"))
+
+    assert not (tmp_path / "workspace" / INSTRUCTIONS_FILE).exists()
+    assert "removed" in telegram.sent[1]
+    await adapter.handle_update(text_update("/agents clear"))
+    assert "had no standing instructions" in telegram.sent[2]
+
+
+async def test_agents_set_with_nothing_to_save_is_refused(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/agents set    "))
+
+    assert "Not saved" in telegram.sent[0]
+    assert not (tmp_path / "workspace" / INSTRUCTIONS_FILE).exists()
+
+
+async def test_saved_instructions_reach_the_next_turn(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """The whole point, end to end: written through the chat, in the prompt of
+    the next message, with no restart in between."""
+
+    backend = ScriptedBackend(says("ладно"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("/agents set Отвечай по-русски."))
+    await adapter.handle_update(text_update("привет"))
+
+    assert "Отвечай по-русски." in prompt_text(backend.requests[0])
+
+
 # --- progress ----------------------------------------------------------------
 
 
@@ -1033,7 +1127,7 @@ def test_the_native_menu_is_the_product_and_not_the_diagnostics() -> None:
 
     offered = [entry.command for entry in PRODUCT_COMMANDS]
 
-    assert offered == ["new", "chats", "can", "stop", "help"]
+    assert offered == ["new", "chats", "can", "agents", "stop", "help"]
     assert "check" not in offered
     assert all(entry.description and entry.description[0].isupper() for entry in PRODUCT_COMMANDS)
     assert len(BOT_DESCRIPTION) <= 512
@@ -1074,6 +1168,7 @@ async def test_publishing_the_profile_sends_exactly_the_product_menu(
         "new",
         "chats",
         "can",
+        "agents",
         "stop",
         "help",
     ]
@@ -1366,6 +1461,16 @@ def test_a_settled_button_is_model_free_at_the_front_door() -> None:
         assert incoming is not None
         assert needs_model(incoming) is False
     assert needs_model(Incoming(CHAT, ALLOWED, "", callback_data="task:yes")) is True
+
+
+def test_standing_instructions_are_model_free_even_carrying_their_text() -> None:
+    """`/agents set …` writes a file and answers from it. Judged by the bare
+    command alone, the front door would wake an A10 to save a sentence."""
+
+    assert needs_model(Incoming(CHAT, ALLOWED, "/agents")) is False
+    assert needs_model(Incoming(CHAT, ALLOWED, "/agents set Отвечай коротко.")) is False
+    assert needs_model(Incoming(CHAT, ALLOWED, "/agents clear")) is False
+    assert needs_model(Incoming(CHAT, ALLOWED, "напиши про /agents")) is True
 
 
 def test_a_conversation_button_is_model_free_at_the_front_door() -> None:

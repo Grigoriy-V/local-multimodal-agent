@@ -234,7 +234,30 @@ web.view
 
 A `CapabilityGrant` has a workspace root and a set of capability names. `CapabilityRegistry` turns the grant into the actual `Toolbox`.
 
-The model's capability description is generated separately in `app/capabilities.py` from what is actually wired: toolbox, admitted input types and interface delivery.
+The model's capability description is generated separately in `app/capabilities.py` from what is actually wired: toolbox, admitted input types, interface delivery and the granted workspace root.
+
+### The prompt is assembled, not written
+
+Since 2026-08-30 the system layer is built from parts ordered by how rarely
+each changes, which is also the order a served prefix cache needs:
+
+```text
+stable core            app/context/window.py    DEFAULT_SYSTEM_PROMPT, names no tool
+capability guidance    app/capabilities.py      generated from the wired toolbox
+tool schemas           the toolbox              sent beside the messages
+standing instructions  app/instructions.py      AGENTS.md, one per person
+rolling summary        the store                changes when a conversation folds
+retrieved facts        the store                changes every turn
+history and turn       the store                the conversation itself
+```
+
+`AGENTS.md` lives at the root of the person's own workspace, is read again on
+every turn — so an edit applies to the next message without a redeploy — and
+travels as its own framed message naming its source. It is an overlay on the
+prompt with authority below product and capability policy: it can shape how
+work is done and can never widen what may be done. It is not memory, holds no
+database copy, and `remember_fact` never writes to it. `/agents` in Telegram is
+a thin UI over that same file.
 
 ### Filesystem
 

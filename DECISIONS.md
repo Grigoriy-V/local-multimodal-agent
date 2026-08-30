@@ -725,3 +725,61 @@ Supersedes / Superseded by
 Refines the 4.3 acceptance proposed in
 `reports/2026-08-30_v2_step4_harness_preparation.md`; no earlier durable
 decision is superseded.
+
+## 2026-08-30 — The prompt is assembled, and a person's instructions are an overlay
+
+Decision
+
+The system layer is assembled from parts rather than written as one paragraph.
+A small stable core names no tool, no file format and no workflow. Everything
+true only because a capability is wired up is generated from that wiring in
+`app/capabilities.py`, and what each call does is owned by its tool schema.
+The layers are ordered by how rarely each changes: core, capability guidance,
+tool schemas, the person's standing instructions, the rolling summary, the
+retrieved facts, the conversation.
+
+A person has exactly one instruction file, `AGENTS.md`, at the root of their own
+workspace. It is read on every turn and travels as its own message naming its
+source, not concatenated into the system string. Its authority is below product
+and capability policy: it shapes how work is done and can never widen what may
+be done. It is not memory — nothing extracts it from conversation, there is no
+database copy, and `remember_fact` never writes to it. `/agents` is a thin UI
+over that same file.
+
+Why
+
+4.3 shipped one production lever, the text of a prompt, and hand-correcting
+that text neither produced the behaviour it aimed at nor turned out to be what
+had changed it. A measured comparison then found the real cause in what the
+prompt could not say: the model was never told where its workspace was, and an
+old instruction not to invent a location for a named file had generalised into
+writing no file at all. Both are facts about the wiring, and a hand-written
+paragraph cannot state them without going stale the moment a grant changes.
+
+Ordering by stability is what a served prefix cache needs; today's per-turn
+retrieved facts sit in front of the conversation and invalidate it from there
+down. Fixing the order now costs nothing and means 4.6a measures a cache
+rather than rebuilding this layer.
+
+The instructions are a file in the workspace because the person already has an
+assistant that can read and edit files there, and a command with its own store
+would be a second set of instructions free to disagree with the first. They are
+a separate message because the graph is compiled once per thread: an overlay
+inside that compiled prompt would wait for a restart, which in the deployed
+profile is invisible and on a personal machine simply does not work.
+
+Consequences
+
+A grant that withholds a tool also withholds the sentence about it, so guidance
+cannot advertise what is not there. The core prompt may not name a tool, and a
+test enforces it. Standing instructions cost tokens on every request and are
+bounded at 8,000 bytes. `/agents` never reaches the model and is declared
+model-free at the front door, arguments included, so writing them cannot wake a
+GPU. Nothing is migrated: the file is new state in a directory that already
+exists per person.
+
+Supersedes / Superseded by
+
+Supersedes the single hand-written `DEFAULT_SYSTEM_PROMPT` of every version up
+to 2026-08-30, including the 4.3 correction to it. Does not change the 4.3
+stopping seam.

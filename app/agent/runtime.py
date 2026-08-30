@@ -30,9 +30,10 @@ from app.checkpoints import CheckpointHandle
 from app.capabilities import (
     CHAT_DELIVERY,
     Delivery,
-    capability_brief,
     capability_report,
+    system_message,
 )
+from app.instructions import read_instructions
 from app.config import AgentSettings, ModelSettings
 from app.context import ContextPolicy, load_turn_context
 from app.context.window import DEFAULT_SYSTEM_PROMPT
@@ -289,9 +290,12 @@ class Agent:
     async def _graph(self, thread_id: str) -> CompiledStateGraph:
         if thread_id not in self._graphs:
             toolbox = self.toolbox(thread_id)
-            # The model is told what it actually has, every turn. Left to its own
-            # account it denies abilities it has and invents tools it does not.
-            prompt = f"{self.system_prompt}\n\n{capability_brief(toolbox, self.delivery)}"
+            # The model is told what it actually has. Left to its own account it
+            # denies abilities it has and invents tools it does not — and until
+            # 2026-08-30 it was never told where its own workspace was.
+            prompt = system_message(
+                toolbox, self.delivery, self.workspace, self.system_prompt
+            )
             self._graphs[thread_id] = build_agent(
                 self.backend,
                 toolbox,
@@ -305,8 +309,14 @@ class Agent:
                 self.turn_budget,
                 self.stops,
                 self.stopping,
+                self.instructions,
             )
         return self._graphs[thread_id]
+
+    def instructions(self) -> str:
+        """The person's standing instructions, read fresh for each turn."""
+
+        return read_instructions(self.workspace)
 
     async def _run(
         self, thread_id: str, command: Any, trace: TurnTrace = NO_TRACE

@@ -80,14 +80,16 @@ def test_a_prelude_without_summary_or_facts_is_just_the_system_prompt() -> None:
     assert message.content[0].text == DEFAULT_SYSTEM_PROMPT
 
 
-def test_the_system_prompt_requires_evidence_before_visual_claims() -> None:
-    assert (
-        "Safe observation tools do not require the person's permission"
-        in DEFAULT_SYSTEM_PROMPT
-    )
-    assert "for local HTML use inspect_page" in DEFAULT_SYSTEM_PROMPT
-    assert "Never ask whether to inspect" in DEFAULT_SYSTEM_PROMPT
-    assert "do not claim how it looks or works" in DEFAULT_SYSTEM_PROMPT
+def test_the_core_prompt_points_at_the_layers_below_it() -> None:
+    """It cannot say what the assistant can do; it says where that is written.
+
+    The rules about observing before describing moved to the capability that
+    owns the observing — `tests/test_capability_brief.py` asserts them there,
+    where they appear only for an agent that actually has the tool.
+    """
+
+    assert "generated from what is wired up" in DEFAULT_SYSTEM_PROMPT
+    assert "standing instructions" in DEFAULT_SYSTEM_PROMPT
 
 
 def test_the_summary_and_the_facts_become_readable_layers() -> None:

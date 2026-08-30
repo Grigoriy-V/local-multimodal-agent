@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.attachments import MAX_FILE_SIZE_BYTES, MAX_FILES, MEDIA_KINDS
+from app.context.window import DEFAULT_SYSTEM_PROMPT
 from app.documents import DOCUMENT_MEDIA_TYPES
 from app.tools import Toolbox
 
@@ -71,8 +72,92 @@ def tool_inventory(tools: Toolbox) -> str:
     return (
         f"Your tools are exactly: {names}. There are no others. Never name a tool "
         "outside that list; if something is beyond them, say plainly what you cannot "
-        "do rather than inventing a tool for it."
+        "do rather than inventing a tool for it. Never deny an ability this list "
+        "gives you and never claim one it does not."
     )
+
+
+def _work_sentence(tools: Toolbox) -> str:
+    """Why the tools are there at all.
+
+    Belongs with the list rather than in the core prompt: an agent given no
+    tools cannot be told to reach for them, and the sentence would then be
+    instructing it to do something impossible. Measured on 2026-08-30: asked
+    for an HTML page with nothing established, the model wrote the whole page
+    into the chat and told the person to save it themselves.
+    """
+
+    if not tools.names:
+        return (
+            "You have no tools here, so answer from what you know and say plainly "
+            "when something would need one."
+        )
+    return (
+        "Treat the request as an outcome to achieve. When these tools can produce "
+        "it, use them instead of explaining what you could do, pasting the result "
+        "for the person to save, or asking them to operate a tool for you. If one "
+        "fails, retry when the failure looks temporary or choose an alternative, "
+        "and report inability only after that."
+    )
+
+
+def _workspace_lines(tools: Toolbox, root: Path | None) -> list[str]:
+    """Where the agent is, and what it may do there without asking.
+
+    The workspace root was never told to the model at all: it was in the
+    report a person reads and in the tool descriptions as "the allowed
+    workspace", which names no place. An agent given autonomy inside a
+    directory it cannot name will not use it.
+
+    The naming rule is the other half of the same measurement. An older
+    instruction said to ask rather than invent a location for a file whose
+    directory was not established; with no filename in the request at all, the
+    model generalised it into writing nothing — and never asked either.
+    """
+
+    if not ({"list_files", "read_file", "write_file", "edit_file"} & set(tools.names)):
+        return []
+    where = f"exactly {root}" if root is not None else "one directory granted to you"
+    lines = [
+        f"- Your workspace is {where}. It is yours: read, create and change files "
+        "there as the work needs, without asking first. Nothing outside it is "
+        "reachable, and a path may be absolute inside that root or relative to it.",
+    ]
+    if {"write_file", "edit_file"} & set(tools.names):
+        lines.append(
+            "- When the person asks for something that is a file and does not name "
+            "one, choose a sensible name in that workspace, create it, and say which "
+            "name you used. Ask where it goes only when they named a file whose "
+            "location is genuinely ambiguous."
+        )
+    return lines
+
+
+def _observation_lines(tools: Toolbox) -> list[str]:
+    if "inspect_page" not in tools.names:
+        return []
+    return [
+        "- inspect_page opens a local HTML file itself and returns its visible text, "
+        "console errors and a screenshot. Safe observation needs no permission and no "
+        "second turn from the person: when you have made or changed something visual, "
+        "look at it before you describe it, and never ask them to open it for you. If "
+        "looking failed, say that it failed rather than describing what you did not see."
+    ]
+
+
+def _memory_lines(tools: Toolbox) -> list[str]:
+    if not ({"remember_fact", "search_memory"} & set(tools.names)):
+        return []
+    lines = []
+    if "remember_fact" in tools.names:
+        lines.append(
+            "- remember_fact keeps something the person told you for later "
+            "conversations. It is for facts, never for how they want you to work: "
+            "standing instructions are their own file and are never written here."
+        )
+    if "search_memory" in tools.names:
+        lines.append("- search_memory looks for a fact you saved in an earlier conversation.")
+    return lines
 
 
 def _delivery_sentence(tools: Toolbox, delivery: Delivery) -> str:
@@ -91,18 +176,28 @@ def _delivery_sentence(tools: Toolbox, delivery: Delivery) -> str:
     )
 
 
-def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
+def capability_brief(
+    tools: Toolbox, delivery: Delivery = CHAT_DELIVERY, root: Path | None = None
+) -> str:
     """The part of the system prompt that must never be written from memory.
 
-    Deliberately short: the tool schemas already carry each tool's parameters
-    and description, so this adds only what they cannot — that the list is
-    exhaustive, what can arrive, and what can leave.
+    Every line here is produced from something that is actually wired: the
+    toolbox, the admission policy, the interface's own declaration and the
+    granted root. That is the whole point — a capability owns its own guidance,
+    so a grant that withholds a tool also withholds the sentence about it, and
+    no fixed prompt can end up describing a tool this agent does not have.
+
+    Still deliberately short. The tool schemas carry each tool's parameters and
+    description, and repeating them here would be two descriptions to keep
+    honest instead of one.
     """
 
     inputs = ", ".join(accepted("image") + accepted("audio")) or "text only"
     lines = [
         "Your real capabilities right now, generated from what is wired up:",
         f"- {tool_inventory(tools)}",
+        f"- {_work_sentence(tools)}",
+        *_workspace_lines(tools, root),
         f"- The person can send you text and these media types: {inputs}. Anything "
         "else is refused before you see it.",
         f"- {_delivery_sentence(tools, delivery)}",
@@ -168,6 +263,8 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
                     "fetch_page before answering; do not present a search snippet as if you "
                     "had checked the page."
                 )
+    lines += _observation_lines(tools)
+    lines += _memory_lines(tools)
     asking = needs_approval(tools)
     if asking:
         lines.append(
@@ -175,6 +272,24 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
             "A declined call is final; say so and do not repeat it."
         )
     return "\n".join(lines)
+
+
+def system_message(
+    tools: Toolbox,
+    delivery: Delivery = CHAT_DELIVERY,
+    root: Path | None = None,
+    core: str = DEFAULT_SYSTEM_PROMPT,
+) -> str:
+    """The whole system layer: the stable core, then what is wired up.
+
+    Assembled rather than written, and assembled in this order because the core
+    is the same for every agent this project builds while the brief changes
+    with the grant. The person's own instructions are not here: they are a
+    separate message with a named source and lower authority, added when the
+    turn's context is built.
+    """
+
+    return f"{core}\n\n{capability_brief(tools, delivery, root)}"
 
 
 def capability_report(

@@ -13,6 +13,7 @@ def load_turn_context(
     query: str,
     retrieved_facts: int,
     system_prompt: str,
+    instructions: str = "",
 ) -> Context:
     """Perform the complete durable read needed to prepare one model turn.
 
@@ -23,6 +24,8 @@ def load_turn_context(
 
     records = store.turn_context(thread_id, user_id, query, retrieved_facts)
     return Context(
-        prelude=build_prelude(records.summary, records.facts, system_prompt),
+        prelude=build_prelude(
+            records.summary, records.facts, system_prompt, instructions
+        ),
         history=records.messages,
     )

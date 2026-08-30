@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
+from app.instructions import instruction_message
 from app.models import ContentPart, Message
 
 # How many media items of each kind one request may carry. This mirrors the
@@ -24,38 +25,19 @@ from app.models import ContentPart, Message
 # exceeding them is an HTTP 400, not a degraded answer.
 MEDIA_BUDGET = {"image": 4, "audio": 1}
 
+# The core names no tool, no file format and no workflow, and it is meant to
+# stay this short. Anything true only because a particular capability is wired
+# up is generated from that wiring in `app/capabilities.py`, and anything true
+# only for one person is their own standing instructions. What is left is what
+# has to hold whatever this assistant is given — which is also why this text is
+# the most stable layer of the prompt and goes first, ahead of everything that
+# changes per grant, per person and per turn.
 DEFAULT_SYSTEM_PROMPT = (
-    "You are a local assistant with tools. Use list_files and read_file to look at the "
-    "workspace instead of guessing. File tools accept absolute paths only when they resolve "
-    "inside the allowed workspace, and also accept paths relative to that workspace. Preserve "
-    "an absolute workspace path supplied by the user. If the user names only a file, such as "
-    "snake.html, and its directory is not already established, ask where it is instead of "
-    "inventing a location. Use write_file to create or fully replace a file and "
-    "edit_file to replace one exact unique fragment in an existing file. "
-    "A document the user sends is saved in the workspace rather than shown to you: use "
-    "read_document to read it, by the name the turn gives you, before answering anything "
-    "about it. It returns numbered sections and says where it stopped, so ask for the rest "
-    "rather than answering from the first part. view_pages gives you visual page evidence "
-    "and a saved rendered-page path; it does not send the picture. Decide what you need "
-    "to inspect, and use send_file only when you choose to present a workspace file to "
-    "the person. You are not a text-only model and you are not blind to files you can "
-    "read or view. "
-    "Safe observation tools do not require the person's permission. When the requested "
-    "outcome is visual, or before describing how a generated artifact looks or works, inspect "
-    "the actual result first; for local HTML use inspect_page. Never ask whether to inspect "
-    "and never expose internal tool names. If you have not inspected an artifact, report only "
-    "what you changed and do not claim how it looks or works. "
-    "Call remember_fact when the user tells you something worth keeping for later "
-    "conversations, and "
-    "search_memory when an earlier fact would help. "
-    "Treat the person's request as an outcome to achieve. When your available tools can "
-    "produce it, use them instead of merely explaining what you could do or asking the "
-    "person to operate them. If a safe observation tool fails, make a reasonable recovery "
-    "attempt: retry when the failure looks temporary or choose a useful alternative. Report "
-    "inability only after the reasonable attempts available to you have failed. "
-    "Never deny an ability the capability list gives you and never claim one it does not; "
-    "if you are unsure whether you can do something, describe what your tools do rather "
-    "than guessing about yourself. "
+    "You are a general-purpose assistant with tools. What you can actually do is "
+    "listed below, generated from what is wired up rather than written from memory: "
+    "trust that list about yourself. After it may come standing instructions from "
+    "the person you are talking to, saying how they want you to work; follow them "
+    "wherever they do not contradict what is above them. "
     "Answer briefly."
 )
 
@@ -187,8 +169,21 @@ def build_prelude(
     summary: str | None,
     facts: Sequence[str],
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    instructions: str = "",
 ) -> list[Message]:
+    """The synthetic layers, ordered by how rarely each one changes.
+
+    The system message is the same for weeks, a person's standing instructions
+    change when they decide to, the summary changes when a conversation is
+    folded and the retrieved facts change every single turn. Ordering them that
+    way is what lets a served prefix cache survive: a layer that changes
+    invalidates everything after it, so the volatile ones go last.
+    """
+
     prelude = [system(system_prompt)]
+    overlay = instruction_message(instructions)
+    if overlay is not None:
+        prelude.append(overlay)
     if summary:
         prelude.append(system(f"Summary of the earlier conversation:\n{summary}"))
     if facts:

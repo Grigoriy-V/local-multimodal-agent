@@ -297,6 +297,7 @@ PRODUCT_COMMANDS = (
     BotCommand("new", "Start a new conversation"),
     BotCommand("chats", "Switch conversation"),
     BotCommand("can", "What I can see, hear, send and change"),
+    BotCommand("agents", "Your standing instructions for how I work"),
     BotCommand("stop", "Stop the task running in this chat"),
     BotCommand("help", "What this assistant is and how to use it"),
 )

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
@@ -262,6 +263,7 @@ def build_agent(
     budget: TurnBudget | None = None,
     stops: StopRequests = NO_STOPS,
     stopping: TurnStopping = STOP_ON_ANSWER,
+    instructions: Callable[[], str] | None = None,
 ) -> CompiledStateGraph:
     """Compile the graph. This is the loop, and there is only one of it.
 
@@ -282,6 +284,11 @@ def build_agent(
     `stopping` is asked only at the first of those four endings, and only when
     the turn could still afford another step. Its default stops, so wiring
     nothing changes nothing: an ordinary answer still costs one model call.
+
+    `instructions` is asked once per turn rather than captured, because the
+    person may rewrite them between two messages and a graph is compiled once
+    and kept. That is the whole mechanism by which an edit takes effect without
+    a redeploy.
     """
 
     policy = policy or ContextPolicy()
@@ -308,6 +315,7 @@ def build_agent(
             query,
             policy.retrieved_facts,
             system_prompt,
+            instructions() if instructions is not None else "",
         )
 
     def load(state: AgentState) -> dict[str, Context]:

@@ -38,9 +38,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.agent.runtime import Agent, MessageProduced, create_agent, text_message
-from app.capabilities import capability_brief
+from app.capabilities import system_message
 from app.config import AgentSettings, ModelSettings
 from app.context import DEFAULT_SYSTEM_PROMPT
+from app.instructions import INSTRUCTIONS_FILE
 from app.telemetry.base import TurnRun
 from app.telemetry.cost import A10_USD_PER_SECOND, IDLE_WINDOW_SECONDS, gpu_cost
 from app.telemetry.inspect import tool_calls
@@ -152,6 +153,15 @@ SCENARIOS: tuple[Scenario, ...] = (
         ),
     ),
     Scenario(
+        name="standing_instructions",
+        request="Привет. Что ты умеешь? Коротко.",
+        seed=((INSTRUCTIONS_FILE, "Always answer in English, and start with the word OK.\n"),),
+        look_for=(
+            "дошёл ли оверлей до модели и послушалась ли она его: ответ должен "
+            "быть по-английски и начинаться с OK, хотя спросили по-русски"
+        ),
+    ),
+    Scenario(
         name="web",
         request="Когда вышла Gemma 3? Скажи, откуда взял.",
         expected_tools=("search_web",),
@@ -232,7 +242,7 @@ def assembled(agent: Agent, prompt: str, thread_id: str) -> str:
     what a comparison is comparing even when only the core changed.
     """
 
-    return f"{prompt}\n\n{capability_brief(agent.toolbox(thread_id), agent.delivery)}"
+    return system_message(agent.toolbox(thread_id), agent.delivery, agent.workspace, prompt)
 
 
 def sealed(root: Path) -> AgentSettings:

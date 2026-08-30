@@ -32,6 +32,13 @@ from typing import Any
 from app.agent.runtime import Agent, AnswerWithdrawn, AssistantDelta, create_agent
 from app.agent.stop import MemoryStopRequests, PostgresStopRequests, StopRequests
 from app.attachments import AttachmentBytes, AttachmentError, admit_uploads
+from app.instructions import (
+    INSTRUCTIONS_FILE,
+    InstructionsError,
+    clear_instructions,
+    read_instructions,
+    write_instructions,
+)
 from app.capabilities import Delivery
 from app.config import AgentSettings, TelegramSettings
 from app.memory import ConversationStore, Thread
@@ -600,6 +607,12 @@ class TelegramAdapter:
         if command == "/chats":
             await self._show_conversations(store, user_id, incoming.chat_id)
             return
+        head, _, argument = incoming.text.strip().partition(" ")
+        if head.lower() == "/agents":
+            # Read from the raw text rather than the lowercased command: what
+            # follows `set` is the person's own writing and must survive.
+            await self._on_instructions(agent, incoming.chat_id, argument.strip())
+            return
         if command == "/can":
             # Answered from the wiring, not by the model. When the assistant
             # claims it cannot send a picture, this is what that is checked
@@ -652,6 +665,63 @@ class TelegramAdapter:
         )
 
     # --- choosing a conversation ---------------------------------------------
+
+    async def _on_instructions(self, agent: Agent, chat_id: int, argument: str) -> None:
+        """Show, replace or clear the standing instructions.
+
+        A thin UI over one file and nothing else. The same `AGENTS.md` is an
+        ordinary file in the person's workspace, so the assistant can read and
+        edit it with the tools it already has, and this command has to write
+        the same place — a command with its own store would be a second set of
+        instructions that disagrees with the first.
+
+        Replacement rather than appending: one message is the whole file. What
+        does not fit in a message is what `edit_file` is for.
+        """
+
+        action, _, body = argument.partition(" ")
+        action = action.strip().lower()
+        workspace = agent.workspace
+
+        if action == "set":
+            try:
+                saved = write_instructions(workspace, body)
+            except InstructionsError as error:
+                await self.client.send_message(chat_id, f"Not saved: {error}.")
+                return
+            await self.client.send_message(
+                chat_id,
+                f"Saved {len(saved)} characters to {INSTRUCTIONS_FILE}. "
+                "They apply from your next message.",
+            )
+            return
+
+        if action == "clear":
+            removed = clear_instructions(workspace)
+            await self.client.send_message(
+                chat_id,
+                f"{INSTRUCTIONS_FILE} removed. I go back to my ordinary behaviour."
+                if removed
+                else "You had no standing instructions.",
+            )
+            return
+
+        current = read_instructions(workspace)
+        if not current:
+            await self.client.send_message(
+                chat_id,
+                "You have no standing instructions. Send /agents set followed by "
+                "how you want me to work — for example, which language to answer "
+                f"in, or how much detail you want. It is kept as {INSTRUCTIONS_FILE} "
+                "in your workspace, so you can also ask me to edit it. "
+                "/agents clear removes it.",
+            )
+            return
+        await self.client.send_message(
+            chat_id,
+            f"Your standing instructions, from {INSTRUCTIONS_FILE}:\n\n{current}\n\n"
+            "/agents set … replaces this, /agents clear removes it.",
+        )
 
     async def _show_conversations(
         self, store: ConversationStore, user_id: str, chat_id: int
