@@ -4,22 +4,15 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.4 is **closed with known problems**, 2026-08-31.
-The planning tool, its stopping extension and the display all work; what was
-never observed is a single live turn where a plan and the work finish together.
-Read the honest account below before building on it.
+**Current approved step:** none. 4.4 closed 2026-08-31 with known problems
+rather than acceptance; 4.5 is next and is not approved.
 
-Everything before 4.4 is closed and accepted live: one loop, real context
-capacity at 65,536, the tool execution seam, turn stopping, and prompt assembly
-with a per-person `AGENTS.md` overlay. Each entry below carries its evidence.
-Observed defects are in `ISSUES.md`, which is not a plan and authorizes nothing.
-
-**Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
-automatic delivery of media returned by any tool was rejected product behaviour.
-Its replacement is now implemented, tested offline and accepted in a real
-Telegram chat. Read
+**Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
-"Correction after the last live test", before changing anything.
+"Correction after the last live test": automatic delivery of media returned by
+any tool was rejected product behaviour and its replacement is what is deployed.
+
+Observed defects are in `ISSUES.md`, which is not a plan and authorizes nothing.
 
 This is the only source for current product direction, state, order and approved
 work. The human approves one step before implementation.
@@ -80,8 +73,7 @@ Verified platform facts and cold-start evidence remain in
 
 ### Done
 
-Evidence lives in the linked reports; these lines say what exists, not how it
-was built.
+What exists. How it was reached, and every number, is in the linked report.
 
 - **Persistence contract** — `ConversationStore`, `SqliteStore`, per-owner
   scoping, one contract suite over every implementation, `user_version`
@@ -90,53 +82,41 @@ was built.
   transport isolated. `reports/2026-08-28_v2_step2_telegram_adapter.md`,
   `reports/2026-08-28_v2_step3b_telegram_live_acceptance.md`,
   `reports/2026-08-28_v2_telegram_voice_and_media_budget.md`.
-- **Model endpoint, then optimized** — Gemma 4 12B on an A10 through vLLM;
-  snapshots, scale to zero, 10.4 s restored cold start, callers refused at the
-  edge. `reports/2026-08-28_v2_step3a_model_endpoint.md`,
-  `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
-  `reports/2026-08-28_v2_step3b_edge_auth_refusal.md`,
-  `reports/2026-08-28_v2_step3b_snapshot_boot.md`,
-  `reports/2026-08-28_v2_step3b_first_boot_failure.md`.
+- **Model endpoint, then optimized** — Gemma 4 12B on an A10 through vLLM, with
+  snapshots, scale to zero and callers refused at the edge.
+  `reports/2026-08-28_v2_step3a_model_endpoint.md`,
+  `reports/2026-08-28_v2_step3b_*.md`.
 - **Capability honesty** — the assistant describes itself from its own wiring;
   `/can` answers without a model call, `/check` tries each capability.
   `reports/2026-08-28_v2_capability_honesty_and_telegram_shape.md`.
 - **Control plane, accepted live** — webhook, checked secret and allow list,
-  Neon inbox, spawned CPU worker, the harness, GPU wake, reply, with nothing on
-  the human's machine. Polling retired; `PostgresStore` joins the contract suite
-  under `AGENT_TEST_DATABASE_URL`. Five reports,
-  `reports/2026-08-28_v2_control_plane_*.md`.
-- **Database latency gate withdrawn** — placement stays unpinned, the probe is
-  an instrument and not acceptance. `DECISIONS.md` 2026-08-28,
+  Neon inbox, spawned CPU worker, harness, GPU wake, reply, with nothing on the
+  human's machine. Polling retired; `PostgresStore` joins the contract suite
+  under `AGENT_TEST_DATABASE_URL`. `reports/2026-08-28_v2_control_plane_*.md`.
+- **Database latency gate withdrawn** — the probe is an instrument, not
+  acceptance. `DECISIONS.md` 2026-08-28,
   `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
 - **Cold start reduced** — the agent stack is off the webhook's import path and
-  the webhook starts the model waking for updates that need one; about 9.2 s
-  against 14.4 s, unconfirmed live. A memory snapshot was tried and reverted.
+  the webhook starts the model waking for updates that need one.
   `reports/2026-08-29_v2_control_plane_cold_start.md`.
 - **1. Baseline capabilities, accepted live** — persistent per-user workspace,
   filesystem tools, document text and visual reading, isolated browser, web
-  search/fetch/view, agent-controlled file delivery. The closing live scenario
-  chose `view_web_page`, inspected page and screenshot, then delivered a PNG and
-  described it.
+  search/fetch/view, agent-controlled file delivery.
   `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`,
   `reports/2026-08-29_v2_web_capability.md`.
 - **2. Baseline chat product, accepted live** — onboarding, Telegram Markdown
-  with a plain fallback, transient English tool activity, truthful inline
-  settlement. Conversation selection became a stored choice (`/new`, `/chats`)
-  behind an additive schema-2 migration, accepted live.
+  with a plain fallback, transient tool activity, truthful inline settlement,
+  and conversation selection as a stored choice (`/new`, `/chats`) behind an
+  additive schema-2 migration.
   `reports/2026-08-29_v2_baseline_chat_product_offline.md`,
   `reports/2026-08-29_v2_conversation_selection.md`.
 - **2. Real answer streaming, accepted live** — the model call streams through
-  the graph, so tool calls, usage, finish reason and persistence are the ones
-  the turn always had; only finished messages are stored, and
-  `AGENT_STREAM_ANSWERS` turns it off.
-  `reports/2026-08-29_v2_answer_streaming_preparation.md`,
-  `reports/2026-08-29_v2_answer_streaming_implementation.md`.
+  the graph, only finished messages are stored, and `AGENT_STREAM_ANSWERS`
+  turns it off. `reports/2026-08-29_v2_answer_streaming_*.md`.
 - **3. Baseline measurement, metrics and logs, closed** — a turn is one `run_id`
-  from ingress to delivery, with no message text; `tools/show_run.py` reads one
-  run and reports GPU active seconds per successful turn, labelled as derived
-  (21.2 s and $0.0065 over the first six live turns). Engine baseline: decode
-  21-24 ms per output token, prefill dominant and superlinear, prefix caching
-  98% on a repeated prefix.
+  from ingress to delivery, carrying no message text; `tools/show_run.py` reads
+  one run and reports GPU active seconds per successful turn, labelled as
+  derived. The engine baseline is measured.
   `reports/2026-08-29_v2_turn_telemetry_implementation.md`,
   `reports/2026-08-29_v2_run_inspector_implementation.md`,
   `reports/2026-08-29_v2_gpu_baseline_measured.md`.
@@ -153,103 +133,59 @@ was built.
    `reports/2026-08-30_v2_step4_harness_preparation.md`.
 
    - **4.0 Conversation serialization — done, accepted live.** The lease belongs
-     to the conversation and the worker drains it in order; two messages 323 ms
-     apart were answered in order. Coalescing an image and the question after it
-     is held back — it redefines the turn every recorded number counts.
+     to the conversation and the worker drains it in order. Coalescing an image
+     and the question after it is deliberately held back.
      `reports/2026-08-30_v2_conversation_serialization.md`.
    - **4.1 One loop — done, accepted live.** The router and the
-     plan/implement/test/evaluate lifecycle are deleted, about 1,730 lines, and
-     an ordinary message costs one model call where it cost two. The survivor
-     has a `TurnBudget`, `loop_step` events and an out-of-band stop read at each
-     step boundary. A blocking defect closed with it: an expired callback query
-     could fail a whole turn, and after 4.0 that blocked the conversation for
-     ever. `reports/2026-08-30_v2_one_loop.md`, `DECISIONS.md` 2026-08-30.
-   - **4.1.5 Real context capacity — done, accepted live.** The ceiling went
-     from 16,384 to **65,536** at 0.80 utilization with no KV quantization,
-     measured at 11.13 GiB of KV pool and 3.92x concurrency — about three times
-     the room predicted. The request is estimated before every model step and
-     folds only when over budget; the everyday default is
-     `AGENT_CONTEXT_FRACTION=0.8`, a 52,428-token budget. Live: seven turns, the
-     largest request 15,699 tokens against an old budget of 9,830, no fold
-     needed. A Telegram `429` discarding a finished answer was fixed here; the
-     edit frequency that provoked it is queued below.
+     plan/implement/test/evaluate lifecycle are gone; one loop with a
+     `TurnBudget`, `loop_step` events and an out-of-band stop read at each step
+     boundary. `reports/2026-08-30_v2_one_loop.md`, `DECISIONS.md` 2026-08-30.
+   - **4.1.5 Real context capacity — done, accepted live.** The engine ceiling
+     and the everyday default are in Current state above. The request is
+     estimated before every model step and folds only when over budget; no
+     context engine, pruning or summarizer schema was built here.
      `reports/2026-08-30_v2_context_capacity.md`,
      `reports/2026-08-30_v2_context_memory_plan.md`, `DECISIONS.md` 2026-08-30.
    - **4.2 Tool execution seam — done, accepted live.** One
      `pre_execute -> execute -> post_execute` path for every tool, holding
      consent policy, validation and telemetry. Workspace mutation and explicit
      `send_file` back to the same person are autonomous; third-party,
-     publication, spending and infrastructure effects stay gated, and a future
-     sandbox plugs in as another backend without changing that.
+     publication, spending and infrastructure effects stay gated, and a sandbox
+     will plug in as another backend without changing that.
      `reports/2026-08-30_v2_tool_execution_seam.md`, `DECISIONS.md` 2026-08-30.
-   - **4.3 Turn stopping — done, deployed. Proportional validation not
-     dependable.** A minimal extension seam instead of a mandatory repair
+   - **4.3 Turn stopping — done, deployed. Proportional validation demonstrated,
+     not dependable.** A minimal extension seam instead of a mandatory repair
      lifecycle: stop by default, continue only through explicit structured
      steering, and withdraw a rejected streamed candidate from the interface. No
-     validator, finish tool or obligation state. Live, the model inspected its
-     artifact unprompted in both turns while the scenario runner on the same
-     prompt does not — demonstrated, not dependable. Closed because the only
-     lever left inside the step was prompt wording.
-     `reports/2026-08-30_v2_turn_stopping.md`,
-     `reports/2026-08-30_v2_prompt_assembly.md`.
+     validator, finish tool or obligation state. The residual acceptance moves
+     to 4.5.5. `reports/2026-08-30_v2_turn_stopping.md`.
    - **4.3.5 Prompt assembly and user instructions — done, measured live,
      deployed.** The system prompt is assembled in order of stability so the
      prefix cache survives: a stable core naming no tool, capability guidance
      generated from the wired toolbox, the schemas, then the person's own
      `AGENTS.md` — one file at the root of their workspace, editable with the
      ordinary tools or `/agent`, a prompt overlay of lower authority than
-     product policy and never memory. It takes effect on the next turn without
-     a redeploy. The scenario runner is the instrument for anything later that
-     changes how the agent decides; every run is a product-runtime worker and
-     its own gate. Corrected the same day: `/agent` singular, and the workspace
-     path removed from the guidance because naming it taught the model to build
-     paths. `reports/2026-08-30_v2_prompt_assembly.md`,
+     product policy and never memory. It takes effect without a redeploy. The
+     scenario runner is the instrument for anything later that changes how the
+     agent decides, and every run is a product-runtime worker and its own gate.
+     `reports/2026-08-30_v2_prompt_assembly.md`,
      `docs/v2_4_3_prompt_assembly_agents_handoff.md`, `DECISIONS.md` 2026-08-30.
    - **4.4 `todo` as agent state, not a mode — closed 2026-08-31 with known
-     problems, not with acceptance.** Scope is the state of **one unfinished
-     turn**: it survives compaction, an interrupt and a restarted worker, and is
-     gone from the next thing the person asks. That lifetime already existed —
-     the plan is the arguments of the last accepted `todo_write`, living in the
-     turn's checkpointed messages and cleared by the `extend` reducer — so there
-     is no store table and no schema 3. `app/agent/todo.py` is the first
-     production extension in the 4.3 seam, capped at one objection per turn. An
-     agent that writes no plan meets none of it, so an ordinary answer still
-     costs one model call. The plan is shown to the person inside the transient
-     Telegram status message and leaves with it.
-
-     **What is honestly not settled**, and why this is closed rather than
-     accepted:
-
-     - **No live turn has ever finished with a plan.** Two turns opened one and
-       both died on a defect of ours; after that defect was fixed the plan
-       stopped appearing on the same requests. A plan and finished work have
-       never been observed together.
-     - **The stopping extension has never refused anything that mattered.** It
-       fired twice live and both times the model discharged it by closing its
-       list rather than by doing more work.
-     - **The threshold is unstable.** Wording moved the behaviour from almost
-       always planning, to never, to twice, to never again, across four deploys
-       in one day. Two runs either side of a change is not a measurement.
-     - **A closed item is not a done item.** One run marked verification
-       complete without verifying and answered as if it had, which is ISS-0004
-       wearing a plan.
-     - **The grain of the plan is unmeasured.** Items mirrored tool calls; the
-       tool now asks for milestones instead, and no live turn has tested that.
-
-     `reports/2026-08-31_v2_todo_live_failure.md`, `ISSUES.md` ISS-0004 to
-     ISS-0009.
+     problems rather than accepted.** The plan is the arguments of the model's
+     own last `todo_write`, living in the turn's checkpointed messages: it
+     survives an interrupt and a restarted worker, and is gone at the next user
+     message, so there is no store table and no schema 3. An open item can
+     refuse one ending, once per turn, and the plan is shown inside the
+     transient Telegram status message. **Never observed: a live turn where a
+     plan and the finished work arrive together.** The open problems are in
+     `ISSUES.md`; the follow-up is in Not started.
+     `reports/2026-08-31_v2_todo_live_failure.md`.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
-   - **4.5.5 Saying only what was observed.** One product question with two
-     measured faces: the assistant makes an artifact and describes how it looks
-     without opening it, and having opened a different page it invented details
-     of a source it never read — while the same page read as source gave both
-     of its real defects. `inspect_page` returning a render without the source
-     is a candidate cause and is deliberately not patched: the browser
-     capability below replaces it, so a fix here would be written against a
-     tool that is going away. The steering that could refuse such an answer
-     arrives in 4.4. Deliberately after those,
-     because three rounds of prompt wording moved this back and forth and
-     settled nothing. Includes the residual acceptance 4.3 did not demonstrate.
+   - **4.5.5 Saying only what was observed.** The assistant describes artifacts
+     and sources it did not open. Deliberately after the steps above, because
+     three rounds of prompt wording settled nothing, and deliberately not fixed
+     inside `inspect_page`, which the browser capability replaces. Includes the
+     residual acceptance 4.3 did not demonstrate. `ISSUES.md` ISS-0004,
      `reports/2026-08-30_v2_prompt_assembly.md`.
    - **4.6a Context engine.** Context preparation before every model step rather
      than folding after a turn: measure the surface, shorten old tool results
@@ -259,13 +195,10 @@ was built.
      and invalidate the prefix cache from there down. Bounded by the
      history/projection decision of `DECISIONS.md` 2026-08-30.
 
-     The person's own choice of context size belongs here too, not earlier: a
-     smaller budget is only a good trade once compaction is what enforces it,
-     and 4.1.5 still folds a turn late. The offered sizes are derived from the
-     engine's real ceiling rather than listed, and the choice is presented as a
-     trade — more context is slower and costs more, because prefill is
-     superlinear. It shares the schema-3 migration with the compaction records,
-     which is one human gate on the populated database instead of two.
+     The person's own choice of context size belongs here too, not earlier,
+     presented as a trade and derived from the engine's real ceiling. It shares
+     the schema-3 migration with the compaction records: one human gate on the
+     populated database instead of two.
    - **4.6b Exact recovery from archived history.** A search over what was
      actually said, returning real messages and tool results rather than another
      summary, so a detail a summary lost is recoverable. Full-text in both
@@ -287,10 +220,8 @@ was built.
 
 6. **Optimization after the agent is observable.** Adaptive scaledown through
    `autoscale.py`. Prefix caching is confirmed active and needs no work before
-   it is used deliberately; speculative decoding is the weakest lever, since
-   decode is 21-24 ms per output token while prefill dominates long turns. The
-   router's second request per message is already gone, deleted with the route
-   it existed to choose.
+   it is used deliberately; speculative decoding is the weakest lever, because
+   prefill dominates long turns. `reports/2026-08-29_v2_gpu_baseline_measured.md`.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the
@@ -298,76 +229,37 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
 
 ### Not started
 
-Recorded, not approved, not begun, and not in the order above. One line each.
+Recorded, not approved, not begun, and not in the order above. One line each;
+an observed defect is described in `ISSUES.md`, not here.
 
-- **Finish the `todo` tool.** What 4.4 left: one live turn where a plan and the
-  work finish together, on a fresh conversation so the model is not copying its
-  own previous turn; separating the two jobs one line of wording now does at
-  once, which is when a list is worth opening and how coarse its items should
-  be; and a turn that ends with an item the model does not want to close, which
-  is the only thing that would test the stopping extension.
-  `reports/2026-08-31_v2_todo_live_failure.md`.
-- **A plan cannot be corrected by the person.** It is shown while the work
-  happens and deleted with the status, by choice; what is not solved is that
-  reading it is all anyone can do.
-- **Nothing constrains what the model emits.** Tool schemas are advice: the
-  served model does not use guided decoding for tool calls, so "do not wrap file
-  content in a markdown fence" is enforced by wording alone, and one fence cost
-  three failed live turns. Constrained decoding would end the class; it is a
-  model App redeploy and its own gate, and `tools/gemma4_parser.py` holds the
-  tested alternative. `ISSUES.md` ISS-0001.
-- **The assistant does not hand over what it made.** Live on 2026-08-30, with
-  standing instructions that said not to send code into the chat: asked for an
-  HTML page it wrote `house.html`, inspected it, and answered with the literal
-  text `[house.html](house.html)` — twice in the same session. The Markdown
-  renderer is right to leave that as text, because only http, https, tg and
-  mailto become links and a relative path leads nowhere; the model is trying to
-  deliver a file *in prose*, and believes it has. The screenshot and then the
-  file itself each arrived only when asked for by name. So the missing step is
-  not a decision to withhold — it is that handing something over is
-  `send_file`, and the model reaches for a link instead. Related to 4.5.5 and
-  not the same: that one is about claiming what was not seen, this one about
-  not delivering what was made.
-  `reports/2026-08-30_v2_prompt_assembly.md`, section "The first live session
-  with instructions in place".
-- **One browser capability instead of `inspect_page`.** A named set rather than
-  a single call that renders and returns everything at once: `browser_open` /
-  `navigate`, `browser_snapshot`, `browser_screenshot`, `browser_click`,
-  `browser_type`, `browser_evaluate`. It absorbs two open questions rather than
-  answering them separately — a snapshot is the page as text where a screenshot
-  is the page as pixels, which is what "looking is not reading" was asking for;
-  and clicking and typing are what a generated page cannot be judged by looking
-  alone. Until it exists, `inspect_page` is left as it is on purpose: patching
-  the tool that is being replaced spends the work twice. The same trust
-  boundary applies — a local artifact renders where the agent runs, a page from
-  the internet goes to the isolated renderer, and `WEB_LOCAL_BROWSER=0` still
-  means this container may not open one itself.
-- **Latency to the first visible word**, to give 4.1 a "before" number:
+- **Finish the `todo` tool.** What 4.4 left: a live turn where a plan and the
+  finished work arrive together, the wording split into when a list is worth
+  opening and how coarse its items are, and a turn ending on an item the model
+  does not want to close. `reports/2026-08-31_v2_todo_live_failure.md`.
+- **Let a plan be corrected by the person**, who can currently only read it.
+- **Constrain what the model emits.** Guided decoding for tool calls on the
+  served model, or the corrected parser in `tools/gemma4_parser.py`. A model App
+  redeploy and its own gate. `ISSUES.md` ISS-0001.
+- **Hand over what was made.** Delivery is `send_file` and the model reaches for
+  a Markdown link instead. `ISSUES.md` ISS-0003.
+- **One browser capability instead of `inspect_page`**: open/navigate, snapshot,
+  screenshot, click, type, evaluate. A snapshot is the page as text where a
+  screenshot is pixels, and clicking is how a generated page is judged.
+  `inspect_page` is deliberately left unpatched until this replaces it. The
+  trust boundary is unchanged: a local artifact renders where the agent runs, an
+  internet page goes to the isolated renderer. `ISSUES.md` ISS-0008.
+- **Latency to the first visible word**, to give 4.1 a "before" number.
   `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
-- **Throttle the edits that write a streamed answer.** Seven long answers in
-  four and a half minutes rate-limited the bot on 2026-08-30. Waiting out the
-  limit is now handled; being chatty enough to earn it is not, and how often to
-  edit is a measurement rather than a constant to pick.
-- **Keep a picture someone sends.** A document is written into the person's
-  workspace and survives; a photo, voice message or image is passed straight
-  into that turn as content and never written anywhere, so `/new` loses it and
-  the assistant can never look at it again or send it back. Verified against the
-  deployed volume on 2026-08-30: 22 entries, every one a document or an
-  agent-made artifact, no image among them. The split is in `admit_uploads` and
-  nothing about it is visible to the person, who reasonably thinks what they
-  sent is in their workspace. It also sits badly with 4.2, which gives the
-  assistant autonomy inside a workspace that its pictures are not in. Saving the
-  file is the easy half; deciding when the model is shown the image itself and
-  when it is shown a filename is the part worth designing.
-- **Answer a Telegram album as one turn.** Four documents in one message reach
-  the bot as four updates sharing a `media_group_id`, with the caption on one of
-  them, and become four turns and four answers. Coalescing them means a turn
-  whose identity is not one update — which 4.0 held back deliberately, because
-  every recorded number counts turns that way — and waiting out an album that
-  has no end marker. Design it rather than patch it; the assistant handed four
-  documents and no instruction also has a missing decision, which is 4.5's
-  `ask_user`, not a permission prompt.
-  `reports/2026-08-30_v2_album_burst_incident.md`.
+- **Throttle the edits that write a streamed answer.** How often to edit is a
+  measurement, not a constant to pick.
+- **Keep a picture someone sends.** Saving the file is the easy half; when the
+  model is shown the image and when it is shown a filename is the design.
+  `ISSUES.md` ISS-0002.
+- **Answer a Telegram album as one turn.** It means a turn whose identity is not
+  one update, which 4.0 held back deliberately, and waiting out an album with no
+  end marker. `reports/2026-08-30_v2_album_burst_incident.md`.
+- **Show the preview only when it will survive.** `ISSUES.md` ISS-0009.
+- **Put the reason in `tool_failed`.** `ISSUES.md` ISS-0007.
 
 **Closing criterion:** through Telegram, a normal conversational request is
 answered and a work request completes end to end for two different users without
@@ -381,24 +273,13 @@ works, Open WebUI as the main UI, and the superseded policy-platform/MCP version
 of Version 2. Changing scope requires an edit here, and a `DECISIONS.md` entry
 when the change is architecturally durable.
 
-A larger context was deferred here until a concrete product trigger made it
-current. The trigger arrived on 2026-08-30: the one loop of 4.1 can spend a
-turn's worth of steps against an effective 9,830 tokens. It is now 4.1.5 in the
-queue, at 64k. It was also deferred as a "VRAM experiment", which the ceiling is
-not — see `DECISIONS.md` 2026-08-30. Each boot it needs is still its own GPU
-gate.
-
 **A different endpoint for 128k**, recorded 2026-08-30 and not begun: L40S with
 Qwen3-8B, a 128k ceiling and KV-cache quantization, as its own measured
-comparison rather than a continuation of the A10. Any such run needs its own
-approval, and quantized KV on an already 4-bit QAT checkpoint needs a quality
-comparison, not just a successful boot.
-
-This was recorded as a different endpoint because 128k looked unreachable on the
-A10. The 64k boot showed that reasoning was wrong — 3.92x concurrency at full
-length, not the 1.32x predicted — so 128k on the current hardware is now an open
-question rather than a settled no. It stays out of scope until someone wants it:
-prefill, not memory, is what a long context costs here.
+comparison rather than a continuation of the A10. 128k on the current hardware
+is an open question rather than a settled no; it stays out of scope until
+someone wants it. Any such run needs its own approval, and quantized KV on an
+already 4-bit QAT checkpoint needs a quality comparison, not just a successful
+boot. `DECISIONS.md` 2026-08-30.
 
 ## How this file is kept
 
