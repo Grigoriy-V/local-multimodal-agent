@@ -252,3 +252,45 @@ costs nothing, which is its own test.
 
 That is the whole of step 1. Nothing is deployed, and the served model still has
 the shipped parser.
+
+## The fix, in the client
+
+Step 1 ended with a parser that could refuse a corrupt call but not complete the
+work, which is not a fix. Re-reading the evidence showed why one is possible.
+
+**`path` was never lost from the stream.** It is in the span, at the end of the
+`content` value stored in the database: `…</html>\n```,path:`. The model wrote
+it. What was lost is the *closing* delimiter of `content` — the page ended in a
+markdown fence — so the parser read to the next delimiter, which was the opening
+one of `path`'s value, and everything after is off by one. The earlier reading
+in this report, that a contiguous chunk of the stream went missing, was wrong.
+
+That makes the accident recognisable from what the client already receives, with
+no access to the raw text: a required argument is missing, and another string
+value ends in `,<that argument>:`. One follows from the other.
+
+`app/models/openai_compatible.py` now does three things:
+
+- **`unreadable`** names why a call cannot be what the model asked for: a value
+  ending in `,name:` for an argument that is then absent, or a parameter name
+  containing a brace, a newline or the delimiter token. Narrow on purpose — only
+  at the very end, only after a comma, only for an identifier — so it recognises
+  one accident rather than reading text.
+- **`repaired`** gives a value its own tail back. `content` did end at the page.
+  The missing argument is *not* invented: its value went into the next name and
+  is not in the call at all.
+- **the retry.** A corrupt completion is thrown away before the loop or the
+  conversation sees it, and asked for once more **without streaming**. The model
+  never reads its own malformed call, which is what it imitated eight times. One
+  retry, not a loop: a second corruption is a broken server, and finding that out
+  must not cost the turn's budget. A second corrupt answer is repaired as far as
+  is honest and delivered, so the floor is the tool error that exists today.
+
+Offline: **892 passed, 27 skipped**, sixteen new in
+`tests/test_unreadable_tool_call.py`, including the whole path through a stubbed
+transport — corrupt stream, retry not streamed, the intended call delivered; and
+a clean stream never asked for twice.
+
+The standing weakness: **the non-streamed response is assumed healthy on one
+observation.** If it corrupts too, the retry buys nothing and the served-side
+parser plugin in `tools/gemma4_parser.py` is the next move.

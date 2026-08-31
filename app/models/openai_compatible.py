@@ -11,7 +11,7 @@ import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Self
 
 import httpx
@@ -157,6 +157,80 @@ def parse_arguments(name: str, arguments: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise BackendError(f"tool call {name} sent arguments that are not an object: {parsed!r}")
     return parsed
+
+
+# --- a tool call the server could not read ------------------------------------
+#
+# Gemma 4 does not emit JSON arguments. It emits a compact form in which a
+# string is wrapped in the token `<|"|>`, and the served vLLM turns that back
+# into the JSON this client receives. When the model ends a string without that
+# token — measured live on 2026-08-31, writing a page that ended in a markdown
+# fence — the server reads on to the *next* delimiter, which is the opening one
+# of the following value. Everything after is off by one: the value swallows
+# `,path:`, and every later name is read out of somebody else's value.
+#
+# None of that is visible as an error. What arrives is a well-formed call the
+# model never made, missing the arguments its tool requires. Both live failures
+# and one measured scenario run were this, and the model retried the same call
+# eight times without recovering, because its own malformed call was sitting in
+# the history it was reading.
+STRING_DELIM = '<|"|>'
+
+# A parameter name is written from the schema: a short identifier. One holding a
+# brace, a newline or the delimiter is not a name, it is a fragment of a value.
+_IMPOSSIBLE_IN_A_NAME = ("{", "}", "[", "]", "\n", "\t", STRING_DELIM)
+
+
+def unreadable(call: ToolCall) -> str:
+    """Why this call cannot be what the model asked for, or an empty string.
+
+    Two signatures, both from the same cause. A name that cannot be a name is
+    the general one. The specific one is a string value ending in `,name:` for
+    an argument that is then missing — the exact shape of a lost closing
+    delimiter, and the one that says which argument was eaten.
+    """
+
+    for name in call.arguments:
+        if not name or any(mark in name for mark in _IMPOSSIBLE_IN_A_NAME):
+            return f"{call.name} received a name that cannot be a parameter name"
+    for value in call.arguments.values():
+        if not isinstance(value, str):
+            continue
+        eaten = swallowed_name(value)
+        if eaten and eaten not in call.arguments:
+            return f"{call.name} lost the argument {eaten!r} into another value"
+    return ""
+
+
+def swallowed_name(value: str) -> str:
+    """The parameter name a value ends with, as `…,name:` — or nothing.
+
+    Deliberately narrow. It matches only at the very end, only after a comma,
+    and only for something shaped like an identifier, because the point is to
+    recognise one specific accident rather than to guess at text.
+    """
+
+    tail = value.rsplit(",", 1)
+    if len(tail) != 2 or not tail[1].endswith(":"):
+        return ""
+    candidate = tail[1][:-1]
+    return candidate if candidate.isidentifier() else ""
+
+
+def repaired(call: ToolCall) -> ToolCall:
+    """Give back what the accident is known to have taken: the value's own tail.
+
+    `content` really did end at the page and not at `,path:`; that much is
+    certain and is restored. The argument itself stays missing, because its
+    value went into the next name and is not in this call at all — and inventing
+    a filename is exactly the thing this project does not do.
+    """
+
+    arguments = dict(call.arguments)
+    for name, value in call.arguments.items():
+        if isinstance(value, str) and swallowed_name(value):
+            arguments[name] = value[: value.rindex(",")]
+    return replace(call, arguments=arguments)
 
 
 def parse_usage(usage: dict[str, Any] | None) -> Usage:
@@ -535,7 +609,40 @@ class OpenAICompatibleBackend(ModelBackend):
                     yield TextDelta(text)
         finished = streamed.result()
         self._calibrate(messages, finished.usage)
+        broken = next((unreadable(call) for call in finished.tool_calls if unreadable(call)), "")
+        if broken:
+            # The corrupt completion is thrown away and never reaches the loop,
+            # so the model does not read its own malformed call and imitate it
+            # — which is what it did eight times, live. Asked again without
+            # streaming, because every corruption measured so far arrived on a
+            # streamed response and the one non-streamed run did not corrupt.
+            finished = await self._reread(messages, tools, response_format, broken)
         yield CompletionDone(finished)
+
+    async def _reread(
+        self,
+        messages: Sequence[Message],
+        tools: Sequence[dict[str, Any]] | None,
+        response_format: dict[str, Any] | None,
+        broken: str,
+    ) -> Completion:
+        """Ask once more for a completion whose tool calls can be read.
+
+        One retry, not a loop: a second corruption is a broken server rather
+        than an accident, and the turn's own budget must not be spent finding
+        that out. What comes back second is used even if it is corrupt too —
+        the tool call is repaired as far as it honestly can be, and the tool
+        then refuses it with an error the model can act on, which is the
+        behaviour that existed before this and is still the floor.
+        """
+
+        again = await self.invoke(messages, tools, response_format)
+        still = next((unreadable(call) for call in again.tool_calls if unreadable(call)), "")
+        if not still:
+            return again
+        return replace(
+            again, tool_calls=tuple(repaired(call) for call in again.tool_calls)
+        )
 
     def estimate_tokens(self, messages: Sequence[Message]) -> int:
         """The inherited estimate, at the ratio this endpoint has been observed at.
