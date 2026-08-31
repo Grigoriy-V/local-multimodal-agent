@@ -199,3 +199,56 @@ be done here, cheapest first:
 and 4.4's acceptance question — does an unfinished plan hold a turn open — is
 still unanswered, because in every successful variant the model closed its own
 list before answering.
+
+## Step 1: the parser, offline
+
+`tools/gemma4_parser.py` holds `vllm/parser/gemma4.py` at v0.26.0 verbatim
+(Apache-2.0, logger removed) beside a corrected copy, and
+`tests/test_gemma4_parser.py` drives both on strings. No model, no server, no
+GPU. Twenty tests, three subjects.
+
+**A gap in the plan, stated rather than hidden.** There are no captured raw
+emissions. vLLM hands over parsed arguments and never the text behind them, and
+nothing was logging that text. So the raw span was *reconstructed by inversion
+and verified by reproduction*: a candidate counts only if the vendored parser
+turns it into the corrupted call this project recorded. One does, exactly, using
+the 3,303-character page the model really wrote —
+`tests/fixtures/gemma4_merged_call.txt`.
+
+```text
+content:<|"|>{the page}<|"|>Create snake_game.html…<|"|>,status:<|"|>completed<|"|>},{…
+```
+
+The closing delimiter of `content` is also the opening delimiter of the next
+string. From there every following name is read out of somebody's value:
+`content` (the whole page, intact), then
+`Create snake_game.html with a basic snake game implementation.<|"|>,status`,
+then `},{content`, then `status` — the recorded call, key for key, and no
+`path`.
+
+So the failure is **not** 51284 and not 53431. It is a third thing in the same
+file: a lost delimiter, after which the argument scan cannot tell a name from a
+value. What 51284 predicted — nesting, value length — the GPU run had already
+ruled out.
+
+**51284 reproduced anyway**, because it is real and will be met later:
+`content:"a, b",path:"page.html"` gives the vendored parser `content` = `"a` and
+no `path` at all; `style:{css:"body{margin:0}"}` closes the object on the page's
+own brace. The corrected copy reads a quoted literal as a string, honours
+backslash escapes, and returns both correctly.
+
+**53431 reproduced and fixed**: `<|tool_call>:name{…}` is accepted beside
+`<|tool_call>call:name{…}`, calls closed with `<turn|>` are accepted, and the
+extraction scans balanced braces instead of matching a lazy pattern that ends a
+call inside the page's own CSS.
+
+**And the correction for our own case is a refusal, not a repair.** Once the
+delimiter is gone no reading of that span is the model's intent, so guessing
+would be inventing. What can be said is that a parameter name never contains a
+brace, a newline or the delimiter token; a span whose names do is not a call,
+and `parse_arguments` raises instead of returning one. A partial streaming span
+is never refused — half a span is not corrupt. On the calls that work the guard
+costs nothing, which is its own test.
+
+That is the whole of step 1. Nothing is deployed, and the served model still has
+the shipped parser.

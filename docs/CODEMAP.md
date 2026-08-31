@@ -43,6 +43,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change how an answer streams as it is written | `app/agent/graph.py`, `ui/telegram/adapter.py` | `complete`, `ASSISTANT_DELTA`, `AssistantDelta`, `MessageProduced`, `AnswerWithdrawn`, `AnswerPreview`, `StreamedCompletion` |
 | Change model-agnostic message types | `app/models/base.py` | `Message`, `ContentPart`, `ToolCall`, `ModelBackend` |
 | Change OpenAI/vLLM request translation | `app/models/openai_compatible.py` | `OpenAICompatibleBackend`, `build_messages`, `parse_completion` |
+| Reproduce or fix the served Gemma 4 tool parser | `tools/gemma4_parser.py` | `vendored_args`, `fixed_args`, `extract_calls`, `parse_arguments`, `CorruptArguments`, `tests/test_gemma4_parser.py` |
 | Change the stable prompt core (names no tool) | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT` |
 | Change prompt layer order / context replay | `app/context/window.py` | `build_prelude`, `Context`, `ContextPolicy` |
 | Read or write a person's standing instructions | `app/instructions.py` | `AGENTS.md`, `read_instructions`, `write_instructions`, `instruction_message` |
