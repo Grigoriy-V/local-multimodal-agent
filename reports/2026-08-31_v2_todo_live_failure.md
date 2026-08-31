@@ -460,3 +460,52 @@ exists, the honest position is that the plan is unproven at this size of task
 rather than shown to be useless — and that the two candidate directions are
 raising the threshold at which it appears at all, or making it visible so it can
 be steered. Both are proposals; neither is decided.
+
+## Raising the bar, and letting the plan be seen
+
+Two changes, both decided after the three tests above.
+
+**The bar is raised by wording and nothing else.** Two other levers were
+considered and rejected. A classifier in the harness — look at the request,
+decide whether it is big — is a hard-coded workflow standing in for the model's
+judgement, which is the one thing this project's primary principle forbids.
+Withholding the tool until the loop's second step is not a classifier and would
+work, but it moves the plan to after the first action, and a plan written after
+the work has started is a different feature. So: the capability line and the
+tool description now lead with the default being no list, and both name the
+price the model cannot otherwise see — the list is resent whole on every update
+and carried on every step after it. Neither says anything about a kind of task.
+
+What was removed matters as much as what was added. The old capability line
+read as an invitation — "write it before you start" — and ended by saying an
+open item is a reason you will be asked to carry on, which is a true
+consequence but reads as a reason to have a list. The consequence is kept and
+subordinated; the invitation is gone.
+
+This lever is weak on its own evidence: 4.3.5 spent three rounds on prompt
+wording and got better and worse in turn. It is chosen because the alternatives
+cost more than the problem.
+
+**The plan is visible.** It rides in the transient status message that already
+says what the assistant is doing — the action line, a blank line, then one line
+per item with its status.
+
+```text
+Step 4 · Writing file…
+
+✓ Write the page
+▸ Look at it
+· Say what it does
+```
+
+It is read out of the tool call's arguments, because that is where a plan lives
+and the tool stores nothing. A batch of calls that says nothing about the plan
+leaves the shown one standing, so it stays up while the work runs. It is
+deleted with the status when the answer arrives: the chat afterwards is the
+conversation, and a finished checklist left behind on every turn would be a
+second thing to read forever. Model output is treated as model output — a
+`todos` that is not the expected shape is skipped rather than repaired, and a
+long plan is truncated so it cannot cost the status line its message.
+
+**Acceptance for 4.4, agreed before the work:** no plan on a simple request, a
+plan on a large one. Both are live turns and neither has been tried.

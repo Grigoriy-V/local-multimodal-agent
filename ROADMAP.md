@@ -28,6 +28,17 @@ question in the report: what a plan adds when the prompt already asks for the
 work to be checked. Defects from these runs are ISS-0005 to ISS-0008 in
 `ISSUES.md`, which is new and holds observed defects only.
 
+**Two changes follow, approved 2026-08-31, and they carry 4.4's acceptance.**
+The bar for opening a plan is raised, by wording alone: the capability line and
+the tool description now say the default is no list and name its price, and
+nothing anywhere names a kind of task — no rule keyed to what was asked, and no
+classifier in the harness, because that would replace the model's judgement
+with a hard-coded workflow. And the plan is now visible: it rides in the same
+transient Telegram message as the current action, one status per item, and it
+leaves with that message when the answer arrives. **Accepted when a plan does
+not appear on a simple request and does appear on a large one.** Both live, and
+neither tried yet.
+
 Earlier the same day, before that: live acceptance failed twice, and a
 four-variant GPU measurement found the cause is **not ours and not `todo`**: the served
 vLLM's Gemma 4 tool parser intermittently loses whatever follows a long string

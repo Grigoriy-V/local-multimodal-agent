@@ -1477,6 +1477,137 @@ async def test_a_whole_turn_that_uses_a_tool_never_shows_its_name(
     assert "deleteMessage" in [method for method, _ in telegram.calls]
 
 
+def a_plan(*items: tuple[str, str]) -> ToolCall:
+    return ToolCall(
+        id="p",
+        name="todo_write",
+        arguments={"todos": [{"content": text, "status": status} for text, status in items]},
+    )
+
+
+def test_the_plan_is_read_out_of_the_call_that_carries_it() -> None:
+    """It lives nowhere else: the tool stores nothing."""
+
+    from ui.telegram.adapter import plan_lines  # noqa: PLC0415
+
+    lines = plan_lines(
+        [a_plan(("Write the page", "completed"), ("Look at it", "in_progress"))]
+    )
+
+    assert lines == ["✓ Write the page", "▸ Look at it"]
+
+
+def test_a_batch_with_no_plan_in_it_says_nothing_about_the_plan() -> None:
+    """`None` is not an empty plan: it must leave what is shown standing."""
+
+    from ui.telegram.adapter import plan_lines  # noqa: PLC0415
+
+    assert plan_lines([ToolCall("a", "write_file", {"path": "a.html"})]) is None
+    assert plan_lines([a_plan()]) == []
+
+
+def test_a_plan_that_is_not_the_shape_it_should_be_is_skipped_not_trusted() -> None:
+    """Arguments are model output, and one live turn's arguments held fragments
+    of a different call."""
+
+    from ui.telegram.adapter import plan_lines  # noqa: PLC0415
+
+    assert plan_lines([ToolCall("a", "todo_write", {"todos": "everything"})]) is None
+    assert (
+        plan_lines(
+            [
+                ToolCall(
+                    "a",
+                    "todo_write",
+                    {"todos": ["a string", {"content": "Real", "status": "nonsense"}]},
+                )
+            ]
+        )
+        == ["· Real"]
+    )
+
+
+async def test_the_plan_rides_under_the_action_in_the_same_message(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """One message: what is happening, a blank line, then the plan. And the
+    plan stays up while later steps run, because a batch that says nothing
+    about it has not changed it."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    activity = ToolActivity(adapter.client, CHAT)
+
+    await adapter._deliver(
+        CHAT,
+        Message(
+            role="assistant",
+            content=[],
+            tool_calls=(a_plan(("Write the page", "in_progress"), ("Look at it", "pending")),),
+        ),
+        activity,
+    )
+    await adapter._deliver(
+        CHAT,
+        Message(role="assistant", content=[], tool_calls=(ToolCall("w", "write_file", {}),)),
+        activity,
+    )
+
+    assert telegram.sent[0] == "Planning…\n\n▸ Write the page\n· Look at it"
+    edited = [payload for method, payload in telegram.calls if method == "editMessageText"]
+    assert edited[-1]["text"] == (
+        "Step 2 · Writing file…\n\n▸ Write the page\n· Look at it"
+    )
+
+
+async def test_the_plan_leaves_with_the_status_and_not_into_the_answer(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """What stays in the chat after a turn is the conversation."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    activity = ToolActivity(adapter.client, CHAT)
+
+    await adapter._deliver(
+        CHAT,
+        Message(role="assistant", content=[], tool_calls=(a_plan(("Do it", "pending")),)),
+        activity,
+    )
+    await adapter._deliver(
+        CHAT,
+        Message(role="assistant", content=[ContentPart(kind="text", text="Done.")]),
+        activity,
+    )
+
+    assert "deleteMessage" in [method for method, _ in telegram.calls]
+    assert telegram.sent[-1] == "Done."
+    assert not any("Do it" in sent for sent in telegram.sent[1:])
+
+
+async def test_a_long_plan_cannot_cost_the_status_line(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Telegram refuses a message over 4096 characters, and the useful part is
+    the line at the top."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(default=says("x")))
+    activity = ToolActivity(adapter.client, CHAT)
+
+    await adapter._deliver(
+        CHAT,
+        Message(
+            role="assistant",
+            content=[],
+            tool_calls=(a_plan(*[(f"Step {n} " + "x" * 300, "pending") for n in range(30)]),),
+        ),
+        activity,
+    )
+
+    shown = telegram.sent[0]
+    assert shown.startswith("Planning…\n\n")
+    assert len(shown) < 4096
+    assert "18 more" in shown
+
+
 async def test_a_status_that_cannot_be_sent_does_not_fail_the_turn(
     settings: TelegramSettings, tmp_path: Path
 ) -> None:

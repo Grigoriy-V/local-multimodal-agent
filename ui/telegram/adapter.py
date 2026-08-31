@@ -156,6 +156,56 @@ def activity_labels(calls: Iterable[Any]) -> list[str]:
     return labels
 
 
+# A status per item, in one column, so the eye finds the current step without
+# reading. Deliberately characters and not emoji: this sits under a line of
+# interface chrome and should read as a list, not decorate one.
+PLAN_MARKS = {"completed": "✓", "in_progress": "▸", "pending": "·"}
+PLAN_MARK = "·"
+# The plan is the model's own text and can be as long as the model made it.
+# Telegram refuses a message over 4096 characters, and losing the status line
+# because the plan below it was long would trade the useful part for the
+# decorative one.
+PLAN_ITEMS = 12
+PLAN_ITEM_CHARS = 80
+
+
+def plan_lines(calls: Iterable[Any]) -> list[str] | None:
+    """The plan a batch of calls carries, as lines the person can read.
+
+    Read straight out of the call's arguments, which is where the plan lives —
+    the tool stores nothing. `None` means this batch said nothing about the
+    plan, which is not the same as an empty plan and must leave what is already
+    shown alone.
+
+    Arguments are model output and are treated as such: anything that is not
+    the shape this expects is skipped rather than trusted or repaired.
+    """
+
+    plan: list[str] | None = None
+    for call in calls:
+        if call.name != "todo_write":
+            continue
+        items = getattr(call, "arguments", None)
+        items = items.get("todos") if isinstance(items, dict) else None
+        if not isinstance(items, list):
+            continue
+        plan = []
+        for item in items[:PLAN_ITEMS]:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            content = content.strip()
+            if len(content) > PLAN_ITEM_CHARS:
+                content = content[: PLAN_ITEM_CHARS - 1].rstrip() + "…"
+            mark = PLAN_MARKS.get(item.get("status"), PLAN_MARK)
+            plan.append(f"{mark} {content}")
+        if len(items) > PLAN_ITEMS:
+            plan.append(f"… {len(items) - PLAN_ITEMS} more")
+    return plan
+
+
 class ToolActivity:
     """One transient status message per turn, edited as the work moves on.
 
@@ -164,6 +214,12 @@ class ToolActivity:
     information in one message that is edited while the tools run and deleted
     when there is an answer to read, so what remains in the chat afterwards is
     the conversation.
+
+    When there is a plan it rides in the same message, under the line saying
+    what is happening: one message, current action first, then the plan with a
+    status per item. It is the only place the plan is visible at all — it lives
+    in the arguments of a tool call otherwise — and it goes when the status
+    goes, so the chat afterwards is still just the conversation.
 
     Nothing here can fail a turn. A status that could not be sent, edited or
     removed is a cosmetic loss, and the answer it was describing is not.
@@ -175,10 +231,15 @@ class ToolActivity:
         self.message_id: int | None = None
         self._shown: str | None = None
         self.step = 0
+        self.plan: list[str] = []
 
-    async def show(self, labels: list[str]) -> None:
+    async def show(self, labels: list[str], plan: list[str] | None = None) -> None:
         if not labels:
             return
+        # A batch that said nothing about the plan leaves the one already shown
+        # standing: the work carries on under a plan that has not changed.
+        if plan is not None:
+            self.plan = plan
         # One batch of tool calls is one step of the loop, so counting them here
         # is counting the loop. Shown only from the second onwards: a turn that
         # reads one file is not a process a person needs a progress report on,
@@ -187,6 +248,8 @@ class ToolActivity:
         text = "\n".join(labels)
         if self.step > 1:
             text = f"Step {self.step} · {text}"
+        if self.plan:
+            text = text + "\n\n" + "\n".join(self.plan)
         if text == self._shown:
             return
         try:
@@ -904,7 +967,7 @@ class TelegramAdapter:
         if produced.tool_calls:
             labels = activity_labels(produced.tool_calls)
             if activity is not None:
-                await activity.show(labels)
+                await activity.show(labels, plan_lines(produced.tool_calls))
             else:
                 await self.client.send_message(chat_id, "\n".join(labels))
 

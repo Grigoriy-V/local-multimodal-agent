@@ -157,22 +157,31 @@ def _observation_lines(tools: Toolbox) -> list[str]:
 
 
 def _planning_lines(tools: Toolbox) -> list[str]:
-    """That the list is worth keeping current, and what reads it.
+    """What a list costs, and what reads it once there is one.
 
-    The schema owns how to call it. What belongs here is the consequence, which
-    a schema cannot state: the list is read when a turn tries to end, so leaving
-    it stale is not free. Saying so is fairer than letting the model discover it
-    as an interruption it cannot account for.
+    The schema owns how to call it. Two things belong here that a schema cannot
+    say. The first is the price, because the model cannot see it: the list is
+    resent whole on every update and travels in the turn's messages from then
+    on, so an unnecessary list is paid for on every step that follows. The
+    second is the consequence, which is fairer stated than discovered: what is
+    still open is read when the turn tries to end.
+
+    Measured on 2026-08-31: three live runs where a plan cost 88-100 s against
+    about 50 s without one and changed nothing the model did. So the default
+    here is no list. Nothing describes which requests deserve one — that is the
+    model's judgement about the work in front of it, not a rule keyed to what
+    the person happened to ask for.
     """
 
     if "todo_write" not in tools.names:
         return []
     return [
-        "- todo_write holds your own plan for work that takes several steps: write "
-        "it before you start, keep it current as you go, and leave nothing open "
-        "that is actually done. It is read when you try to finish, so an item still "
-        "open is a reason you will be asked to carry on. Work that is one step needs "
-        "no list."
+        "- todo_write is your own list, and its default is not to exist. Keep the "
+        "work in your head and just do it; open a list only when you can already "
+        "tell that you would otherwise lose a step, which is rarer than it "
+        "sounds. It is not free: every update resends the whole list and it is "
+        "carried on every step after that. If you do keep one, keep it true — "
+        "what is still open is read when you try to finish."
     ]
 
 

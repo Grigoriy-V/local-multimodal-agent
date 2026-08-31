@@ -226,7 +226,13 @@ def test_observation_guidance_appears_only_with_the_tool(
 def test_planning_guidance_appears_only_with_the_tool(
     registry: CapabilityRegistry,
 ) -> None:
-    """And it says the one thing the schema cannot: what reads the list."""
+    """And it says the two things the schema cannot: the price of a list, and
+    what reads it once there is one.
+
+    The default is stated as not having one. Three live runs on 2026-08-31 paid
+    88-100 s for a plan against about 50 s without one and got nothing back for
+    it, so a line that reads as an invitation is a line that costs money.
+    """
 
     from app.tools import todo_tools
 
@@ -234,8 +240,9 @@ def test_planning_guidance_appears_only_with_the_tool(
 
     guided = capability_brief(planning)
 
-    assert "todo_write holds your own plan" in guided
-    assert "a reason you will be asked to carry on" in guided
+    assert "its default is not to exist" in guided
+    assert "resends the whole list" in guided
+    assert "read when you try to finish" in guided
     assert "todo_write" not in capability_brief(everything(registry))
 
 

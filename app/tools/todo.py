@@ -42,12 +42,14 @@ MAX_ITEMS = 20
 MAX_CONTENT_CHARS = 200
 
 DESCRIPTION = (
-    "Record and update your task list for the work in front of you. Send the "
-    "ENTIRE list every call: it replaces the previous one, and there are no "
-    "partial updates or per-item edits. Write one item per concrete step before "
-    "you start, keep at most one item in_progress while work remains, and mark "
-    "an item completed the moment it is done rather than in one batch at the "
-    "end. Skip the list entirely for work that is a single step."
+    "Your own list of steps, for work long enough that you would otherwise lose "
+    "one. Most work is not: if you can hold what remains in your head, hold it "
+    "and do the work instead — a list you did not need is resent in full on "
+    "every update and carried on every step afterwards. When you do open one: "
+    "send the ENTIRE list every call, because it replaces the previous one and "
+    "there are no partial updates or per-item edits. One item per concrete "
+    "step, at most one in_progress while work remains, and an item marked "
+    "completed the moment it is done rather than in one batch at the end."
 )
 
 PARAMETERS: dict[str, Any] = {
