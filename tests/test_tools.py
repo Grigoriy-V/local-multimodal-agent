@@ -136,6 +136,41 @@ def test_write_file_on_a_directory_is_refused(workspace: Path) -> None:
         tools(workspace)["write_file"].run(path="sub", content="x")
 
 
+@pytest.mark.parametrize("path", ["Task Board/", "Task Board\\", "a/b/"])
+def test_a_trailing_separator_never_makes_a_file_with_a_folders_name(
+    workspace: Path, path: str
+) -> None:
+    """Live on 2026-08-31 this cost three turns twice over.
+
+    `pathlib` drops the trailing separator, so a call plainly meant to make a
+    folder made a file with the folder's name, and every write into that folder
+    afterwards failed. A trailing separator is how everyone writes a directory,
+    so the call is not wrong — the answer is to say what to do instead.
+    """
+
+    with pytest.raises(ToolError, match="names a directory"):
+        tools(workspace)["write_file"].run(path=path, content="# notes")
+
+    assert not (workspace / path.rstrip("/\\")).exists()
+
+
+def test_a_file_standing_where_a_folder_should_be_says_so(workspace: Path) -> None:
+    """Instead of `FileExistsError [WinError 183]`, which nothing can act on."""
+
+    tools(workspace)["write_file"].run(path="Board", content="x")
+
+    with pytest.raises(ToolError, match="'Board' is a file"):
+        tools(workspace)["write_file"].run(path="Board/index.html", content="<h1>hi</h1>")
+
+
+def test_the_advice_it_gives_is_advice_that_works(workspace: Path) -> None:
+    """The refusal says directories are made for you. They are."""
+
+    tools(workspace)["write_file"].run(path="Task Board/index.html", content="<h1>hi</h1>")
+
+    assert (workspace / "Task Board" / "index.html").is_file()
+
+
 def test_edit_file_replaces_one_exact_match(workspace: Path) -> None:
     result = tools(workspace)["edit_file"].run(
         path="notes.txt", old_text="kept", new_text="stayed"

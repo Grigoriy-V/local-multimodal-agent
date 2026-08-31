@@ -42,9 +42,13 @@ def _list_files(root: Path, path: str = ".") -> str:
     target = resolve_in_root(root, path)
     if not target.is_dir():
         raise ToolError(f"path {path!r} is not a directory")
-    entries = sorted(
-        f"{entry.name}/" if entry.is_dir() else entry.name for entry in target.iterdir()
-    )
+    try:
+        entries = sorted(
+            f"{entry.name}/" if entry.is_dir() else entry.name for entry in target.iterdir()
+        )
+    except OSError as error:
+        detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
+        raise ToolError(f"path {path!r} could not be listed: {detail}") from error
     if not entries:
         return f"{path}: empty"
     shown = entries[:MAX_ENTRIES]
@@ -58,19 +62,57 @@ def _read_file(root: Path, path: str) -> str:
     target = resolve_in_root(root, path)
     if not target.is_file():
         raise ToolError(f"path {path!r} is not a file")
-    text = target.read_text(encoding="utf-8", errors="replace")
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as error:
+        detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
+        raise ToolError(f"path {path!r} could not be read: {detail}") from error
     if len(text) > MAX_CHARS:
         return text[:MAX_CHARS] + f"\n... truncated at {MAX_CHARS} characters"
     return text
 
 
+def _names_a_directory(path: str) -> bool:
+    """A trailing separator means a directory, everywhere except in `pathlib`.
+
+    `Path("notes/")` is `Path("notes")`, so without this check a call meant to
+    make a folder makes a file with the folder's name, and every write into
+    that folder afterwards fails. Live on 2026-08-31 this cost three turns and
+    scattered four files into the root of someone's workspace.
+    """
+
+    return path.rstrip().endswith(("/", "\\"))
+
+
+def _blocked_by(root: Path, target: Path) -> Path | None:
+    """The ancestor that is a file, if a file is why nothing can be written."""
+
+    return next((parent for parent in target.parents if parent.is_file()), None)
+
+
 def _write_file(root: Path, path: str, content: str) -> str:
+    if _names_a_directory(path):
+        raise ToolError(
+            f"path {path!r} names a directory, not a file. Write the file you want "
+            "and any directories it needs are created for you."
+        )
     target = resolve_in_root(root, path)
     if target.is_dir():
         raise ToolError(f"path {path!r} is a directory")
     existed = target.is_file()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    except OSError as error:
+        # A platform error code is not something a model can act on. Say what is
+        # in the way when that is knowable, and otherwise say what failed.
+        blocking = _blocked_by(root, target)
+        if blocking is not None:
+            raise ToolError(
+                f"{blocking.name!r} is a file, so nothing can be written inside it"
+            ) from error
+        detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
+        raise ToolError(f"path {path!r} could not be written: {detail}") from error
     verb = "overwrote" if existed else "created"
     return f"{verb} {path} ({len(content)} characters)"
 
@@ -166,7 +208,8 @@ def filesystem_tools(root: Path) -> list[Tool]:
             name="write_file",
             description=(
                 "Write a UTF-8 text file inside the workspace, replacing it if it already "
-                "exists. Give `path` first and `content` last. `content` is the exact "
+                "exists. Missing directories are created for you, so there is nothing to "
+                "make first. Give `path` first and `content` last. `content` is the exact "
                 "bytes of the file and nothing else: never wrap it in a markdown code "
                 "fence and never add ``` before or after it."
             ),

@@ -110,7 +110,7 @@ Rules that keep the file honest:
 
 ### ISS-0006 — a path meant as a directory becomes a file, and poisons the folder
 
-- **Status:** open
+- **Status:** fixed, 2026-08-31 — offline only, not yet seen live
 - **Seen:** 2026-08-31, live, "Personal Task Board 3" via Telegram
 - **Costs:** two turns and about 155 s produced no folder. Every later write
   into that name failed, `list_files` on it failed, and the model gave up and
@@ -129,21 +129,30 @@ Rules that keep the file honest:
   `app/tools/filesystem.py` treats `Board 3/` as an ordinary file name and
   creates it. There is nothing wrong with the model's call: a trailing slash is
   how everyone writes a directory.
+- **Fixed by:** `write_file` refuses a path ending in a separator and says that
+  directories are made for you, which is also now in the tool's description; an
+  ancestor standing in the way is named instead of a platform error code. Seen
+  twice more before the fix, in the only two live turns that opened a plan:
+  runs `1763523c` and `3af91a0c`, 2026-08-31T05:27–05:30Z — a plan whose first
+  item is "create the folder" produces exactly this call.
 - **Evidence:** run `e9bae9a5` and run `28daa249`, 2026-08-31T04:14–04:17Z;
-  offline reproduction as above
+  offline reproduction as above; `tests/test_tools.py`
 - **Related:** ISS-0005, which is why the model saw only an OS error and could
   not route around it; the repeat rule ended the first turn correctly at 52 s
 
 ### ISS-0005 — an OS error escapes the filesystem tools unwrapped
 
-- **Status:** open
+- **Status:** fixed, 2026-08-31 — offline only, not yet seen live
 - **Seen:** 2026-08-31, live and offline
 - **Costs:** the model is handed a raw platform error with a platform error
   code, instead of a sentence naming what it should do differently. It cannot
   act on it, and the wording differs by operating system.
 - **Reproduce:** the ISS-0006 sequence raises `FileExistsError`, not `ToolError`.
-- **Cause:** `resolve_in_root` wraps `OSError`; the write, the `mkdir` and the
-  read after it do not.
+- **Cause:** `resolve_in_root` wrapped `OSError`; the write, the `mkdir`, the
+  read and the listing did not.
+- **Fixed by:** wrapping them, in `app/tools/filesystem.py`. `edit_file`'s
+  atomic replace is deliberately left as it is: it has its own recovery path
+  and its own test.
 - **Related:** ISS-0006
 
 ### ISS-0004 — the assistant describes what it did not observe

@@ -47,9 +47,11 @@ DESCRIPTION = (
     "in your head: a list that was not needed is resent in full on every "
     "update and carried on every step afterwards. When you do open one: "
     "send the ENTIRE list every call, because it replaces the previous one and "
-    "there are no partial updates or per-item edits. One item per concrete "
-    "step, at most one in_progress while work remains, and an item marked "
-    "completed the moment it is done rather than in one batch at the end."
+    "there are no partial updates or per-item edits. One item per meaningful "
+    "milestone or outcome — do not mirror individual tool calls, files or small "
+    "implementation actions, and expect one item to stay in_progress across "
+    "several of them. At most one in_progress while work remains, and an item "
+    "marked completed the moment it is done rather than in one batch at the end."
 )
 
 PARAMETERS: dict[str, Any] = {

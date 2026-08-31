@@ -536,3 +536,34 @@ The rewrite that follows sits in the middle deliberately. The handle is
 invitation nor a discouragement is left in it. Both extremes have now been
 measured live, which is what makes a middle position something other than a
 guess.
+
+### The plan came back, and walked straight into our own defect
+
+Two turns after the middle wording deployed, both on multi-file requests, both
+planned — and both died the same way:
+
+```text
+1763523c   todo_write, then write_file "Task Board test/"   folder became a file
+           two writes into it failed, repeat rule ended the turn      78.8 s
+3af91a0c   todo_write, then write_file "Expense Tracker/"   the same
+           steered, then stopped by the person                        93.1 s
+```
+
+So the middle position works and was never given a chance to be judged. The
+defect is ISS-0006, known since 04:14 and not fixed at the time on the grounds
+that it was not blocking. It was: **a plan whose first item is "create the
+folder" produces exactly the call that breaks**, so raising the threshold made
+the failure more likely rather than less. Fixed now — a path ending in a
+separator is refused with the reason that directories are made for you, an
+ancestor standing in the way is named rather than reported as
+`FileExistsError [WinError 183]`, and the tool's own description says there is
+nothing to create first.
+
+The other half of what those runs showed is the plan's grain. The items mirror
+the tool calls: create the folder, write index.html, write styles.css. For a
+four-file application the readable plan is four outcomes — build the structure
+and interface, implement the behaviour, verify and fix, document — with one
+item staying `in_progress` across several writes. The tool description now asks
+for a milestone or an outcome per item and says in as many words not to mirror
+individual tool calls, files or small implementation actions. Unmeasured: it is
+the next thing a live turn would settle.
