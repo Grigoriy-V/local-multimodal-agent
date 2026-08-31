@@ -238,15 +238,6 @@ was built.
 
      `reports/2026-08-31_v2_todo_live_failure.md`, `ISSUES.md` ISS-0004 to
      ISS-0009.
-   - **The plan is invisible outside the running turn.** It is shown while the
-     work happens and deleted with the status, by choice. What is not solved is
-     correcting one: the person can read a plan and cannot change it.
-   - **Nothing constrains what the model emits.** Tool schemas are advice: the
-     served model does not use guided decoding for tool calls, so "do not wrap
-     file content in a markdown fence" is enforced by wording alone. One fence
-     cost three failed live turns. Constrained decoding would end the class; it
-     is a model App redeploy and its own gate, and `tools/gemma4_parser.py`
-     holds the tested alternative. `ISSUES.md` ISS-0001.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
    - **4.5.5 Saying only what was observed.** One product question with two
      measured faces: the assistant makes an artifact and describes how it looks
@@ -316,6 +307,15 @@ Recorded, not approved, not begun, and not in the order above. One line each.
   be; and a turn that ends with an item the model does not want to close, which
   is the only thing that would test the stopping extension.
   `reports/2026-08-31_v2_todo_live_failure.md`.
+- **A plan cannot be corrected by the person.** It is shown while the work
+  happens and deleted with the status, by choice; what is not solved is that
+  reading it is all anyone can do.
+- **Nothing constrains what the model emits.** Tool schemas are advice: the
+  served model does not use guided decoding for tool calls, so "do not wrap file
+  content in a markdown fence" is enforced by wording alone, and one fence cost
+  three failed live turns. Constrained decoding would end the class; it is a
+  model App redeploy and its own gate, and `tools/gemma4_parser.py` holds the
+  tested alternative. `ISSUES.md` ISS-0001.
 - **The assistant does not hand over what it made.** Live on 2026-08-30, with
   standing instructions that said not to send code into the chat: asked for an
   HTML page it wrote `house.html`, inspected it, and answered with the literal
