@@ -509,3 +509,30 @@ long plan is truncated so it cannot cost the status line its message.
 
 **Acceptance for 4.4, agreed before the work:** no plan on a simple request, a
 plan on a large one. Both are live turns and neither has been tried.
+
+### The first wording overshot, and what that measures
+
+Deployed at 05:0x. Six turns after it, no plan at all — correct on the simple
+ones, and then on a genuinely large request it was still absent:
+
+```text
+cc98b3e0   Task Board, four files, eight stated requirements, 64.4 s
+           README.md written first, then index.html, styles.css, app.js
+           no todo_write, and no inspect_page
+```
+
+Asked afterwards whether it had planned, the model said no, because the task
+"was done within a single step". Four files is not one step. The requirement
+"проверь что всё работает" was in the request and nothing was checked, which is
+ISS-0008 with an explicit instruction attached to it.
+
+So the lever does work — it moved the behaviour completely, in one deploy, from
+almost always to never. That is worth recording on its own: the earlier reading
+that prompt wording is a weak lever was drawn from changes that argued with the
+model rather than repricing the thing it was choosing.
+
+The rewrite that follows sits in the middle deliberately. The handle is
+"several parts you could lose track of", the price stays, and neither an
+invitation nor a discouragement is left in it. Both extremes have now been
+measured live, which is what makes a middle position something other than a
+guess.

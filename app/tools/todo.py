@@ -42,10 +42,10 @@ MAX_ITEMS = 20
 MAX_CONTENT_CHARS = 200
 
 DESCRIPTION = (
-    "Your own list of steps, for work long enough that you would otherwise lose "
-    "one. Most work is not: if you can hold what remains in your head, hold it "
-    "and do the work instead — a list you did not need is resent in full on "
-    "every update and carried on every step afterwards. When you do open one: "
+    "Your own list of steps, for work that has several parts you could "
+    "otherwise lose track of. Skip it when you can hold the whole of the work "
+    "in your head: a list that was not needed is resent in full on every "
+    "update and carried on every step afterwards. When you do open one: "
     "send the ENTIRE list every call, because it replaces the previous one and "
     "there are no partial updates or per-item edits. One item per concrete "
     "step, at most one in_progress while work remains, and an item marked "

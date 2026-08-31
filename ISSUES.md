@@ -51,6 +51,28 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0009 — the person reads an answer for a minute and then it is deleted
+
+- **Status:** open
+- **Seen:** 2026-08-31, live, four turns in a row
+- **Costs:** text appears and grows while the work happens, the person reads
+  it, and then it vanishes and a file arrives instead. What is said afterwards
+  is almost nothing: 17 output tokens in one turn, **one** in another. The
+  assistant has already explained itself in a message it then took back.
+- **Reproduce:** ask for anything the model narrates before writing. The
+  narration is streamed, previewed, and withdrawn when the same completion
+  turns out to end in a tool call.
+- **Cause:** known and half deliberate. A completion that carries both text and
+  a tool call has its preview discarded — added on 2026-08-30 so that a
+  narrated tool call would not become a second answer in the chat. That fix is
+  right about the end state and wrong about the middle: the preview should not
+  have been shown, and by the time we know it should not have been, the person
+  has been reading it for up to 58 s. Nothing in a stream says in advance
+  whether it will end in a tool call.
+- **Evidence:** runs `94e8bd24` (preview at 15.9 s, 2,075 tokens, withdrawn,
+  final answer 17 tokens) and `3e5690ae` (preview at 67.1 s, withdrawn, final
+  answer 1 token), 2026-08-31T05:06–05:11Z
+
 ### ISS-0008 — a generated app is delivered as working without ever being used
 
 - **Status:** open
@@ -64,6 +86,11 @@ Rules that keep the file honest:
   and looks; it does not click, type or read the console, so a defect that only
   appears on interaction cannot be seen by the only tool that looks. In this run
   the model did not call it at all, and had rewritten the same file twice.
+- **Also seen:** 2026-08-31, run `cc98b3e0`. The request ended with the words
+  "проверь что всё работает". Four files were written and nothing was opened,
+  rendered or read back; the answer described the application as working. So
+  the gap is not only that the loop cannot exercise an artifact — an explicit
+  instruction to check did not produce a look either.
 - **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`, section "Three
   live tests on a task big enough for a plan"
 - **Related:** ISS-0004; the browser capability set in `ROADMAP.md`, "Not

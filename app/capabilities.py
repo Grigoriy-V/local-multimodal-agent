@@ -167,21 +167,24 @@ def _planning_lines(tools: Toolbox) -> list[str]:
     still open is read when the turn tries to end.
 
     Measured on 2026-08-31: three live runs where a plan cost 88-100 s against
-    about 50 s without one and changed nothing the model did. So the default
-    here is no list. Nothing describes which requests deserve one — that is the
-    model's judgement about the work in front of it, not a rule keyed to what
-    the person happened to ask for.
+    about 50 s without one and changed nothing the model did, and one run after
+    the first rewrite of this line where a four-file application with eight
+    stated requirements was built with no list at all and nothing checked. So
+    this sits in the middle on purpose. It is neither an invitation nor a ban:
+    the price is stated, the handle is "several parts you could lose", and
+    which requests deserve a list stays the model's judgement rather than a
+    rule keyed to what the person happened to ask for.
     """
 
     if "todo_write" not in tools.names:
         return []
     return [
-        "- todo_write is your own list, and its default is not to exist. Keep the "
-        "work in your head and just do it; open a list only when you can already "
-        "tell that you would otherwise lose a step, which is rarer than it "
-        "sounds. It is not free: every update resends the whole list and it is "
-        "carried on every step after that. If you do keep one, keep it true — "
-        "what is still open is read when you try to finish."
+        "- todo_write is your own list of steps. Keep one when the work in front "
+        "of you has several parts you could lose track of, and skip it when you "
+        "can hold the whole of it in your head. It is not free: every update "
+        "resends the whole list and it is carried on every step after that, so "
+        "a list that adds nothing still costs something. If you keep one, keep "
+        "it true — what is still open is read when you try to finish."
     ]
 
 

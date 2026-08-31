@@ -229,9 +229,12 @@ def test_planning_guidance_appears_only_with_the_tool(
     """And it says the two things the schema cannot: the price of a list, and
     what reads it once there is one.
 
-    The default is stated as not having one. Three live runs on 2026-08-31 paid
-    88-100 s for a plan against about 50 s without one and got nothing back for
-    it, so a line that reads as an invitation is a line that costs money.
+    It has to sit between two live failures on 2026-08-31. Read as an
+    invitation, it cost 88-100 s against about 50 s and changed nothing the
+    model did. Rewritten to read as a discouragement, it produced a four-file
+    application with eight stated requirements, no list, and nothing checked.
+    So what is asserted here is the handle and the price, and that neither a
+    prohibition nor an encouragement is left in the wording.
     """
 
     from app.tools import todo_tools
@@ -240,7 +243,7 @@ def test_planning_guidance_appears_only_with_the_tool(
 
     guided = capability_brief(planning)
 
-    assert "its default is not to exist" in guided
+    assert "several parts you could lose track of" in guided
     assert "resends the whole list" in guided
     assert "read when you try to finish" in guided
     assert "todo_write" not in capability_brief(everything(registry))
