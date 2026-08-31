@@ -567,3 +567,38 @@ item staying `in_progress` across several writes. The tool description now asks
 for a milestone or an outcome per item and says in as many words not to mirror
 individual tool calls, files or small implementation actions. Unmeasured: it is
 the next thing a live turn would settle.
+
+### The defect is gone live, and so is the plan
+
+Two turns after the fix deployed, both multi-file, both on folders that did not
+exist yet:
+
+```text
+57d1f54f   list_files "Expense Tracker 2"   refused cleanly, the model moved on
+           index.html, styles.css, app.js, README.md   all written
+           inspect_page index.html, 1.9 s              62.1 s, 7 model calls
+7ed8565b   the same four files in "Task Board test 2"  64.6 s, 5 model calls
+```
+
+Not one `write_file` with a trailing separator, not one failed write, and the
+folder came into existence by being written into. ISS-0006 and ISS-0005 are
+confirmed live. The refusal that did happen is the shape a refusal should have:
+`list_files` on a folder that does not exist said so, and ten seconds later the
+model was writing files rather than repeating the call. And `57d1f54f` called
+`inspect_page` before answering with nobody asking it to.
+
+**And neither turn wrote a plan** — on the same two requests that produced one
+two turns earlier. Between them, one thing changed that the model can see: the
+tool description was rewritten to ask for milestones instead of steps. A
+plausible reading is that coarser items make a four-file job look like something
+that fits in the head, which is the same sentence that decides whether to open a
+list at all. A second reading is available for one of the two: `7ed8565b` began
+at 7,417 input tokens against `57d1f54f`'s 3,298, so it was continuing a
+conversation whose previous turn had no plan and may simply have copied itself.
+Neither reading is established. Two runs either side of a change is not a
+measurement, and this is the fourth time in one day that wording moved this
+behaviour completely.
+
+That is where 4.4 is closed: everything built works, and the one thing that
+would make it worth having — a live turn where the plan and the finished work
+arrive together — has never been observed.

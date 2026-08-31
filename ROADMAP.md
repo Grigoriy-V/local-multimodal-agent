@@ -4,73 +4,15 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.4, `todo` as agent state — code, tests and
-documents done on 2026-08-31, and **the first live turn that worked end to end
-came the same day**: plan written, kept current, closed, the page written and
-inspected before the answer. The cause of the three failures before it was a
-stray markdown fence at the end of the file content: the string's closing
-delimiter never arrived, so the served parser ran into the next call and
-`write_file` lost its `path`. `write_file` now forbids the fence, and the model
-recovers by itself after one refusal instead of repeating the call eight times.
-**4.4's own acceptance is still untested** — every successful run closes its own
-list, so the stopping seam has never had to refuse anything. Three other things
-are open and recorded below: the plan is invisible to the person, it costs seven
-model calls against three, and nothing constrains the emission because the
-served model does not use guided decoding.
-`reports/2026-08-31_v2_todo_live_failure.md`.
+**Current approved step:** 4.4 is **closed with known problems**, 2026-08-31.
+The planning tool, its stopping extension and the display all work; what was
+never observed is a single live turn where a plan and the work finish together.
+Read the honest account below before building on it.
 
-**Then three live tests on a task big enough for a plan** — the same task board
-built three times. The plan never caused a failure and never changed an outcome:
-it fired the first live steering twice, and both times the model answered it by
-closing its list. One run shipped an application that does not work, one hit a
-defect of ours in `write_file`, and the open question is now stated as a
-question in the report: what a plan adds when the prompt already asks for the
-work to be checked. Defects from these runs are ISS-0005 to ISS-0008 in
-`ISSUES.md`, which is new and holds observed defects only.
-
-**Two changes follow, approved 2026-08-31, and they carry 4.4's acceptance.**
-The bar for opening a plan is raised, by wording alone: the capability line and
-the tool description now say the default is no list and name its price, and
-nothing anywhere names a kind of task — no rule keyed to what was asked, and no
-classifier in the harness, because that would replace the model's judgement
-with a hard-coded workflow. And the plan is now visible: it rides in the same
-transient Telegram message as the current action, one status per item, and it
-leaves with that message when the answer arrives. **Accepted when a plan does
-not appear on a simple request and does appear on a large one.** Both live, and
-neither tried yet.
-
-Earlier the same day, before that: live acceptance failed twice, and a
-four-variant GPU measurement found the cause is **not ours and not `todo`**: the served
-vLLM's Gemma 4 tool parser intermittently loses whatever follows a long string
-argument, so `write_file` arrives with `content` and no `path`. vLLM 51284 and
-53431, open, present in 0.26.0 and 0.27.1. The nested schema wrote the file and
-inspected it twice; the *flat* variant failed; streaming made no difference.
-`todo_write` stays as it is. What is still unanswered is 4.4's own acceptance —
-whether an unfinished plan holds a turn open — because in every successful run
-the model closed its list by itself. The open decision is which compatibility
-fix to make, not whether to keep the tool.
-`reports/2026-08-31_v2_todo_live_failure.md`. 4.3 and 4.3.5 were both
-closed on 2026-08-30 with one thing deliberately not settled, recorded below
-and moved into its own queue item: **proportional validation is demonstrated
-but not dependable.** The first live session after the workspace path left the
-prompt inspected the artifact before answering, both times, unprompted; the
-scenario runner on the same prompt does not. And having inspected a different
-page the assistant invented details of a source it never read. Closing them is
-a scope decision, not a claim: the remaining
-lever inside those two steps was the wording of a prompt, three rounds of which
-produced better and worse in turn, while the real levers — a source-plus-render
-observation, and a production source of steering — belong to later steps. 4.4
-is where the stopping seam finally gets something to say no with.
-`reports/2026-08-30_v2_prompt_scenario_baseline.md`,
-`reports/2026-08-30_v2_prompt_assembly.md`. 4.2, tool execution seam, remains
-deployed and accepted live, including the correction for narrated tool calls
-becoming a second Telegram answer. An article pushed at the bot produced seven turns up to
-28,113 tokens, with a single request of 15,699 against an old budget of 9,830,
-and no fold was needed. One defect found in the same session — a Telegram rate
-limit discarding a finished answer — is fixed, tested and deployed. The edit
-frequency that provoked the limit remains queued separately.
-`reports/2026-08-30_v2_context_capacity.md`,
-`reports/2026-08-30_v2_context_memory_plan.md`.
+Everything before 4.4 is closed and accepted live: one loop, real context
+capacity at 65,536, the tool execution seam, turn stopping, and prompt assembly
+with a per-person `AGENTS.md` overlay. Each entry below carries its evidence.
+Observed defects are in `ISSUES.md`, which is not a plan and authorizes nothing.
 
 **Corrected and accepted 2026-08-29 after live tests.** `assistant-control` v14's
 automatic delivery of media returned by any tool was rejected product behaviour.
@@ -138,87 +80,63 @@ Verified platform facts and cold-start evidence remain in
 
 ### Done
 
+Evidence lives in the linked reports; these lines say what exists, not how it
+was built.
+
 - **Persistence contract** — `ConversationStore`, `SqliteStore`, per-owner
-  scoping, one contract suite over every implementation, a `user_version`
-  migration. `reports/2026-08-27_v2_step1_store_contract.md`.
+  scoping, one contract suite over every implementation, `user_version`
+  migrations. `reports/2026-08-27_v2_step1_store_contract.md`.
 - **Telegram adapter** — derived identity, allow list empty by default,
-  transport isolated in `run.py`; conversational and work acceptance both passed
-  live. `reports/2026-08-28_v2_step2_telegram_adapter.md`,
+  transport isolated. `reports/2026-08-28_v2_step2_telegram_adapter.md`,
   `reports/2026-08-28_v2_step3b_telegram_live_acceptance.md`,
   `reports/2026-08-28_v2_telegram_voice_and_media_budget.md`.
-- **First model endpoint** — Gemma 4 12B on an A10 through vLLM, 189-201 s from
-  idle. `reports/2026-08-28_v2_step3a_model_endpoint.md`.
-- **Optimized endpoint** — CPU and GPU snapshots, scale to zero, restored cold
-  start 10.4 s, unauthorized callers refused at the edge.
+- **Model endpoint, then optimized** — Gemma 4 12B on an A10 through vLLM;
+  snapshots, scale to zero, 10.4 s restored cold start, callers refused at the
+  edge. `reports/2026-08-28_v2_step3a_model_endpoint.md`,
   `reports/2026-08-28_v2_step3b_restored_cold_start.md`,
   `reports/2026-08-28_v2_step3b_edge_auth_refusal.md`,
   `reports/2026-08-28_v2_step3b_snapshot_boot.md`,
   `reports/2026-08-28_v2_step3b_first_boot_failure.md`.
-- **Capability honesty and Telegram shape** — the assistant describes itself
-  from its own wiring, `/can` answers without a model call, `/check` tries each
-  capability where the agent runs, and the plan and result have a readable form.
+- **Capability honesty** — the assistant describes itself from its own wiring;
+  `/can` answers without a model call, `/check` tries each capability.
   `reports/2026-08-28_v2_capability_honesty_and_telegram_shape.md`.
-- **Control plane, accepted live.** A real Telegram message goes webhook →
-  checked secret and allow list → Neon inbox → spawned CPU worker → the same
-  harness → GPU wake → reply, with nothing on the human's machine. Polling
-  retired. `PostgresStore` is the second `ConversationStore` and joins the
-  contract suite only when `AGENT_TEST_DATABASE_URL` is set.
-  `reports/2026-08-28_v2_control_plane_postgres_store.md`,
-  `reports/2026-08-28_v2_control_plane_offline_foundation.md`,
-  `reports/2026-08-28_v2_control_plane_cpu_adapter.md`,
-  `reports/2026-08-28_v2_control_plane_neon_live.md`,
-  `reports/2026-08-28_v2_control_plane_live_acceptance.md`.
-- **Database latency gate withdrawn.** Placement stays unpinned and current
-  delays are accepted; the probe stays an instrument, not acceptance.
-  `DECISIONS.md` 2026-08-28,
+- **Control plane, accepted live** — webhook, checked secret and allow list,
+  Neon inbox, spawned CPU worker, the harness, GPU wake, reply, with nothing on
+  the human's machine. Polling retired; `PostgresStore` joins the contract suite
+  under `AGENT_TEST_DATABASE_URL`. Five reports,
+  `reports/2026-08-28_v2_control_plane_*.md`.
+- **Database latency gate withdrawn** — placement stays unpinned, the probe is
+  an instrument and not acceptance. `DECISIONS.md` 2026-08-28,
   `reports/2026-08-28_v2_control_plane_database_latency_probe.md`.
-- **Cold start reduced.** The agent stack is off the webhook's import path, a
-  memory snapshot was tried and reverted, the worker's cold start is measured,
-  and the webhook now starts the model waking for updates that need one — a cold
-  first message about 9.2 s against 14.4 s, unconfirmed live. Telegram's typing
-  indicator runs for any turn that reaches the model.
+- **Cold start reduced** — the agent stack is off the webhook's import path and
+  the webhook starts the model waking for updates that need one; about 9.2 s
+  against 14.4 s, unconfirmed live. A memory snapshot was tried and reverted.
   `reports/2026-08-29_v2_control_plane_cold_start.md`.
-- **1. Baseline capabilities, accepted live.** The deployed assistant has a
-  persistent per-user workspace, filesystem tools, document text and visual
-  reading, an isolated browser, web search/fetch/view, and agent-controlled file
-  delivery. In the final live web scenario the model chose `view_web_page`,
-  inspected the returned page and screenshot, chose `send_file`, delivered the
-  PNG and described what it saw. This also exercised the deployed shared
-  Chromium cleanup correction; another synthetic `/check` was not required to
-  close the product capability.
+- **1. Baseline capabilities, accepted live** — persistent per-user workspace,
+  filesystem tools, document text and visual reading, isolated browser, web
+  search/fetch/view, agent-controlled file delivery. The closing live scenario
+  chose `view_web_page`, inspected page and screenshot, then delivered a PNG and
+  described it.
   `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`,
   `reports/2026-08-29_v2_web_capability.md`.
-- **2. Baseline chat product, accepted live.** Onboarding, Telegram Markdown with
-  a plain fallback, transient English tool activity and truthful inline
-  settlement were confirmed in the real chat. Conversation selection then
-  replaced "the newest thread is the open one" with a stored choice: `/new`,
-  `/chats`, and ownership verified where the choice is written. It was deployed
-  with an additive schema-2 migration that left the existing conversations in
-  place, and accepted live — a conversation nearly seven hours behind the newest
-  was chosen at 04:53:51 and the next message landed in it at 04:54:40, where the
-  old rule would have sent it elsewhere. Real answer streaming was carved out and
-  stays in the queue.
+- **2. Baseline chat product, accepted live** — onboarding, Telegram Markdown
+  with a plain fallback, transient English tool activity, truthful inline
+  settlement. Conversation selection became a stored choice (`/new`, `/chats`)
+  behind an additive schema-2 migration, accepted live.
   `reports/2026-08-29_v2_baseline_chat_product_offline.md`,
   `reports/2026-08-29_v2_conversation_selection.md`.
-- **2. Real answer streaming, accepted live.** The model call streams through
+- **2. Real answer streaming, accepted live** — the model call streams through
   the graph, so tool calls, usage, finish reason and persistence are the ones
-  the turn always had; the runtime reports deltas and finished messages as
-  separate events; Telegram shows one message being written and finalizes it in
-  place. Only finished messages are stored, and `AGENT_STREAM_ANSWERS` turns it
-  off in configuration. The same session exposed an unrelated task-route defect:
-  a plan whose validation step named no capability ended the task. Fixed and
-  deployed, not yet exercised live.
+  the turn always had; only finished messages are stored, and
+  `AGENT_STREAM_ANSWERS` turns it off.
   `reports/2026-08-29_v2_answer_streaming_preparation.md`,
   `reports/2026-08-29_v2_answer_streaming_implementation.md`.
-- **3. Baseline measurement, metrics and logs, closed.** A turn is one `run_id`
-  from ingress to delivery, with its stages, model calls, tool calls and paths
-  in `turn_runs`/`trace_events` and no message text. `tools/show_run.py` reads
-  one run, lists failed and unfinished ones, and reports the primary metric —
-  GPU active seconds per successful turn, derived and labelled as derived; over
-  the first six live turns, 21.2 s and $0.0065 a turn. A real autonomous task
-  was reconstructed from the trace without opening a Modal log. The engine
-  baseline is measured: decode 21-24 ms per output token, prefill dominant and
-  superlinear, prefix caching confirmed at 98% on a repeated prefix.
+- **3. Baseline measurement, metrics and logs, closed** — a turn is one `run_id`
+  from ingress to delivery, with no message text; `tools/show_run.py` reads one
+  run and reports GPU active seconds per successful turn, labelled as derived
+  (21.2 s and $0.0065 over the first six live turns). Engine baseline: decode
+  21-24 ms per output token, prefill dominant and superlinear, prefix caching
+  98% on a repeated prefix.
   `reports/2026-08-29_v2_turn_telemetry_implementation.md`,
   `reports/2026-08-29_v2_run_inspector_implementation.md`,
   `reports/2026-08-29_v2_gpu_baseline_measured.md`.
@@ -235,227 +153,107 @@ Verified platform facts and cold-start evidence remain in
    `reports/2026-08-30_v2_step4_harness_preparation.md`.
 
    - **4.0 Conversation serialization — done, accepted live.** The lease belongs
-     to the conversation and the worker drains it in order. Two messages 323 ms
-     apart were answered in order, the second claimed a tenth of a second after
-     the first finished. Coalescing an image and the question after it is held
-     back — it redefines the turn every recorded number counts.
+     to the conversation and the worker drains it in order; two messages 323 ms
+     apart were answered in order. Coalescing an image and the question after it
+     is held back — it redefines the turn every recorded number counts.
      `reports/2026-08-30_v2_conversation_serialization.md`.
    - **4.1 One loop — done, accepted live.** The router and the
      plan/implement/test/evaluate lifecycle are deleted, about 1,730 lines, and
-     an ordinary message costs one model call where it used to cost two. The
-     surviving loop has a `TurnBudget` (steps, tool calls, seconds), `loop_step`
-     events the run inspector renders, and a step number in the chat's status.
-     A control signal travels out of band in both profiles and the loop reads a
-     stop at each step boundary. Live in the deployed bot: `route loop`
-     everywhere, `plan.txt` written and read back with no plan to approve, and a
-     stop that ended a running turn at its next step with no model call spent.
-     The `browser_verifier` and `web_verifier` modules went with the lifecycle;
-     they were already unreachable, and 4.3 decides what validation the one loop
-     does. `reports/2026-08-30_v2_one_loop.md`, `DECISIONS.md` 2026-08-30.
-
-     The live check also found and closed a blocking defect: a consent button
-     pressed after Telegram expired its callback query failed the whole turn,
-     and after 4.0 a failed update is claimed ahead of every later message of
-     that conversation for ever. The acknowledgement can no longer fail a turn,
-     and the queue gives up on an update after three attempts.
-
-   - **4.1.5 Real context capacity — done, accepted live.** The effective limit
-     at the start of this step was 9,830 tokens — 16,384 spent at
-     `AGENT_CONTEXT_FRACTION` 0.6 — and one loop can now spend many steps inside
-     a single turn. The step raised the engine ceiling to **65,536**, kept one
-     threshold rather than two, moved context-pressure measurement ahead of
-     every model call, and made the request budget per-user in mechanism without
-     exposing a choice yet. It deliberately did not implement the context
-     engine: no pruning, summarizer schema or new tables. It came before 4.2
-     because 4.2 increases how many tool results a turn accumulates.
-     `DECISIONS.md` 2026-08-30, both entries of that date on context;
-     `reports/2026-08-30_v2_context_memory_plan.md` for the KV arithmetic.
-
-     **The boot ran on 2026-08-30 and the ceiling is live at 65,536.** It cost
-     299.7 s to first serving, text, image and audio all answered on the new
-     revision, and the NCCL loopback rendezvous owed since 2026-08-28 went in
-     with it and silenced the warning storm. `GPU_MEMORY_UTILIZATION` stayed
-     0.80 and there is no KV-cache quantization; `max_inputs` went from 32 to 8.
-     Measured: 11.13 GiB of KV pool, 256,669 tokens, 3.92x concurrency at full
-     length — about three times the room predicted, because KV per token is not
-     constant across ceilings for this model. That refutes the "128k is
-     unreachable on an A10" reasoning recorded earlier the same day.
-
-     The application side is implemented and green offline: the request about to
-     be sent is estimated before every model step and an over-budget
-     conversation folds before it is sent, the estimate lives behind the model
-     boundary and calibrates itself from reported token counts, and the budget
-     takes a chosen `AGENT_CONTEXT_TOKENS` clamped to the server's limit ahead
-     of the fraction. Deployed and accepted live the same day: an article
-     pushed at the bot produced seven turns, the largest single request 15,699
-     tokens against an old budget of 9,830, and **no fold was needed** — the
-     article stayed in context whole instead of being summarized away.
-     `reports/2026-08-30_v2_context_capacity.md`.
-
-     The approved everyday default is now `AGENT_CONTEXT_FRACTION=0.8`, which
-     gives a 52,428-token request budget at the live 65,536-token ceiling. The
-     repository default and `env.example` were updated and the control plane was
-     deployed with that default on 2026-08-30.
-
-     The acceptance found a delivery defect and it is fixed here: a Telegram
-     `429` discarded a finished 770-token answer, and because a failed delivery
-     fails the turn, the retry would have re-run both model calls rather than
-     re-sending what it already had. `retry_after` is now waited out, bounded,
-     and the fix is deployed.
-     Not fixed, and queued below: the edit frequency that provoked the limit.
-   - **4.2 Tool execution seam — done, accepted live.**
-     One `pre_execute → execute → post_execute`
-     path for every tool, holding consent policy, validation and telemetry.
-     Workspace mutation and explicit `send_file` presentation back to the same
-     person are autonomous; third-party, publication, spending and
-     infrastructure effects remain gated. A future sandbox plugs in as another
-     execution backend without changing that policy: its commands do not ask
-     one by one after the separately gated worker has started. `DECISIONS.md`
-     2026-08-30. Live write/edit/read runs each had one update, one run and one
-     final Telegram delivery after the narrated-tool correction.
-     `reports/2026-08-30_v2_tool_execution_seam.md`.
+     an ordinary message costs one model call where it cost two. The survivor
+     has a `TurnBudget`, `loop_step` events and an out-of-band stop read at each
+     step boundary. A blocking defect closed with it: an expired callback query
+     could fail a whole turn, and after 4.0 that blocked the conversation for
+     ever. `reports/2026-08-30_v2_one_loop.md`, `DECISIONS.md` 2026-08-30.
+   - **4.1.5 Real context capacity — done, accepted live.** The ceiling went
+     from 16,384 to **65,536** at 0.80 utilization with no KV quantization,
+     measured at 11.13 GiB of KV pool and 3.92x concurrency — about three times
+     the room predicted. The request is estimated before every model step and
+     folds only when over budget; the everyday default is
+     `AGENT_CONTEXT_FRACTION=0.8`, a 52,428-token budget. Live: seven turns, the
+     largest request 15,699 tokens against an old budget of 9,830, no fold
+     needed. A Telegram `429` discarding a finished answer was fixed here; the
+     edit frequency that provoked it is queued below.
+     `reports/2026-08-30_v2_context_capacity.md`,
+     `reports/2026-08-30_v2_context_memory_plan.md`, `DECISIONS.md` 2026-08-30.
+   - **4.2 Tool execution seam — done, accepted live.** One
+     `pre_execute -> execute -> post_execute` path for every tool, holding
+     consent policy, validation and telemetry. Workspace mutation and explicit
+     `send_file` back to the same person are autonomous; third-party,
+     publication, spending and infrastructure effects stay gated, and a future
+     sandbox plugs in as another backend without changing that.
+     `reports/2026-08-30_v2_tool_execution_seam.md`, `DECISIONS.md` 2026-08-30.
    - **4.3 Turn stopping — done, deployed. Proportional validation not
-     demonstrated.** A minimal extension seam instead of a mandatory
-     repair lifecycle: stop by default, and continue only through explicit
-     structured steering. A rejected streamed candidate is withdrawn from the
-     interface and is neither persisted nor delivered as a first answer. The
-     seam adds no validator, finish tool, heuristics or obligation state;
-     validation remains proportional and chosen by the model. Offline scenarios
-     cover a simple write with no validation pass, model-chosen `inspect_page`
-     for HTML, tool-failure recovery, the normal stop, explicit steering and
-     Telegram preview withdrawal. Live HTML runs preserved one final answer and
-     proved that write, inspect and explicit presentation work, but the model
-     asked permission before safe inspection. PDF creation is not acceptance
-     until the sandbox exists.
-
-     **What the seam does is done; what it was hoped to cause is inconsistent.**
-     In the first live session after the workspace path left the prompt, both
-     artifact turns called `inspect_page` between writing the file and
-     answering — the model's own trajectory, no steering, no validator. The
-     scenario runner's `castle`, on the same prompt, still does not. So it is
-     demonstrated, not dependable, and there is no production source of
-     steering — by design, since a validator was refused and `todo` is meant to
-     be that source. Closed
-     rather than kept open because the only lever left inside this step was
-     prompt wording, and three rounds of that produced better and worse in
-     turn. The behaviour is now one queue item below, after 4.4.
+     dependable.** A minimal extension seam instead of a mandatory repair
+     lifecycle: stop by default, continue only through explicit structured
+     steering, and withdraw a rejected streamed candidate from the interface. No
+     validator, finish tool or obligation state. Live, the model inspected its
+     artifact unprompted in both turns while the scenario runner on the same
+     prompt does not — demonstrated, not dependable. Closed because the only
+     lever left inside the step was prompt wording.
      `reports/2026-08-30_v2_turn_stopping.md`,
      `reports/2026-08-30_v2_prompt_assembly.md`.
    - **4.3.5 Prompt assembly and user instructions — done, measured live,
-     deployed.** The system prompt is an assembled layer instead of one
-     hand-written paragraph: a small stable
-     core that names no tool, capability-owned guidance generated from the
-     wired toolbox, the tool schemas, then the person's own standing
-     instructions. Order is fixed by how stable each layer is, so the prefix
-     cache is not invalidated by the layer above it; the caching win itself is
-     measured in 4.6a. `AGENTS.md` is one file per person at the root of their
-     workspace, editable with the ordinary workspace tools and through a thin
-     `/agents` command that writes the same file. It is a prompt overlay of
-     lower authority than product and capability policy, never memory: nothing
-     extracts it from conversation and `remember_fact` never writes to it. It
-     takes effect on the next turn without a redeploy. No memory redesign,
-     fact extraction, project hierarchy or second store.
-     `docs/v2_4_3_prompt_assembly_agents_handoff.md`.
+     deployed.** The system prompt is assembled in order of stability so the
+     prefix cache survives: a stable core naming no tool, capability guidance
+     generated from the wired toolbox, the schemas, then the person's own
+     `AGENTS.md` — one file at the root of their workspace, editable with the
+     ordinary tools or `/agent`, a prompt overlay of lower authority than
+     product policy and never memory. It takes effect on the next turn without
+     a redeploy. The scenario runner is the instrument for anything later that
+     changes how the agent decides; every run is a product-runtime worker and
+     its own gate. Corrected the same day: `/agent` singular, and the workspace
+     path removed from the guidance because naming it taught the model to build
+     paths. `reports/2026-08-30_v2_prompt_assembly.md`,
+     `docs/v2_4_3_prompt_assembly_agents_handoff.md`, `DECISIONS.md` 2026-08-30.
+   - **4.4 `todo` as agent state, not a mode — closed 2026-08-31 with known
+     problems, not with acceptance.** Scope is the state of **one unfinished
+     turn**: it survives compaction, an interrupt and a restarted worker, and is
+     gone from the next thing the person asks. That lifetime already existed —
+     the plan is the arguments of the last accepted `todo_write`, living in the
+     turn's checkpointed messages and cleared by the `extend` reducer — so there
+     is no store table and no schema 3. `app/agent/todo.py` is the first
+     production extension in the 4.3 seam, capped at one objection per turn. An
+     agent that writes no plan meets none of it, so an ordinary answer still
+     costs one model call. The plan is shown to the person inside the transient
+     Telegram status message and leaves with it.
 
-     A scenario runner is the instrument for this step and for anything later
-     that changes how the agent decides: fixed natural requests through the
-     same agent the bot uses,
-     recording tools called, model calls, tokens, seconds and the full answer
-     against a named prompt variant, so two variants are compared in one warm
-     window. Judgement stays human; nothing asserts on wording. It is not part
-     of the offline suite, and every run is a product-runtime worker and its
-     own human gate.
+     **What is honestly not settled**, and why this is closed rather than
+     accepted:
 
-     Deployed to `assistant-control` and the command menu republished with
-     `/agents` on 2026-08-30. Measured live: the file now gets written where it
-     was not, an ordinary answer still costs one model call and no tool, and
-     `note` got a model call cheaper because the workspace no longer has to be
-     looked for. The overlay demonstrably reaches the model and is partly
-     obeyed — a small model matched the question's language over a standing
-     instruction to answer in another. `reports/2026-08-30_v2_prompt_assembly.md`,
-     `DECISIONS.md` 2026-08-30.
+     - **No live turn has ever finished with a plan.** Two turns opened one and
+       both died on a defect of ours; after that defect was fixed the plan
+       stopped appearing on the same requests. A plan and finished work have
+       never been observed together.
+     - **The stopping extension has never refused anything that mattered.** It
+       fired twice live and both times the model discharged it by closing its
+       list rather than by doing more work.
+     - **The threshold is unstable.** Wording moved the behaviour from almost
+       always planning, to never, to twice, to never again, across four deploys
+       in one day. Two runs either side of a change is not a measurement.
+     - **A closed item is not a done item.** One run marked verification
+       complete without verifying and answered as if it had, which is ISS-0004
+       wearing a plan.
+     - **The grain of the plan is unmeasured.** Items mirrored tool calls; the
+       tool now asks for milestones instead, and no live turn has tested that.
 
-     Corrected the same day after the first real use. `/agent`, the singular a
-     person actually types, missed the command and went to the model as
-     ordinary text, so instructions were never saved and the reply read like
-     success; both spellings are now the same command, `set` is an optional
-     word it strips rather than acts on, and only `clear` is a keyword. The
-     workspace path was removed from the guidance: naming it taught the model
-     to build paths, and in the deployed profile that path is the volume's
-     internal one, which cost a refused `write_file` and a local path handed to
-     a web tool. Measured without it — same shape on all nine scenarios, every
-     call by plain name, and the run $0.0726 against $0.0794.
-   - **4.4 `todo` as agent state, not a mode — implemented and tested offline,
-     live acceptance not yet run.** Scope narrowed by the human on 2026-08-31:
-     this is the state of **one unfinished turn**. It survives compaction, an
-     interrupt and a restarted worker, and it is gone from the next thing the
-     person asks; carrying a plan between finished turns is explicitly not
-     wanted, so no store table and no schema 3.
-
-     That lifetime already existed and did not have to be built. The plan is the
-     arguments of the model's own last accepted `todo_write` call, which live in
-     the turn's messages: checkpointed, and cleared by the `extend` reducer when
-     a user message starts a turn. `app/tools/todo.py` validates a whole list
-     and stores nothing; `current` folds the standing plan back out.
-
-     `app/agent/todo.py` is the first production extension in the 4.3 seam: an
-     open item refuses one ending, naming the items and offering the free way
-     out — update the list to say what actually happened. Capped at one
-     objection per turn, which needed `Candidate.steerings`, because a steered
-     draft is deliberately never appended to the turn's messages and an
-     extension could not otherwise count itself. An agent that wrote no plan
-     never meets any of this, so an ordinary answer still costs one model call.
-
-     **Both live turns failed; a measurement then exonerated the tool.**
-     Deployed the same day, a multi-step request ran 264 s and ten model calls
-     and produced nothing. The model had two things to do in one step — write
-     the file and update the plan — and what arrived was one `write_file` call
-     holding both tools' fields, with `path` gone. The mangled keys are
-     fragments of an array of objects, cut where nesting and quoting begin, and
-     carry a `<|"|>` token: a quote encoded and never decoded. `todos` is the
-     only argument in this project with that shape.
-
-     Three fixes were made and deployed. The assembler now tells streamed calls
-     apart by id and name as well as position — a real defect, tested, and **not
-     this one**: the second live turn reproduced the corruption byte for byte
-     after it shipped. An argument error now carries the tool's signature; the
-     model read it five times without recovering. And a call that has failed
-     twice identically is refused a third attempt, which is **proven live** —
-     151 s and an honest answer instead of 264 s and a `/stop`.
-
-     What the second turn told the person is the worst part: it claimed a file
-     it had never created, and only `send_file` failing revealed it.
-
-     One GPU run, four variants of the same request, settled the attribution.
-     Nested schema with streaming and without it: the file written, inspected,
-     the plan kept, seven model calls. **Flat schema: failed the same way as
-     live.** No planning tool: succeeded in three calls. So neither nesting nor
-     streaming nor the planning tool is the cause — the served parser loses what
-     follows a long string argument, intermittently, which is vLLM 51284's
-     described behaviour and matches the undecoded `<|"|>` in our own evidence.
-     A plan's measured price is 7 model calls against 3. 4.4 is **not accepted**:
-     its own question is untested, because every successful variant closed its
-     list unprompted. `reports/2026-08-31_v2_todo_live_failure.md`.
-
-     Reference read directly, not from the plan document:
-     `deepseek-ai/deepseek-harness`, `packages/todo/tool-todo`. Whole-list
-     replacement, no item identity, three statuses, at most one active as a
-     deployment policy rather than a stored rule, and the same lifetime rule —
-     their standing plan clears on the next `turn/start`, not on `turn/end`, so
-     the finished checklist stays readable while the person reads the answer.
-   - **The plan is invisible to the person.** `todo_write` lives in the
-     arguments of a tool call: not in the chat, not readable, not correctable.
-     The interface says only `Planning…`. A plan nobody can see is a plan
-     nobody can steer, and the reference harness renders it as a standing panel
-     for exactly that reason. Measured cost alongside it: seven model calls
-     against three without a plan, on work whose plan was one item.
-     `reports/2026-08-31_v2_todo_live_failure.md`.
+     `reports/2026-08-31_v2_todo_live_failure.md`, `ISSUES.md` ISS-0004 to
+     ISS-0009.
+   - **Finish the `todo` tool.** What 4.4 left, and the next thing to approve:
+     get one live turn where a plan and the work finish together, on a fresh
+     conversation so the model is not copying its own previous turn; separate
+     the two jobs one line of wording now does at once — when a list is worth
+     opening, and how coarse its items should be; and test the stopping
+     extension against a turn that ends with an item the model does not want to
+     close. Blocked on nothing.
+   - **The plan is invisible outside the running turn.** It is shown while the
+     work happens and deleted with the status, by choice. What is not solved is
+     correcting one: the person can read a plan and cannot change it.
    - **Nothing constrains what the model emits.** Tool schemas are advice: the
      served model does not use guided decoding for tool calls, so "do not wrap
      file content in a markdown fence" is enforced by wording alone. One fence
-     cost three failed live turns. Constrained decoding on the served model
-     would end the class; it is a model App redeploy and its own gate, and
-     `tools/gemma4_parser.py` holds the tested alternative.
+     cost three failed live turns. Constrained decoding would end the class; it
+     is a model App redeploy and its own gate, and `tools/gemma4_parser.py`
+     holds the tested alternative. `ISSUES.md` ISS-0001.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
    - **4.5.5 Saying only what was observed.** One product question with two
      measured faces: the assistant makes an artifact and describes how it looks
