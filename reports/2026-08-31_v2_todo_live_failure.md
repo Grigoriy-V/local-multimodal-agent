@@ -1,11 +1,14 @@
-# Version 2 step 4.4 — the first live turn, and the bug it exposed
+# Version 2 step 4.4 — the first live turns, and what they cost
 
 **Date:** 2026-08-31
 **Agent:** Claude, direct session
-**Status:** diagnosed from the deployed trace and the stored conversation;
-three fixes implemented and tested offline. Not deployed, not measured live.
+**Status:** two live turns, both failed, both read from the deployed trace and
+the stored conversation. Three fixes implemented, tested and deployed; one of
+them is proven live, one is untested, and **the cause of the failure is still
+upstream of this repository.** `todo_write` is deployed and currently breaks
+file writing.
 
-## What happened
+## The first turn
 
 `assistant-control` was deployed with `todo_write` at 23:36. The first live
 request was *«Создай html с игрой змейка, Назови Снейк_Гейм, проверь что
@@ -23,10 +26,10 @@ budget would have.
 `duration_ms: 0` and no `path` in the trace: these never reached the filesystem.
 They failed argument validation.
 
-## The cause
+## What the arguments were
 
-The stored conversation has the arguments the trace does not. The **first**
-`write_file` call was this:
+The stored conversation has what the trace does not. The **first** `write_file`
+call was this, and it was identical in both turns:
 
 ```json
 {"content": "<!DOCTYPE html>\n<html lang=\"ru\">…",
@@ -34,60 +37,97 @@ The stored conversation has the arguments the trace does not. The **first**
  "},{content": "Inspect the game to ensure it works.", "status": "pending"}
 ```
 
-That is a `write_file` call and a `todo_write` list **run together into one
-object**. The model had emitted two tool calls — write the file, and mark the
-first item done — and they arrived as one call whose name was the first tool's,
-whose arguments were both, and in which `path` no longer existed.
+That is a `write_file` call and a `todo_write` list run together into one
+object. The model had two things to do in one step — write the file, and update
+the plan — and what arrived was one call, named for the first tool, holding both
+sets of fields, with `path` gone.
 
-`StreamedCompletion._fragment` assembled them. It keyed fragments by the
-server's `index` and treated a fragment without one as a continuation of the
-call in progress, which is documented and was believed safe: *"a server that
-omits it can only be describing the call already in progress"*. It cannot. A
-fragment that names a different tool, or carries a different id, is the next
-call. Concatenating its arguments onto the previous one usually produces invalid
-JSON and fails loudly — and sometimes, as here, produces a valid object that is
-a call the model never made.
+The keys are the evidence about where it broke: `},{content` and
+`…<|"|>,status` are fragments of **an array of objects**, cut at the places
+where nesting and quoting begin. `<|"|>` is not something a model types inside a
+JSON string; it is a quote that was encoded and never decoded. `todos` is this
+project's first and only argument with that shape.
 
-This is why it worked the day before with the same request. Nothing about the
-page changed. What changed is that the agent acquired a second tool worth
-calling in the same step as the first, so a turn with two tool calls in it went
-from rare to ordinary. `todo_write` did not cause the bug; it exposed one that
-had been there since answer streaming landed.
+The eight repeats afterwards carry no todo text at all — just
+`{"content": "<!DOCTYPE html>…"}`, over and over, each one regenerating the
+whole page. `path` never reappears, which is consistent with the arguments being
+truncated after the long `content` string rather than with the model forgetting
+it.
 
-The eight repeats afterwards are the model's own: each attempt regenerated the
-whole page, was told `missing required argument(s): path`, and tried again.
+## A wrong diagnosis, corrected
 
-## Three fixes
+The first version of this report said `StreamedCompletion._fragment` caused it,
+by treating a fragment without an `index` as a continuation of the call in
+progress. That was wrong. It is a real defect and it is fixed and tested — a
+server that opens a second call without a fresh index used to have its arguments
+appended to the first — but it is not what happened here. **The second live turn,
+after the fix was deployed, produced a byte-identical corruption.**
 
-**The assembler tells calls apart by identity, not only by position.** A
-fragment carrying a different name or a different id opens a new call, at the
-next free position, whatever index the server gave it. A server that echoes the
-same id and name on every fragment is still one call, which is the other real
-shape and is now tested.
+So the damage happens before anything in this repository sees it: in the
+model's own emission, or in the server's tool-call parser, or in the pair. This
+report does not claim which, because nothing measured here can tell them apart.
 
-**A rejected call is told the shape it should have had.** The error was
-accurate and useless: it named what was missing beside a schema the model was
-plainly no longer reading. It now ends with `write_file takes: path (string),
-content (string)`. A few tokens, at the moment they are the only thing being
-read.
+## What the three fixes actually did
 
-**The loop stops paying for a call that keeps failing identically.** Two
-attempts are a retry; a third attempt at a call that has already failed twice
-with the same arguments is a loop. It is refused before it runs, the turn stops
-offering tools, and the model is asked once more for the answer the person is
-owed — the same path a spent budget takes, with its own reason: *the same call
-kept failing in the same way*. Identity is name plus arguments, and only
-failures count, so writing the same file twice is unaffected.
+**The assembler tells calls apart by identity, not only by position.** Correct,
+tested, and aimed at the wrong layer for this failure. It stays.
 
-Offline: **856 passed, 27 skipped**, 10 of them new in
-`tests/test_repeated_failure.py`.
+**A rejected call is told the shape it should have had.** The error now ends
+with `write_file takes: path (string), content (string)`. Live, the model read
+it five times and never added `path`. Not proven useless — the argument is
+plausibly being cut off before `path` can survive — but it did not rescue this
+turn.
 
-## What this does not settle
+**A call that has failed twice identically is refused a third attempt.**
+Proven live. `turn_repeating` fired at 00:15:10 with `attempts: 2`, the turn
+stopped offering tools, and the model was asked once for the answer the person
+was owed. **151 seconds instead of 264, and an answer instead of a `/stop`.**
 
-Whether the model emits two calls in one step *more often* because of
-`todo_write`, and whether that is good, is unmeasured. The scenario runner's
-`plan` scenario is where that gets looked at, and it needs a GPU run.
+## What the second turn ended up telling the person
 
-The 264 seconds were bounded only by a person. With the repeat rule the same
-turn would have ended after three attempts, roughly 80 seconds, with an answer
-saying what failed.
+Worse than the first, and this is the part that matters most:
+
+```text
+"Я создал файл Снейк_Гейм.html с игрой «Змейка». К сожалению, из-за
+ технической ошибки … не могу выполнить автоматическую визуальную проверку"
+```
+
+The file was never created. Asked for it afterwards, `send_file` failed with
+`path 'Снейк_Гейм.html' is not a file`. So the assistant asserted an artifact
+that does not exist, and only the person asking for it revealed that. This is
+the 4.5.5 failure — saying what was not observed — reached from a new direction:
+not describing an unseen artifact, but describing an unmade one.
+
+`inspect_page` was never called, for three reasons worth separating: there was
+no file to open; the last model call was offered no tools at all, by the repeat
+rule; and the plan item that said to inspect it was one of the fields eaten by
+the corrupted call, so it never reached the stored list. The stopping extension
+was not asked either — a turn already ending on a harder reason is not asked
+whether it would like to keep going.
+
+## Where this leaves 4.4
+
+`todo_write` is deployed and, on the evidence of two turns, makes a multi-step
+request fail. It did not break the parser; a second tool worth calling in the
+same step as `write_file` is what makes the fragile path ordinary.
+
+Two options, neither taken yet:
+
+- **Unwire it** from the granted toolbox and redeploy. Restores file writing
+  immediately; leaves 4.4 unaccepted.
+- **Flatten the schema** so nothing nests — a checklist as one string, or an
+  array of strings — and measure. A deliberate departure from the reference,
+  whose whole-list-of-objects shape is fine on a different server and a
+  different model.
+
+Either way the measurement is the same scenario run: the same request with the
+nested schema, with a flat one, and with no planning tool at all. It needs a
+GPU and is its own permission.
+
+## Ledger
+
+Offline after the fixes: **856 passed, 27 skipped**, ten new in
+`tests/test_repeated_failure.py`. Two deploys of `assistant-control` (19.560 s
+and 34.873 s), control plane only, no model App and no GPU worker started by
+either. The two failed turns cost roughly 415 seconds of A10 time between them.
+Commits `24f7057`, `17f81ea`.

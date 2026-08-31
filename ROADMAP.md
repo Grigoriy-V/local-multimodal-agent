@@ -5,8 +5,14 @@
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** 4.4, `todo` as agent state — code, tests and
-documents done on 2026-08-31; **live acceptance is the open half**, and it needs
-one GPU scenario run, which is its own permission. 4.3 and 4.3.5 were both
+documents done on 2026-08-31, and **live acceptance failed twice.** With
+`todo_write` deployed, a request that takes several steps produces one
+`write_file` call carrying another tool's fields and no `path`, so the file is
+never written and the assistant says it was. The corruption arrives already
+formed, before anything here reads it. Nothing is decided: the choice is to
+unwire the tool or to flatten its schema, and either way the next thing needed
+is one GPU scenario run, which is its own permission.
+`reports/2026-08-31_v2_todo_live_failure.md`. 4.3 and 4.3.5 were both
 closed on 2026-08-30 with one thing deliberately not settled, recorded below
 and moved into its own queue item: **proportional validation is demonstrated
 but not dependable.** The first live session after the workspace path left the
@@ -363,18 +369,28 @@ Verified platform facts and cold-start evidence remain in
      extension could not otherwise count itself. An agent that wrote no plan
      never meets any of this, so an ordinary answer still costs one model call.
 
-     **The first live turn failed, and found an older bug.** Deployed the same
-     day, the first multi-step request ran 264 s and ten model calls and
-     produced nothing. The model emitted `write_file` and a `todo_write` update
-     in one step; `StreamedCompletion` assembled the two into one call, because
-     it treated a fragment without an `index` as a continuation. `path`
-     disappeared into the merged object, and the call was retried eight times.
-     `todo_write` did not cause it — it made a two-call step ordinary, which
-     answer streaming had never been correct about. Fixed three ways: the
-     assembler tells calls apart by id and name as well as position; a rejected
-     call is told the signature it should have had; and a call that has failed
-     twice identically is refused a third attempt, ending the turn the way a
-     spent budget does. Not yet deployed or measured live.
+     **Both live turns failed, and the cause is not in this repository.**
+     Deployed the same day, a multi-step request ran 264 s and ten model calls
+     and produced nothing. The model had two things to do in one step — write
+     the file and update the plan — and what arrived was one `write_file` call
+     holding both tools' fields, with `path` gone. The mangled keys are
+     fragments of an array of objects, cut where nesting and quoting begin, and
+     carry a `<|"|>` token: a quote encoded and never decoded. `todos` is the
+     only argument in this project with that shape.
+
+     Three fixes were made and deployed. The assembler now tells streamed calls
+     apart by id and name as well as position — a real defect, tested, and **not
+     this one**: the second live turn reproduced the corruption byte for byte
+     after it shipped. An argument error now carries the tool's signature; the
+     model read it five times without recovering. And a call that has failed
+     twice identically is refused a third attempt, which is **proven live** —
+     151 s and an honest answer instead of 264 s and a `/stop`.
+
+     What the second turn told the person is the worst part: it claimed a file
+     it had never created, and only `send_file` failing revealed it. 4.4 is
+     therefore **not accepted**, and `todo_write` currently breaks file writing
+     in the deployed bot. Two options, neither chosen: unwire it, or flatten the
+     schema so nothing nests and measure. Both need the same GPU scenario run.
      `reports/2026-08-31_v2_todo_live_failure.md`.
 
      Reference read directly, not from the plan document:
