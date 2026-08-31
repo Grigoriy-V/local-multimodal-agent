@@ -1,15 +1,18 @@
-"""A tool call the server could not read, and the turn carrying on anyway.
+"""A tool call the served parser could not read, and what reaches the loop.
 
-The live failure of 2026-08-31: the model wrote a page that ended in a markdown
-fence, the served parser lost the string's closing delimiter, and what arrived
-was a `write_file` whose `content` ended in `,path:` and which had no `path` at
-all. Nothing reported an error. The model then repeated that call eight times,
-because its own malformed call was in the history it was reading.
+Measured live on 2026-08-31. The model wrote a page, ended it with a stray
+markdown fence, and the string's closing delimiter never arrived; the served
+parser read on to the next one, which was inside the *following* tool call. What
+came back was a `write_file` with no `path`, carrying fragments of a
+`todo_write` as argument names. Nothing reported an error.
 
-This is the client's answer: recognise it, throw the completion away before the
-loop or the conversation ever sees it, and ask once more without streaming.
+Two answers were tried. Asking again without streaming: measured, and the second
+answer was corrupt in the same way at twenty-five seconds a time, so there is no
+retry here. Cleaning the call before anyone sees it: kept, because it costs
+nothing and it keeps another call's text out of the history the model imitates —
+it copied its own malformed call three times over.
 
-No network — the transport is a stubbed `httpx` handler. No model, no GPU.
+No network: the transport is a stubbed `httpx` handler. No model, no GPU.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from app.models.openai_compatible import (
 from tests.fakes import user
 
 PAGE = "<!DOCTYPE html>\n<h1>Snake</h1>\n```"
+BLANK = "\n\n"
 
 
 def call(**arguments: object) -> ToolCall:
@@ -45,13 +49,11 @@ def test_an_ordinary_call_is_readable() -> None:
 
 
 def test_a_value_ending_in_a_missing_argument_name_is_the_signature() -> None:
-    why = unreadable(call(content=f"{PAGE},path:"))
-
-    assert "lost the argument 'path'" in why
+    assert "lost the argument 'path'" in unreadable(call(content=f"{PAGE},path:"))
 
 
 def test_a_name_that_cannot_be_a_parameter_name_is_the_other_signature() -> None:
-    """What the live call's later keys looked like: fragments of a value."""
+    """What the live call's later names were: fragments of another call."""
 
     why = unreadable(
         ToolCall(id="c", name="write_file", arguments={"},{content": "Inspect it."})
@@ -61,8 +63,6 @@ def test_a_name_that_cannot_be_a_parameter_name_is_the_other_signature() -> None
 
 
 def test_an_argument_that_is_present_is_not_reported_as_lost() -> None:
-    """Text that merely ends this way, with the argument really there."""
-
     assert unreadable(call(path="a.html", content="see ,path:")) == ""
 
 
@@ -78,29 +78,36 @@ def test_an_argument_that_is_present_is_not_reported_as_lost() -> None:
     ],
 )
 def test_only_one_specific_accident_is_recognised(value: str, expected: str) -> None:
-    """Narrow on purpose: this recognises an accident, it does not read text."""
+    """Narrow on purpose: it recognises an accident, it does not read text."""
 
     assert swallowed_name(value) == expected
 
 
-# --- repairing what is recoverable -------------------------------------------
+# --- taking out what is provably not the model's ------------------------------
 
 
 def test_the_value_gets_its_own_tail_back() -> None:
-    """`content` really did end at the page, and that much is certain."""
-
-    mended = repaired(call(content=f"{PAGE},path:"))
-
-    assert mended.arguments["content"] == PAGE
+    assert repaired(call(content=f"{PAGE},path:")).arguments["content"] == PAGE
 
 
 def test_the_lost_argument_is_not_invented() -> None:
-    """Its value went into the next name. Guessing a filename is not a repair."""
+    """Its value went into the next name, and a guessed filename is a file
+    written somewhere nobody asked for."""
 
     assert "path" not in repaired(call(content=f"{PAGE},path:")).arguments
 
 
-# --- and the turn carries on --------------------------------------------------
+def test_another_calls_fragments_are_dropped() -> None:
+    spoiled = ToolCall(
+        id="c",
+        name="write_file",
+        arguments={"content": PAGE, "},{content": "Inspect it.", "status": "pending"},
+    )
+
+    assert repaired(spoiled).arguments == {"content": PAGE, "status": "pending"}
+
+
+# --- and what reaches the loop ------------------------------------------------
 
 
 def backend(handler) -> OpenAICompatibleBackend:
@@ -134,30 +141,20 @@ def streamed_call(arguments: dict[str, object]) -> str:
         },
         {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
     ]
-    return "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+    body = "".join("data: " + json.dumps(chunk) + BLANK for chunk in chunks)
+    return body + "data: [DONE]" + BLANK
 
 
-def whole_call(arguments: dict[str, object]) -> dict[str, object]:
-    return {
-        "choices": [
-            {
-                "message": {
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": "c2",
-                            "function": {
-                                "name": "write_file",
-                                "arguments": json.dumps(arguments),
-                            },
-                        }
-                    ],
-                },
-                "finish_reason": "tool_calls",
-            }
-        ],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-    }
+def streaming(arguments: dict[str, object], seen: list[str]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(
+            200,
+            text=streamed_call(arguments),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    return handler
 
 
 async def drain(made: OpenAICompatibleBackend, messages):
@@ -165,85 +162,62 @@ async def drain(made: OpenAICompatibleBackend, messages):
     return [event for event in events if isinstance(event, CompletionDone)][-1].completion
 
 
-async def test_a_corrupt_streamed_call_is_asked_for_again() -> None:
+async def test_a_corrupt_call_is_asked_for_exactly_once() -> None:
+    """Asking again was measured and did not help, so it is not done."""
+
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        seen.append("stream" if body.get("stream") else "whole")
-        if body.get("stream"):
-            return httpx.Response(
-                200,
-                text=streamed_call({"content": f"{PAGE},path:"}),
-                headers={"content-type": "text/event-stream"},
-            )
-        return httpx.Response(200, json=whole_call({"path": "snake.html", "content": PAGE}))
-
-    finished = await drain(backend(handler), [user("write a page")])
-
-    # The second request was not streamed, and what the loop receives is the
-    # call the model meant to make.
-    assert seen == ["stream", "whole"]
-    assert finished.tool_calls[0].arguments == {"path": "snake.html", "content": PAGE}
-
-
-async def test_a_good_streamed_call_is_never_asked_for_twice() -> None:
-    seen: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.path)
-        return httpx.Response(
-            200,
-            text=streamed_call({"path": "snake.html", "content": PAGE}),
-            headers={"content-type": "text/event-stream"},
-        )
-
-    finished = await drain(backend(handler), [user("write a page")])
+    finished = await drain(
+        backend(streaming({"content": f"{PAGE},path:"}, seen)), [user("write a page")]
+    )
 
     assert len(seen) == 1
-    assert finished.tool_calls[0].arguments["path"] == "snake.html"
-
-
-async def test_a_second_corruption_is_repaired_and_delivered_rather_than_retried() -> None:
-    """One retry, not a loop. A tool error the model can read is the floor."""
-
-    seen: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        seen.append("stream" if body.get("stream") else "whole")
-        if body.get("stream"):
-            return httpx.Response(
-                200,
-                text=streamed_call({"content": f"{PAGE},path:"}),
-                headers={"content-type": "text/event-stream"},
-            )
-        return httpx.Response(200, json=whole_call({"content": f"{PAGE},path:"}))
-
-    finished = await drain(backend(handler), [user("write a page")])
-
-    assert seen == ["stream", "whole"]
     assert finished.tool_calls[0].arguments == {"content": PAGE}
 
 
-async def test_the_text_of_a_corrupt_completion_still_reached_the_reader() -> None:
-    """A preview already shown is not unsaid; only the tool call is replaced."""
+async def test_another_calls_fragments_never_reach_the_conversation() -> None:
+    """History the model reads is history the model imitates."""
+
+    seen: list[str] = []
+    corrupt = {
+        "content": PAGE,
+        "},{content": "Inspect the game to ensure it works.",
+        "status": "pending",
+    }
+
+    finished = await drain(backend(streaming(corrupt, seen)), [user("write a page")])
+
+    assert finished.tool_calls[0].arguments == {"content": PAGE, "status": "pending"}
+
+
+async def test_a_good_call_passes_through_untouched() -> None:
+    seen: list[str] = []
+    good = {"path": "snake.html", "content": PAGE}
+
+    finished = await drain(backend(streaming(good, seen)), [user("write a page")])
+
+    assert len(seen) == 1
+    assert finished.tool_calls[0].arguments == good
+
+
+async def test_the_text_already_shown_is_not_unsaid() -> None:
+    """A preview the person is reading is not withdrawn over a bad call."""
+
+    spoken = {"choices": [{"delta": {"content": "Writing it now."}}]}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        if body.get("stream"):
-            return httpx.Response(
-                200,
-                text=(
-                    'data: {"choices":[{"delta":{"content":"Writing it now."}}]}\n\n'
-                    + streamed_call({"content": f"{PAGE},path:"})
-                ),
-                headers={"content-type": "text/event-stream"},
-            )
-        return httpx.Response(200, json=whole_call({"path": "snake.html", "content": PAGE}))
+        return httpx.Response(
+            200,
+            text=(
+                "data: "
+                + json.dumps(spoken)
+                + BLANK
+                + streamed_call({"content": f"{PAGE},path:"})
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
 
-    made = backend(handler)
-    events = [event async for event in made.stream([user("write a page")])]
+    events = [event async for event in backend(handler).stream([user("write a page")])]
 
     assert [event.text for event in events if isinstance(event, TextDelta)] == [
         "Writing it now."

@@ -181,6 +181,25 @@ STRING_DELIM = '<|"|>'
 _IMPOSSIBLE_IN_A_NAME = ("{", "}", "[", "]", "\n", "\t", STRING_DELIM)
 
 
+def readable(completion: Completion) -> Completion:
+    """A completion whose tool calls carry only what the model can be held to.
+
+    Asking again was tried and measured on 2026-08-31: a corrupt streamed
+    response was thrown away and re-requested without streaming, and the second
+    answer was corrupt in the same way, at twenty-five seconds a time. So there
+    is no retry here. What is left is the part that costs nothing — deliver the
+    call without the fragments of another one, let the tool refuse it for the
+    argument it is really missing, and leave the conversation clean enough that
+    the next attempt is not a copy of this one.
+    """
+
+    if not any(unreadable(call) for call in completion.tool_calls):
+        return completion
+    return replace(
+        completion, tool_calls=tuple(repaired(call) for call in completion.tool_calls)
+    )
+
+
 def unreadable(call: ToolCall) -> str:
     """Why this call cannot be what the model asked for, or an empty string.
 
@@ -218,16 +237,25 @@ def swallowed_name(value: str) -> str:
 
 
 def repaired(call: ToolCall) -> ToolCall:
-    """Give back what the accident is known to have taken: the value's own tail.
+    """Take out of a call everything that provably is not the model's.
 
-    `content` really did end at the page and not at `,path:`; that much is
-    certain and is restored. The argument itself stays missing, because its
-    value went into the next name and is not in this call at all — and inventing
-    a filename is exactly the thing this project does not do.
+    Two things are certain and both are removals. A value ending in `,name:`
+    for an absent argument really did end before that tail. A name that cannot
+    be a parameter name is a fragment of somebody's value, and keeping it puts
+    another call's text into the conversation for the model to imitate — which
+    it did, copying its own malformed call three times over.
+
+    What is never done is the opposite: the missing argument stays missing. Its
+    value is not in the call, and a guessed filename is a file written
+    somewhere nobody asked for.
     """
 
-    arguments = dict(call.arguments)
-    for name, value in call.arguments.items():
+    arguments = {
+        name: value
+        for name, value in call.arguments.items()
+        if name and not any(mark in name for mark in _IMPOSSIBLE_IN_A_NAME)
+    }
+    for name, value in list(arguments.items()):
         if isinstance(value, str) and swallowed_name(value):
             arguments[name] = value[: value.rindex(",")]
     return replace(call, arguments=arguments)
@@ -568,7 +596,9 @@ class OpenAICompatibleBackend(ModelBackend):
             await self._completion(self._body(messages, tools, response_format))
         )
         self._calibrate(messages, completion.usage)
-        return completion
+        # The same cleaning as the streamed path: the corruption is the served
+        # parser's, and it arrives whichever way the answer is asked for.
+        return readable(completion)
 
     async def stream(
         self,
@@ -609,40 +639,7 @@ class OpenAICompatibleBackend(ModelBackend):
                     yield TextDelta(text)
         finished = streamed.result()
         self._calibrate(messages, finished.usage)
-        broken = next((unreadable(call) for call in finished.tool_calls if unreadable(call)), "")
-        if broken:
-            # The corrupt completion is thrown away and never reaches the loop,
-            # so the model does not read its own malformed call and imitate it
-            # — which is what it did eight times, live. Asked again without
-            # streaming, because every corruption measured so far arrived on a
-            # streamed response and the one non-streamed run did not corrupt.
-            finished = await self._reread(messages, tools, response_format, broken)
-        yield CompletionDone(finished)
-
-    async def _reread(
-        self,
-        messages: Sequence[Message],
-        tools: Sequence[dict[str, Any]] | None,
-        response_format: dict[str, Any] | None,
-        broken: str,
-    ) -> Completion:
-        """Ask once more for a completion whose tool calls can be read.
-
-        One retry, not a loop: a second corruption is a broken server rather
-        than an accident, and the turn's own budget must not be spent finding
-        that out. What comes back second is used even if it is corrupt too —
-        the tool call is repaired as far as it honestly can be, and the tool
-        then refuses it with an error the model can act on, which is the
-        behaviour that existed before this and is still the floor.
-        """
-
-        again = await self.invoke(messages, tools, response_format)
-        still = next((unreadable(call) for call in again.tool_calls if unreadable(call)), "")
-        if not still:
-            return again
-        return replace(
-            again, tool_calls=tuple(repaired(call) for call in again.tool_calls)
-        )
+        yield CompletionDone(readable(finished))
 
     def estimate_tokens(self, messages: Sequence[Message]) -> int:
         """The inherited estimate, at the ratio this endpoint has been observed at.

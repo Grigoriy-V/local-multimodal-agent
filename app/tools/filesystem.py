@@ -166,7 +166,9 @@ def filesystem_tools(root: Path) -> list[Tool]:
             name="write_file",
             description=(
                 "Write a UTF-8 text file inside the workspace, replacing it if it already "
-                "exists."
+                "exists. Give `path` first and `content` last. `content` is the exact "
+                "bytes of the file and nothing else: never wrap it in a markdown code "
+                "fence and never add ``` before or after it."
             ),
             parameters={
                 "type": "object",
@@ -179,7 +181,10 @@ def filesystem_tools(root: Path) -> list[Tool]:
                     },
                     "content": {
                         "type": "string",
-                        "description": "The complete new contents of the file.",
+                        "description": (
+                            "The complete new contents of the file, with no markdown "
+                            "fence around them."
+                        ),
                     },
                 },
                 "required": ["path", "content"],

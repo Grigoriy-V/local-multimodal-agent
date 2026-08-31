@@ -294,3 +294,42 @@ a clean stream never asked for twice.
 The standing weakness: **the non-streamed response is assumed healthy on one
 observation.** If it corrupts too, the retry buys nothing and the served-side
 parser plugin in `tools/gemma4_parser.py` is the next move.
+
+## The retry was measured, and it failed
+
+Deployed at 01:0x and tried on the same request. Every failing step took **51
+seconds instead of 27** — two requests, so the corruption was recognised, the
+completion discarded and the question asked again without streaming. **The
+non-streamed answer was corrupt in the same way.** The assumption this report
+flagged as resting on one observation was wrong, and the retry bought nothing
+for twenty-five seconds a step.
+
+What the same turn did show is the trigger. The `content` of the first call ends:
+
+```text
+…</script></body></html>\n```\n<|tool_call>call:todo_write{todos:[{content:
+```
+
+No `path` anywhere: the string runs from the page straight into the *next tool
+call's opener*. And the page carries exactly one markdown fence, a closing one,
+while starting at `<!DOCTYPE html>` — there is no opening fence. So the model
+ends the page with a stray ``` and the string's closing delimiter never arrives.
+
+The second half of the failure is imitation: once one malformed call is in the
+history, the next three attempts are byte-identical copies of it, 3,459
+characters each.
+
+### Three changes
+
+- **The fence is forbidden where it does the damage.** `write_file` now says to
+  give `path` first and `content` last, and that content is the exact bytes of
+  the file with no markdown fence before or after it. If the fence is the
+  trigger, this removes it, and one live turn says whether it is.
+- **The retry is gone.** Measured, unhelpful, expensive.
+- **The history stays clean.** `repaired` now drops names that cannot be
+  parameter names as well as the swallowed tail, so fragments of another call
+  never reach the conversation and there is nothing for the model to copy. The
+  missing argument is still never invented. The cleaning runs on the
+  non-streamed path too, which is no longer assumed healthy.
+
+Offline: **893 passed, 27 skipped**.
