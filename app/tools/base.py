@@ -137,6 +137,30 @@ class Toolbox:
                 return f"argument {name!r} must contain at least {minimum} character(s)"
         return None
 
+    def signature(self, name: str) -> str:
+        """How to call this tool, in one line, for a model that just got it wrong.
+
+        The schema is already in the request, but a model that has just made a
+        malformed call is plainly not reading it there. Repeating the shape
+        beside the complaint costs a few tokens and is the difference between a
+        correction and another identical attempt — eight of which happened live
+        on 2026-08-30.
+        """
+
+        tool = self._tools.get(name)
+        if tool is None:
+            return ""
+        properties = tool.parameters.get("properties") or {}
+        required = tool.parameters.get("required") or []
+        if not properties:
+            return f"{name} takes no arguments"
+        shown = []
+        for argument, schema in properties.items():
+            kind = schema.get("type", "value")
+            optional = "" if argument in required else ", optional"
+            shown.append(f"{argument} ({kind}{optional})")
+        return f"{name} takes: {', '.join(shown)}"
+
     def prepare(self, call: ToolCall) -> tuple[Tool | None, Message | None]:
         """Resolve and validate one call without causing its effect."""
 
@@ -148,7 +172,9 @@ class Toolbox:
         validation_error = self.validation_error(call)
         if validation_error:
             return None, self._message(
-                call, f"error: bad arguments for {call.name}: {validation_error}"
+                call,
+                f"error: bad arguments for {call.name}: {validation_error}. "
+                f"{self.signature(call.name)}",
             )
         return tool, None
 

@@ -1,0 +1,227 @@
+"""What happens when a tool call keeps failing the same way.
+
+The live failure of 2026-08-30, in three parts. A streamed response carrying two
+tool calls was assembled into one, so `write_file` arrived holding another
+tool's fields and missing `path`. The error it got back named what was missing
+and nothing else. And the loop let it try again eight times, once every twenty-
+seven seconds, until the person stopped it.
+
+Everything runs against a scripted backend and a temporary store. No network, no
+model endpoint, no worker.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from app.agent.graph import (
+    MAX_IDENTICAL_FAILURES,
+    REPEATED_FAILURE,
+    TurnBudget,
+    build_agent,
+    failed_before,
+)
+from app.memory import LOCAL_USER_ID, SqliteStore
+from app.models import ContentPart, Message, ToolCall
+from app.models.openai_compatible import StreamedCompletion
+from app.tools import Toolbox, filesystem_tools
+from tests.fakes import ScriptedBackend, calls, says
+
+OWNER = LOCAL_USER_ID
+
+
+@pytest.fixture
+def store() -> SqliteStore:
+    with SqliteStore() as store:
+        yield store
+
+
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    room = tmp_path / "workspace"
+    room.mkdir()
+    return room
+
+
+def spoken(message: Message) -> str:
+    return " ".join(part.text or "" for part in message.content)
+
+
+def ask(text: str = "go") -> dict[str, object]:
+    return {
+        "messages": [Message(role="user", content=[ContentPart(kind="text", text=text)])],
+        "sequence": 10,
+    }
+
+
+def fragment(**raw: object) -> dict[str, object]:
+    return {"choices": [{"delta": {"tool_calls": [raw]}}]}
+
+
+# --- two calls must not become one -------------------------------------------
+
+
+def test_a_second_call_without_a_position_is_not_the_first_one_continued() -> None:
+    """The live corruption, in the shape that produced it.
+
+    A server that opens a second call without repeating the index used to have
+    its arguments appended to the call in progress. The result was one call
+    holding both sets of fields.
+    """
+
+    stream = StreamedCompletion()
+    stream.add(
+        fragment(
+            index=0,
+            id="a",
+            function={"name": "write_file", "arguments": '{"path": "p.html", '},
+        )
+    )
+    stream.add(fragment(index=0, function={"arguments": '"content": "<p>hi</p>"}'}))
+    stream.add(
+        fragment(
+            id="b",
+            function={"name": "todo_write", "arguments": '{"todos": []}'},
+        )
+    )
+
+    result = stream.result()
+
+    assert [call.name for call in result.tool_calls] == ["write_file", "todo_write"]
+    assert result.tool_calls[0].arguments == {"path": "p.html", "content": "<p>hi</p>"}
+    assert result.tool_calls[1].arguments == {"todos": []}
+
+
+def test_a_second_call_reusing_a_position_is_still_a_second_call() -> None:
+    stream = StreamedCompletion()
+    stream.add(fragment(index=0, id="a", function={"name": "read_file", "arguments": "{}"}))
+    stream.add(fragment(index=0, id="b", function={"name": "list_files", "arguments": "{}"}))
+
+    assert [call.name for call in stream.result().tool_calls] == ["read_file", "list_files"]
+
+
+def test_a_server_that_echoes_the_same_identity_is_still_one_call() -> None:
+    """Repeating the id and name on every fragment is a continuation."""
+
+    stream = StreamedCompletion()
+    stream.add(
+        fragment(index=0, id="a", function={"name": "read_file", "arguments": '{"path": "a'})
+    )
+    stream.add(
+        fragment(index=0, id="a", function={"name": "read_file", "arguments": '.txt"}'})
+    )
+
+    result = stream.result()
+
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].arguments == {"path": "a.txt"}
+
+
+def test_ordinary_parallel_calls_keep_their_own_positions() -> None:
+    stream = StreamedCompletion()
+    stream.add(fragment(index=0, id="a", function={"name": "read_file", "arguments": "{}"}))
+    stream.add(fragment(index=1, id="b", function={"name": "list_files", "arguments": "{}"}))
+    stream.add(fragment(index=0, function={"arguments": ""}))
+
+    assert [call.name for call in stream.result().tool_calls] == ["read_file", "list_files"]
+
+
+# --- the error says how to call it -------------------------------------------
+
+
+def test_a_rejected_call_is_told_the_shape_it_should_have_had(
+    workspace: Path,
+) -> None:
+    """The model got "missing required argument(s): path" eight times."""
+
+    box = Toolbox(filesystem_tools(workspace))
+
+    result = box.run(ToolCall(id="c", name="write_file", arguments={"content": "x"}))
+
+    assert "missing required argument(s): path" in spoken(result)
+    assert "write_file takes: path (string), content (string)" in spoken(result)
+
+
+def test_an_optional_argument_is_marked_as_one(workspace: Path) -> None:
+    box = Toolbox(filesystem_tools(workspace))
+
+    assert box.signature("list_files") == "list_files takes: path (string, optional)"
+
+
+# --- and the loop stops paying for it ----------------------------------------
+
+
+def test_the_same_failing_call_is_counted(workspace: Path) -> None:
+    call = ToolCall(id="3", name="write_file", arguments={"content": "x"})
+    history = [
+        Message(role="assistant", content=[], tool_calls=[
+            ToolCall(id="1", name="write_file", arguments={"content": "x"})
+        ]),
+        Message(role="tool", content=[ContentPart(kind="text", text="error: no path")], tool_call_id="1"),
+        Message(role="assistant", content=[], tool_calls=[
+            ToolCall(id="2", name="write_file", arguments={"content": "different"})
+        ]),
+        Message(role="tool", content=[ContentPart(kind="text", text="error: no path")], tool_call_id="2"),
+    ]
+
+    assert failed_before(history, call) == 1
+
+
+def test_a_call_that_succeeded_is_not_a_failure_to_count(workspace: Path) -> None:
+    """Writing the same file twice is ordinary work, not a loop."""
+
+    call = ToolCall(id="2", name="write_file", arguments={"path": "a", "content": "x"})
+    history = [
+        Message(role="assistant", content=[], tool_calls=[
+            ToolCall(id="1", name="write_file", arguments={"path": "a", "content": "x"})
+        ]),
+        Message(role="tool", content=[ContentPart(kind="text", text="created a")], tool_call_id="1"),
+    ]
+
+    assert failed_before(history, call) == 0
+
+
+async def test_a_call_that_keeps_failing_ends_the_turn_instead_of_the_person(
+    store: SqliteStore, workspace: Path
+) -> None:
+    """Two attempts, then no more tools — and an answer that says why."""
+
+    broken = calls("write_file", content="<!DOCTYPE html>")
+    backend = ScriptedBackend(broken, broken, broken, broken, says("unused"))
+    agent = build_agent(
+        backend,
+        Toolbox(filesystem_tools(workspace)),
+        store,
+        OWNER,
+        budget=TurnBudget(max_steps=12),
+    )
+
+    result = await agent.ainvoke(ask("make a page"))
+
+    # Two failures, then the third call is refused before it runs, and the model
+    # is asked once more with no tools at all.
+    assert len(backend.requests) == MAX_IDENTICAL_FAILURES + 2
+    assert backend.tools_seen[-1] is None
+    assert result["stopping"] == REPEATED_FAILURE
+    assert "kept failing in the same way" in spoken(result["messages"][-1])
+
+
+async def test_a_call_that_fails_once_is_still_retried(
+    store: SqliteStore, workspace: Path
+) -> None:
+    """A transient failure deserves another attempt; nothing here forbids one."""
+
+    backend = ScriptedBackend(
+        calls("read_file", path="missing.txt"),
+        calls("read_file", path="missing.txt"),
+        says("It is not there."),
+    )
+    agent = build_agent(backend, Toolbox(filesystem_tools(workspace)), store, OWNER)
+
+    result = await agent.ainvoke(ask("read missing.txt"))
+
+    assert len(backend.requests) == 3
+    assert not result.get("stopping")
+    assert spoken(result["messages"][-1]) == "It is not there."

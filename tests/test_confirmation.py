@@ -118,7 +118,8 @@ async def test_an_invalid_write_is_rejected_before_confirmation(
 
     assert await agent.pending("t1") is None
     assert body(produced[1]) == (
-        "error: bad arguments for write_file: missing required argument(s): path"
+        "error: bad arguments for write_file: missing required argument(s): path. "
+        "write_file takes: path (string), content (string)"
     )
     assert not (workspace / "missing path").exists()
     await agent.aclose()

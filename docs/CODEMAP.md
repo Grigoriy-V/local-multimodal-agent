@@ -33,6 +33,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change environment/config | `app/config.py` | `env.example`, `ModelSettings`, `AgentSettings`, `TelegramSettings`, `WebSettings` |
 | Change the agent loop | `app/agent/graph.py` | `build_agent`, `AgentState`, `interrupt`, `tests/test_agent_graph.py` |
 | Change what one turn may spend | `app/agent/graph.py` | `TurnBudget`, `exceeded`, `BUDGET_EXHAUSTED`, `tests/test_turn_bounds.py` |
+| Change when a repeating failed call ends a turn | `app/agent/graph.py` | `failed_before`, `MAX_IDENTICAL_FAILURES`, `REPEATED_FAILURE`, `ENDING`, `tests/test_repeated_failure.py` |
 | Change how a running turn is stopped | `app/agent/stop.py` | `StopRequests`, `MemoryStopRequests`, `PostgresStopRequests`, `asked_to_stop` |
 | Change whether a model result ends the turn | `app/agent/stopping.py` | `TurnStopping`, `Candidate`, `Steering`, `Steered`, `STOP_ON_ANSWER`, `settled`, `carried`, `tests/test_turn_stopping.py` |
 | Change the agent's own plan for a turn | `app/tools/todo.py` | `todo_write`, `normalise`, `current`, `unfinished`, `tests/test_todo.py` |

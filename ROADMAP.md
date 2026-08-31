@@ -363,6 +363,20 @@ Verified platform facts and cold-start evidence remain in
      extension could not otherwise count itself. An agent that wrote no plan
      never meets any of this, so an ordinary answer still costs one model call.
 
+     **The first live turn failed, and found an older bug.** Deployed the same
+     day, the first multi-step request ran 264 s and ten model calls and
+     produced nothing. The model emitted `write_file` and a `todo_write` update
+     in one step; `StreamedCompletion` assembled the two into one call, because
+     it treated a fragment without an `index` as a continuation. `path`
+     disappeared into the merged object, and the call was retried eight times.
+     `todo_write` did not cause it — it made a two-call step ordinary, which
+     answer streaming had never been correct about. Fixed three ways: the
+     assembler tells calls apart by id and name as well as position; a rejected
+     call is told the signature it should have had; and a call that has failed
+     twice identically is refused a third attempt, ending the turn the way a
+     spent budget does. Not yet deployed or measured live.
+     `reports/2026-08-31_v2_todo_live_failure.md`.
+
      Reference read directly, not from the plan document:
      `deepseek-ai/deepseek-harness`, `packages/todo/tool-todo`. Whole-list
      replacement, no item identity, three statuses, at most one active as a

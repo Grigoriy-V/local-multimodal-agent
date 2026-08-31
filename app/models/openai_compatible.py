@@ -286,17 +286,46 @@ class StreamedCompletion:
             self._text.append(text)
         return text
 
+    def _opens_another(self, partial: _PartialCall, identifier: str, name: str) -> bool:
+        """Whether this fragment starts a new call rather than continuing one.
+
+        A continuation carries only a slice of the argument string, and a server
+        that echoes the id and name on every fragment is still describing the
+        same call. What cannot be a continuation is a fragment naming a
+        *different* tool, or carrying a different id: that is the next call,
+        whatever position the server gave it.
+        """
+
+        if name and partial.name and name != partial.name:
+            return True
+        return bool(identifier and partial.id and identifier != partial.id)
+
     def _fragment(self, raw: dict[str, Any]) -> None:
+        # Position is what ties fragments together — when the server gives one.
+        # A server that omits it, or reuses a position it has already finished
+        # with, is why identity is checked as well: appending a second call's
+        # arguments to the first produces one call whose arguments are two
+        # objects run together. Sometimes that is invalid JSON and the request
+        # fails loudly. Sometimes it parses, and the model is handed back a call
+        # it never made, with the other call's fields as keys and its own
+        # required ones missing. That happened live on 2026-08-30: `write_file`
+        # swallowed a `todo_write` list, lost `path`, and was retried eight
+        # times.
         index = raw.get("index")
-        # Position is what ties fragments together. A server that omits it can
-        # only be describing the call already in progress.
-        key = int(index) if isinstance(index, int) else len(self._calls) - 1
-        partial = self._calls.setdefault(max(key, 0), _PartialCall())
-        if raw.get("id"):
-            partial.id = raw["id"]
         function = raw.get("function") or {}
-        if function.get("name"):
-            partial.name = function["name"]
+        name = function.get("name") or ""
+        identifier = raw.get("id") or ""
+        key = max(int(index), 0) if isinstance(index, int) else max(len(self._calls) - 1, 0)
+        partial = self._calls.get(key)
+        if partial is not None and self._opens_another(partial, identifier, name):
+            key = max(self._calls) + 1
+            partial = None
+        if partial is None:
+            partial = self._calls.setdefault(key, _PartialCall())
+        if identifier:
+            partial.id = identifier
+        if name:
+            partial.name = name
         partial.arguments += function.get("arguments") or ""
 
     def result(self) -> Completion:

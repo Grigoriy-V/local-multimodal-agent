@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
@@ -45,7 +45,7 @@ from app.models import (
     Usage,
 )
 from app.telemetry import NO_TRACE, Telemetry, TurnTrace
-from app.tools import ToolExecutor, Toolbox
+from app.tools import ToolExecutor, Toolbox, tool_failed
 
 # The key a text delta travels under on LangGraph's custom stream channel. The
 # channel carries anything, so the runtime and the graph have to agree on one
@@ -114,6 +114,20 @@ class TurnBudget:
 # ordinary case: nothing stopped it.
 BUDGET_EXHAUSTED = "budget"
 STOP_REQUESTED = "stopped"
+REPEATED_FAILURE = "repeated"
+
+# How many times one identical call may fail before the turn stops offering
+# tools at all. Two is a real retry — a transient failure deserves one — and the
+# third attempt at a call that has already failed twice with the same arguments
+# is not recovery, it is a loop. Live on 2026-08-30 a malformed `write_file`
+# was retried eight times over four minutes, each attempt regenerating a whole
+# page, and only the person ended it.
+MAX_IDENTICAL_FAILURES = 2
+
+# The states in which the turn is already finishing: the model gets one last
+# request, without tools, for the answer the person is owed, and nothing asks an
+# extension whether it may spend more.
+ENDING = frozenset({BUDGET_EXHAUSTED, REPEATED_FAILURE})
 
 
 @dataclass
@@ -189,6 +203,33 @@ def declined(call: ToolCall) -> Message:
     )
 
 
+def failed_before(messages: Sequence[Message], call: ToolCall) -> int:
+    """How often this exact call has already failed in this turn.
+
+    Identity is the tool's name and its arguments, because that is what decides
+    the result: a call differing in one character is a different attempt and
+    gets its own retries. Only failures count — a tool that succeeded and is
+    called again with the same arguments is ordinary work, like writing the
+    same file twice.
+    """
+
+    failures = {
+        message.tool_call_id
+        for message in messages
+        if message.role == "tool" and tool_failed(message)
+    }
+    seen = 0
+    for message in messages:
+        for earlier in message.tool_calls:
+            if (
+                earlier.id in failures
+                and earlier.name == call.name
+                and earlier.arguments == call.arguments
+            ):
+                seen += 1
+    return seen
+
+
 def halted(call: ToolCall, reason: str) -> Message:
     """A call that was not run, phrased as a tool result the model can read.
 
@@ -208,10 +249,22 @@ BUDGET_REASON = (
     "will run, so answer now with what you already have"
 )
 STOP_REASON = "the user asked to stop; this call was not run"
+REPEAT_REASON = (
+    "this exact call has already failed the same way in this turn and was not "
+    "run again; no further tools will run, so say plainly what you could not do "
+    "and answer with what you have"
+)
 # What the person is told when the model spent its last request asking for one
-# more tool rather than answering.
+# more tool rather than answering. Two ways to reach it, and they are not the
+# same news: one turn ran out of what it may spend, the other kept making a call
+# that kept failing. Saying which is the difference between "try again" and
+# "this will fail again the same way".
 BUDGET_ANSWER = (
     "I stopped here: this turn reached the limit of what it is allowed to spend."
+)
+REPEAT_ANSWER = (
+    "I stopped here: the same call kept failing in the same way, so trying it "
+    "again would not have helped."
 )
 
 
@@ -398,8 +451,10 @@ def build_agent(
         )
         # A turn that has spent its budget still gets to answer, and is offered
         # no tools while it does: the alternative is to keep asking a model that
-        # keeps calling tools whether it would like to stop now.
-        offered = None if state.stopping == BUDGET_EXHAUSTED else schemas
+        # keeps calling tools whether it would like to stop now. A turn ended by
+        # a repeating call is in exactly the same position: what it must not be
+        # able to do is try that call once more.
+        offered = None if state.stopping in ENDING else schemas
 
         def produced(completion: Completion) -> Message:
             """What the model wrote, and only that, once the turn is ending.
@@ -414,9 +469,14 @@ def build_agent(
                 if not message.content:
                     # It asked for another tool instead of answering. Saying so
                     # is better than an empty bubble, and better than a lie.
+                    ended = (
+                        REPEAT_ANSWER
+                        if state.stopping == REPEATED_FAILURE
+                        else BUDGET_ANSWER
+                    )
                     return Message(
                         role="assistant",
-                        content=[ContentPart(kind="text", text=BUDGET_ANSWER)],
+                        content=[ContentPart(kind="text", text=ended)],
                     )
                 return Message(role="assistant", content=message.content)
             return message
@@ -504,7 +564,7 @@ def build_agent(
         priced = replace(state, steps=state.steps + 1, spent_seconds=spent)
         if (
             message.tool_calls
-            or state.stopping == BUDGET_EXHAUSTED
+            or state.stopping in ENDING
             or exceeded(priced, 0)
         ):
             return {**keep, "messages": [message]}
@@ -621,6 +681,29 @@ def build_agent(
                 ],
                 "stopping": STOP_REQUESTED,
             }
+        looping = [
+            call
+            for call in calls
+            # Everything before this batch: the attempt being judged is in
+            # `state.messages` too, and a fake or a server that reuses call ids
+            # would otherwise let it count itself.
+            if failed_before(state.messages[:-1], call) >= MAX_IDENTICAL_FAILURES
+        ]
+        if looping:
+            # Not a budget and not a stop: the turn can afford more, and nobody
+            # asked it to end. It is being ended because another attempt at a
+            # call that has failed twice identically cannot produce anything
+            # the last two did not, and each one costs a full generation.
+            trace.event(
+                "turn_repeating",
+                tool=looping[0].name,
+                attempts=failed_before(state.messages[:-1], looping[0]),
+                step=state.steps,
+            )
+            return {
+                "messages": [halted(call, REPEAT_REASON) for call in calls],
+                "stopping": REPEATED_FAILURE,
+            }
         limit = exceeded(state, len(calls))
         if limit:
             trace.event(
@@ -688,7 +771,7 @@ def build_agent(
             # Nothing was produced for the conversation, so there is nothing to
             # persist yet; the turn takes another step with the steering in it.
             return "model"
-        if state.stopping == BUDGET_EXHAUSTED:
+        if state.stopping in ENDING:
             # The answer written without tools is the end of the turn, whatever
             # the model asked for while writing it.
             return "persist"
