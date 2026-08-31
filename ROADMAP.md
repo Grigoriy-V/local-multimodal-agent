@@ -5,13 +5,16 @@
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** 4.4, `todo` as agent state — code, tests and
-documents done on 2026-08-31, and **live acceptance failed twice.** With
-`todo_write` deployed, a request that takes several steps produces one
-`write_file` call carrying another tool's fields and no `path`, so the file is
-never written and the assistant says it was. The corruption arrives already
-formed, before anything here reads it. Nothing is decided: the choice is to
-unwire the tool or to flatten its schema, and either way the next thing needed
-is one GPU scenario run, which is its own permission.
+documents done on 2026-08-31. Live acceptance failed twice, and a four-variant
+GPU measurement then found the cause is **not ours and not `todo`**: the served
+vLLM's Gemma 4 tool parser intermittently loses whatever follows a long string
+argument, so `write_file` arrives with `content` and no `path`. vLLM 51284 and
+53431, open, present in 0.26.0 and 0.27.1. The nested schema wrote the file and
+inspected it twice; the *flat* variant failed; streaming made no difference.
+`todo_write` stays as it is. What is still unanswered is 4.4's own acceptance —
+whether an unfinished plan holds a turn open — because in every successful run
+the model closed its list by itself. The open decision is which compatibility
+fix to make, not whether to keep the tool.
 `reports/2026-08-31_v2_todo_live_failure.md`. 4.3 and 4.3.5 were both
 closed on 2026-08-30 with one thing deliberately not settled, recorded below
 and moved into its own queue item: **proportional validation is demonstrated
@@ -369,7 +372,7 @@ Verified platform facts and cold-start evidence remain in
      extension could not otherwise count itself. An agent that wrote no plan
      never meets any of this, so an ordinary answer still costs one model call.
 
-     **Both live turns failed, and the cause is not in this repository.**
+     **Both live turns failed; a measurement then exonerated the tool.**
      Deployed the same day, a multi-step request ran 264 s and ten model calls
      and produced nothing. The model had two things to do in one step — write
      the file and update the plan — and what arrived was one `write_file` call
@@ -387,11 +390,18 @@ Verified platform facts and cold-start evidence remain in
      151 s and an honest answer instead of 264 s and a `/stop`.
 
      What the second turn told the person is the worst part: it claimed a file
-     it had never created, and only `send_file` failing revealed it. 4.4 is
-     therefore **not accepted**, and `todo_write` currently breaks file writing
-     in the deployed bot. Two options, neither chosen: unwire it, or flatten the
-     schema so nothing nests and measure. Both need the same GPU scenario run.
-     `reports/2026-08-31_v2_todo_live_failure.md`.
+     it had never created, and only `send_file` failing revealed it.
+
+     One GPU run, four variants of the same request, settled the attribution.
+     Nested schema with streaming and without it: the file written, inspected,
+     the plan kept, seven model calls. **Flat schema: failed the same way as
+     live.** No planning tool: succeeded in three calls. So neither nesting nor
+     streaming nor the planning tool is the cause — the served parser loses what
+     follows a long string argument, intermittently, which is vLLM 51284's
+     described behaviour and matches the undecoded `<|"|>` in our own evidence.
+     A plan's measured price is 7 model calls against 3. 4.4 is **not accepted**:
+     its own question is untested, because every successful variant closed its
+     list unprompted. `reports/2026-08-31_v2_todo_live_failure.md`.
 
      Reference read directly, not from the plan document:
      `deepseek-ai/deepseek-harness`, `packages/todo/tool-todo`. Whole-list

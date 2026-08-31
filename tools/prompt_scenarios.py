@@ -47,6 +47,8 @@ from app.telemetry.cost import A10_USD_PER_SECOND, IDLE_WINDOW_SECONDS, gpu_cost
 from app.telemetry.inspect import tool_calls
 from app.telemetry.sqlite import SqliteTelemetry
 from app.telemetry.trace import Telemetry
+from app.tools import Tool, Toolbox
+from app.tools.todo import TOOL_NAME as TODO_TOOL
 
 RUNS = Path("reports/prompt_runs")
 
@@ -178,6 +180,18 @@ SCENARIOS: tuple[Scenario, ...] = (
             "быть по-английски и начинаться с OK, хотя спросили по-русски"
         ),
     ),
+    # The request that failed twice live on 2026-08-30/31, word for word. It is
+    # here rather than paraphrased because what is being measured is a parse
+    # failure, and a shorter page might not reach the length that triggers it.
+    Scenario(
+        name="snake",
+        request="Создай html с игрой змейка, Назови Снейк_Гейм, проверь что работает",
+        expected_tools=("write_file", "inspect_page"),
+        look_for=(
+            "живой отказ: write_file приходит с чужими полями и без path. "
+            "Смотреть на аргументы первого вызова после todo_write"
+        ),
+    ),
     Scenario(
         name="web",
         request="Когда вышла Gemma 3? Скажи, откуда взял.",
@@ -216,6 +230,94 @@ class Result:
         if not self.scenario.expected_tools:
             return not seen
         return set(self.scenario.expected_tools) <= seen
+
+
+# --- the planning variants, which exist only to be compared -------------------
+#
+# The product's tool is `app/tools/todo.py` and is not changed by anything here.
+# This is the same tool with the one thing under test replaced: an argument that
+# nests — an array of objects — against an argument that does not. vLLM 51284
+# says the Gemma 4 parser mishandles string values inside nested structures when
+# the model writes them as plain quoted literals instead of the delimiter form,
+# and that the rate climbs with the length of the values. A flat argument is the
+# cheapest way to find out whether that is what this is.
+
+FLAT_DESCRIPTION = (
+    "Record and update your task list for the work in front of you. Send the "
+    "ENTIRE checklist every call: it replaces the previous one, and there are "
+    "no partial updates. One step per line, each line starting with [ ] for not "
+    "started, [>] for the one you are working on now, or [x] for done. Mark a "
+    "step done the moment it is done rather than in one batch at the end. Skip "
+    "the list entirely for work that is a single step."
+)
+
+FLAT_PARAMETERS: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "plan": {
+            "type": "string",
+            "description": (
+                "The COMPLETE checklist, replacing any previous one. "
+                "For example:\n[x] write the page\n[>] look at it"
+            ),
+        }
+    },
+    "required": ["plan"],
+    "additionalProperties": False,
+}
+
+
+def _flat_write(plan: str) -> str:
+    lines = [line.strip() for line in plan.splitlines() if line.strip()]
+    done = sum(1 for line in lines if line.startswith("[x]"))
+    active = sum(1 for line in lines if line.startswith("[>]"))
+    return (
+        f"Updated todo list: {len(lines) - done - active} pending, "
+        f"{active} in progress, {done} completed."
+    )
+
+
+def flat_todo_tools() -> list[Tool]:
+    """The same tool with a single string argument instead of a nested one."""
+
+    return [
+        Tool(
+            name=TODO_TOOL,
+            description=FLAT_DESCRIPTION,
+            parameters=FLAT_PARAMETERS,
+            run=_flat_write,
+        )
+    ]
+
+
+def planning(agent: Agent, mode: str) -> None:
+    """Replace the agent's planning tool for the length of one run.
+
+    Wrapping the bound method rather than reaching into the graph: the toolbox
+    is read once per thread when the graph is compiled, and the capability brief
+    is generated from it, so a swap here changes both the schemas the model is
+    offered and the sentence describing them — which is what a comparison of
+    schemas has to change and nothing else.
+    """
+
+    if mode == "nested":
+        return
+    original = agent.toolbox
+
+    def swapped(thread_id: str) -> Toolbox:
+        # The private dictionary is the only way to get the built tools back
+        # out. This is an instrument, not the product; the product never does
+        # this.
+        kept = [
+            tool
+            for tool in original(thread_id)._tools.values()  # noqa: SLF001
+            if tool.name != TODO_TOOL
+        ]
+        if mode == "flat":
+            kept += flat_todo_tools()
+        return Toolbox(kept)
+
+    agent.toolbox = swapped  # type: ignore[method-assign]
 
 
 def select(only: Sequence[str] = (), external: bool = False) -> list[Scenario]:
@@ -262,7 +364,7 @@ def assembled(agent: Agent, prompt: str, thread_id: str) -> str:
     return system_message(agent.toolbox(thread_id), agent.delivery, prompt)
 
 
-def sealed(root: Path) -> AgentSettings:
+def sealed(root: Path, *, stream: bool = True) -> AgentSettings:
     """Settings that cannot reach anything real.
 
     `database_url` is cleared explicitly rather than left to the environment:
@@ -278,6 +380,7 @@ def sealed(root: Path) -> AgentSettings:
         workspace=str(root / "workspaces"),
         telemetry=True,
         telemetry_database=str(root / "telemetry.sqlite3"),
+        stream_answers=stream,
     )
 
 
@@ -424,7 +527,7 @@ async def measure(options: argparse.Namespace) -> int:
     stamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M")
     root = Path(options.out or RUNS / f"{stamp}_{options.label}")
     root.mkdir(parents=True, exist_ok=True)
-    settings = sealed(root)
+    settings = sealed(root, stream=not options.no_stream)
     telemetry = Telemetry(SqliteTelemetry(settings.telemetry_database))
     model_settings = ModelSettings()
     agent = create_agent(
@@ -434,6 +537,7 @@ async def measure(options: argparse.Namespace) -> int:
         telemetry=telemetry,
         system_prompt=prompt,
     )
+    planning(agent, options.planning)
     whole = assembled(agent, prompt, "preview")
     header = {
         "label": options.label,
@@ -443,6 +547,8 @@ async def measure(options: argparse.Namespace) -> int:
         "model": f"{model_settings.name} at {model_settings.endpoint}",
         "sampling": f"temperature {model_settings.temperature}, "
         f"max_tokens {model_settings.max_tokens}",
+        "planning": options.planning,
+        "streaming": "on" if settings.stream_answers else "off",
     }
 
     if options.dry_run:
@@ -497,6 +603,17 @@ def parse(argv: list[str]) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="compose everything and call nothing, so no GPU is woken",
+    )
+    parser.add_argument(
+        "--planning",
+        choices=("nested", "flat", "none"),
+        default="nested",
+        help="which planning tool the agent is given, or none at all",
+    )
+    parser.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="ask for the whole completion at once instead of streaming it",
     )
     parser.add_argument("--idle-window", type=float, default=IDLE_WINDOW_SECONDS)
     parser.add_argument("--gpu-rate", type=float, default=A10_USD_PER_SECOND)
