@@ -5,8 +5,22 @@
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** 4.4, `todo` as agent state — code, tests and
-documents done on 2026-08-31. Live acceptance failed twice, and a four-variant
-GPU measurement then found the cause is **not ours and not `todo`**: the served
+documents done on 2026-08-31, and **the first live turn that worked end to end
+came the same day**: plan written, kept current, closed, the page written and
+inspected before the answer. The cause of the three failures before it was a
+stray markdown fence at the end of the file content: the string's closing
+delimiter never arrived, so the served parser ran into the next call and
+`write_file` lost its `path`. `write_file` now forbids the fence, and the model
+recovers by itself after one refusal instead of repeating the call eight times.
+**4.4's own acceptance is still untested** — every successful run closes its own
+list, so the stopping seam has never had to refuse anything. Three other things
+are open and recorded below: the plan is invisible to the person, it costs seven
+model calls against three, and nothing constrains the emission because the
+served model does not use guided decoding.
+`reports/2026-08-31_v2_todo_live_failure.md`.
+
+Earlier the same day, before that: live acceptance failed twice, and a
+four-variant GPU measurement found the cause is **not ours and not `todo`**: the served
 vLLM's Gemma 4 tool parser intermittently loses whatever follows a long string
 argument, so `write_file` arrives with `content` and no `path`. vLLM 51284 and
 53431, open, present in 0.26.0 and 0.27.1. The nested schema wrote the file and
@@ -409,6 +423,19 @@ Verified platform facts and cold-start evidence remain in
      deployment policy rather than a stored rule, and the same lifetime rule —
      their standing plan clears on the next `turn/start`, not on `turn/end`, so
      the finished checklist stays readable while the person reads the answer.
+   - **The plan is invisible to the person.** `todo_write` lives in the
+     arguments of a tool call: not in the chat, not readable, not correctable.
+     The interface says only `Planning…`. A plan nobody can see is a plan
+     nobody can steer, and the reference harness renders it as a standing panel
+     for exactly that reason. Measured cost alongside it: seven model calls
+     against three without a plan, on work whose plan was one item.
+     `reports/2026-08-31_v2_todo_live_failure.md`.
+   - **Nothing constrains what the model emits.** Tool schemas are advice: the
+     served model does not use guided decoding for tool calls, so "do not wrap
+     file content in a markdown fence" is enforced by wording alone. One fence
+     cost three failed live turns. Constrained decoding on the served model
+     would end the class; it is a model App redeploy and its own gate, and
+     `tools/gemma4_parser.py` holds the tested alternative.
    - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
    - **4.5.5 Saying only what was observed.** One product question with two
      measured faces: the assistant makes an artifact and describes how it looks

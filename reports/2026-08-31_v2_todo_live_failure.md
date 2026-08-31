@@ -333,3 +333,57 @@ characters each.
   non-streamed path too, which is no longer assumed healthy.
 
 Offline: **893 passed, 27 skipped**.
+
+## The fence was the trigger, and the turn finally worked
+
+Deployed at 01:2x and tried in a fresh conversation. The contrast is inside one
+turn, with everything else identical:
+
+```text
+attempt 1   fences=1   content ends 'e{todos:[{content:'   no path, refused
+attempt 2   fences=0   content ends '</html>\n'            path present, 3,296 chars written
+```
+
+One markdown fence is the difference between a corrupt call and a correct one.
+
+**The model recovered by itself**, which it had never done. One refusal, the
+error naming the signature, and the second attempt dropped the fence and carried
+`path`. Before this it repeated the identical malformed call up to eight times.
+
+**The history stayed clean.** The stored corrupt call holds only `content` and
+`status`; the fragments of the neighbouring `todo_write` were dropped before the
+conversation saw them, so there was nothing to copy.
+
+**And this is 4.4 working live for the first time:**
+
+```text
+todo_write     one item, pending
+write_file     refused (the fenced attempt)
+todo_write     that item in_progress
+write_file     snake_game.html, 3,296 characters
+todo_write     completed
+inspect_page   snake_game.html, 1,417 ms
+answer
+```
+
+The plan was written, kept current through the work, and closed before the
+answer; the artifact was looked at before being described. Not because the
+stopping seam objected — it never had to.
+
+### What is still not settled
+
+- **4.4's own acceptance is untested.** In every successful run the model closes
+  its own list, so the extension has nothing to refuse. Testing it needs a turn
+  that ends with an item genuinely open.
+- **The plan is invisible.** It lives in the arguments of a tool call: not in
+  the chat, not readable, not correctable by the person. The interface shows
+  only `Planning…`.
+- **A plan costs.** Seven model calls against three without one, measured, for
+  work whose whole plan was one item.
+- **The file was named `snake_game.html`** while the person asked for
+  `Снейк_Гейм`. The model took the name from its own English plan rather than
+  from the request — a plan in one language overriding the person's wording.
+- **Nothing constrains the emission.** The schema is advice: the served model
+  does not use guided decoding for tool calls, so a fence is forbidden in words
+  and nowhere else. Constrained decoding would end this class, and it is a model
+  redeploy.
