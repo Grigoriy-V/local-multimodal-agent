@@ -174,6 +174,9 @@ change code, configuration, commands or safety need no test suite.
 work. The four documents under `docs/` are the canonical product, system, code
 and operations maps. `DECISIONS.md` preserves approved durable choices and why
 they were made; it does not replace any map and never authorizes work.
+`ISSUES.md` is the list of observed defects, with its own rules for writing one
+inside it. Record a defect there when it is observed, whether or not anyone
+intends to fix it; like `DECISIONS.md` it authorizes nothing.
 
 **A decision you reached is a draft until the human approves it in words.** This
 covers anything architectural, and anything that materially changes later

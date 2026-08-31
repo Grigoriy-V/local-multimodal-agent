@@ -387,3 +387,76 @@ stopping seam objected — it never had to.
   does not use guided decoding for tool calls, so a fence is forbidden in words
   and nowhere else. Constrained decoding would end this class, and it is a model
   redeploy.
+
+## Three live tests on a task big enough for a plan
+
+The same request three times, through Telegram, on the deployed control plane:
+build a personal task board as a small multi-file web application. Big enough
+that a plan is not obviously theatre, which is what the earlier one-file
+scenarios could not tell us. Read from six hours of deployed logs, 23 runs.
+
+```text
+                   plan          model calls   tools   duration   outcome
+Board 1  5319546e  todo x3, steered once   10       8      100 s   files written, inspected
+Board 2  3b9bcdd5  todo x2, steered once    9       7       88 s   app does not work
+Board 3  e9bae9a5  todo x1                  6       4        52 s   halted by the repeat rule
+         28daa249  no todo                  9       8      103 s   files scattered into the root
+```
+
+**Board 1** is the shape 4.4 was built for. The plan was written first, the
+four files followed, the list was brought up to date, `inspect_page` ran on the
+result, and the stopping seam objected once at step 8 — the first live steering
+in production. The model answered the objection by closing its list rather than
+by doing anything more.
+
+**Board 2 produced an application that does not work.** The board saved a new
+task and never drew it: the render selector is `#todo.task-list`, meaning one
+element carrying both the id and the class, where the list is a child of
+`#todo`. One missing space. The model wrote `script.js` twice in the same turn
+and shipped the defect both times, never called `inspect_page` at all, and the
+plan's own verification item was closed on the way to the answer. The steering
+fired here too, at step 7, and again the model satisfied it by marking the list
+done. Recorded as ISS-0008.
+
+**Board 3 failed on a defect of ours**, not the model's. `write_file` was called
+with the path `Personal Task Board 3/`, and we created a *file* with that name,
+after which every write into the folder and every listing of it failed with an
+unwrapped `FileExistsError`. The repeat rule ended that turn honestly at 52 s,
+which is the behaviour it was added for. The retry gave up on the folder and
+wrote the four files into the root of the person's workspace, where they still
+are. Recorded as ISS-0006 and ISS-0005; the missing error text in the telemetry
+that made this slow to find is ISS-0007.
+
+None of the three failures was caused by the planning tool.
+
+## What the plan is for, still unanswered
+
+Across these three runs the plan cost between 88 s and 100 s where the same work
+without one took about 50 s, and it did not change what the model did. That is
+the open question, stated as a question rather than settled here:
+
+**If the prompt already asks for the work to be checked, and the model does the
+same thing either way, what does the plan add?** Three observations sharpen it
+rather than answer it.
+
+- **The steering has never changed an outcome.** It fired twice live, in Board 1
+  and Board 2, and both times the model discharged it by closing the list, not
+  by doing more work. 4.4's acceptance — an unfinished plan holding a turn open
+  against a model that wants to stop — has still never been tested, because no
+  run has ended with an item the model was unwilling to close.
+- **Closing an item is not doing it.** Board 2 marked verification complete
+  without verifying, and answered as if it had. A checklist the model both fills
+  in and grades makes an unverified claim look like a completed step, which is
+  ISS-0004 wearing a plan. This is a cost, not just a missing benefit.
+- **Nobody can see it.** The plan lives in tool-call arguments; the person sees
+  `Planning…`. Whatever value it has cannot currently reach them, and they
+  cannot correct it.
+
+What would answer the question, in order of what it would cost: a task long
+enough that the model loses track of a step without a plan, which none of these
+three were; and a run in which the person disagrees with the plan before the
+work happens, which is impossible until the plan is visible. Until one of those
+exists, the honest position is that the plan is unproven at this size of task
+rather than shown to be useless — and that the two candidate directions are
+raising the threshold at which it appears at all, or making it visible so it can
+be steered. Both are proposals; neither is decided.

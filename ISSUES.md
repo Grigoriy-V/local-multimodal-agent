@@ -1,0 +1,180 @@
+# Issues
+
+Known defects. One entry per defect, newest first.
+
+## What belongs here, and what does not
+
+A defect is a place where the system does something other than what it was
+built to do, and where that difference has been **observed**, not suspected.
+This file is the list of those, whether or not anyone has decided to fix them.
+
+It is not a plan and it does not authorize work. `ROADMAP.md` remains the only
+source of direction, order and approved work; an issue here becomes work only
+when the roadmap says so. It is also not a place for evidence: a run, a
+measurement or a diagnosis lives in `reports/`, and the entry links to it.
+
+Missing capability is not a defect. "The assistant cannot yet do X" belongs in
+the roadmap. "The assistant claims to have done X and did not" belongs here.
+
+## How to write one
+
+Add the entry at the top of the list, take the next free number, and never
+reuse a number — a closed issue keeps its id so that a report referring to it
+stays readable.
+
+```markdown
+### ISS-0000 — one line, in the words of what goes wrong
+
+- **Status:** open | mitigated | fixed | won't fix
+- **Seen:** YYYY-MM-DD, where it was observed
+- **Costs:** what it does to the person using the assistant
+- **Reproduce:** the shortest thing that shows it, or "not reproduced"
+- **Cause:** what is actually wrong, or "unknown"
+- **Evidence:** reports/... , or a log identifier
+- **Related:** other ids, roadmap queue items
+```
+
+Rules that keep the file honest:
+
+- **Status is about the defect, not the effort.** `mitigated` means the harm is
+  reduced and the defect is still there; only a verified fix is `fixed`.
+- **Do not delete a fixed entry.** Set the status, add the date and what fixed
+  it, and leave it. A defect that comes back is easier to recognise than to
+  rediscover.
+- **Cause stays "unknown" until it is proven.** A hypothesis written in the
+  cause field becomes a fact for the next reader. Put it in `Reproduce` as a
+  question or leave it out.
+- **One defect per entry.** Two symptoms of one cause are one issue; one symptom
+  with two causes is two.
+- **A severity word is not a field here on purpose.** `Costs` says what it does
+  to the person, which is the only ranking that survives disagreement.
+
+---
+
+### ISS-0008 — a generated app is delivered as working without ever being used
+
+- **Status:** open
+- **Seen:** 2026-08-31, live, "Personal Task Board 2" via Telegram
+- **Costs:** the person receives an application described as ready, and the
+  first thing they try does nothing. The task board saved new tasks and never
+  drew them, because the render selector was `#todo.task-list` — one element
+  with both an id and a class — where the list is a child of `#todo`.
+- **Reproduce:** ask for an interactive page, open it, use the primary control.
+- **Cause:** nothing in the loop exercises the artifact. `inspect_page` renders
+  and looks; it does not click, type or read the console, so a defect that only
+  appears on interaction cannot be seen by the only tool that looks. In this run
+  the model did not call it at all, and had rewritten the same file twice.
+- **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`, section "Three
+  live tests on a task big enough for a plan"
+- **Related:** ISS-0004; the browser capability set in `ROADMAP.md`, "Not
+  started", which is where the ability to click would come from
+
+### ISS-0007 — `tool_failed` carries no reason
+
+- **Status:** open
+- **Seen:** 2026-08-31, deployed telemetry
+- **Costs:** nobody investigating a live failure can tell from the logs why a
+  tool refused. Diagnosing ISS-0006 needed the volume and an offline
+  reproduction to recover a message the process already had in hand.
+- **Reproduce:** make any tool raise, then read the `tool_failed` event: tool,
+  call index, stage, path, duration, and no error text.
+- **Cause:** the event is emitted without the error the caller already holds.
+- **Evidence:** run `e9bae9a5`, two `write_file` failures, 2026-08-31T04:14Z
+
+### ISS-0006 — a path meant as a directory becomes a file, and poisons the folder
+
+- **Status:** open
+- **Seen:** 2026-08-31, live, "Personal Task Board 3" via Telegram
+- **Costs:** two turns and about 155 s produced no folder. Every later write
+  into that name failed, `list_files` on it failed, and the model gave up and
+  scattered `index.html`, `app.js`, `styles.css` and `README.md` into the root
+  of the person's workspace, where they still are.
+- **Reproduce:**
+
+  ```text
+  write_file "Board 3/" "# Task board"   -> created Board 3/ (13 characters)
+  Board 3 is now a file
+  write_file "Board 3/index.html" ...    -> FileExistsError [WinError 183]
+  list_files "Board 3"                   -> path 'Board 3' is not a directory
+  ```
+
+- **Cause:** `pathlib` drops a trailing separator, so `_write_file` in
+  `app/tools/filesystem.py` treats `Board 3/` as an ordinary file name and
+  creates it. There is nothing wrong with the model's call: a trailing slash is
+  how everyone writes a directory.
+- **Evidence:** run `e9bae9a5` and run `28daa249`, 2026-08-31T04:14–04:17Z;
+  offline reproduction as above
+- **Related:** ISS-0005, which is why the model saw only an OS error and could
+  not route around it; the repeat rule ended the first turn correctly at 52 s
+
+### ISS-0005 — an OS error escapes the filesystem tools unwrapped
+
+- **Status:** open
+- **Seen:** 2026-08-31, live and offline
+- **Costs:** the model is handed a raw platform error with a platform error
+  code, instead of a sentence naming what it should do differently. It cannot
+  act on it, and the wording differs by operating system.
+- **Reproduce:** the ISS-0006 sequence raises `FileExistsError`, not `ToolError`.
+- **Cause:** `resolve_in_root` wraps `OSError`; the write, the `mkdir` and the
+  read after it do not.
+- **Related:** ISS-0006
+
+### ISS-0004 — the assistant describes what it did not observe
+
+- **Status:** open
+- **Seen:** 2026-08-30, live
+- **Costs:** the person is told about a page's contents that nobody looked at.
+  Once the assistant reported a file it had never created, and only `send_file`
+  failing revealed it.
+- **Cause:** unknown. Three rounds of prompt wording made it better and worse in
+  turn, which is evidence that wording is not the lever.
+- **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`,
+  `reports/2026-08-31_v2_todo_live_failure.md`
+- **Related:** ISS-0008; roadmap step 4.5.5
+
+### ISS-0003 — a made file is handed over as prose instead of sent
+
+- **Status:** open
+- **Seen:** 2026-08-30, live, twice in one session
+- **Costs:** the person is given the literal text `[house.html](house.html)`
+  and no file. A relative path is not a link the renderer will make clickable,
+  so the delivery silently does not happen; the file arrives only when asked for
+  by name.
+- **Cause:** handing something over is `send_file`, and the model reaches for a
+  link. Why it prefers the link is unknown.
+- **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`
+
+### ISS-0002 — a picture someone sends is never kept
+
+- **Status:** open
+- **Seen:** 2026-08-30, verified against the deployed volume
+- **Costs:** a document survives in the person's workspace; a photo, voice
+  message or image is used inside that one turn and written nowhere, so `/new`
+  loses it. The person reasonably believes what they sent is theirs to point at
+  again. 22 entries on the volume, not one of them an image.
+- **Cause:** the split lives in `admit_uploads` and is invisible to the person.
+
+### ISS-0001 — the served tool parser loses what follows a long string argument
+
+- **Status:** mitigated, 2026-08-31 — not fixed
+- **Seen:** 2026-08-30 and 2026-08-31, live, three failed turns
+- **Costs:** `write_file` arrived with `content` and no `path`, so nothing was
+  written and the turn burned up to 264 s. The model then repeated the identical
+  malformed call up to eight times.
+- **Reproduce:** end a long `content` value with a stray markdown fence. The
+  string's closing delimiter never arrives, the parser reads on to the next one
+  — which is inside the following tool call — and the argument after it is
+  swallowed. A four-variant GPU run cleared nesting, streaming and the planning
+  tool of causing it.
+- **Cause:** upstream, in vLLM's Gemma 4 tool parser; vLLM 51284 and 53431, both
+  open, present in 0.26.0 and 0.27.1. Nothing constrains the emission on our
+  side: tool schemas are advice, because the served model does not use guided
+  decoding for tool calls.
+- **What the mitigation is:** `write_file` forbids the fence in words; a call
+  the parser mangled is cleaned before it reaches the conversation; an argument
+  error now carries the tool's signature; and a call that failed twice
+  identically is refused a third time. Live afterwards, the model recovered by
+  itself after one refusal. A corrected parser exists and is tested offline in
+  `tools/gemma4_parser.py`; putting it in front of the served model is a model
+  redeploy and its own gate.
+- **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`

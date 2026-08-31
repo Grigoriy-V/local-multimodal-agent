@@ -1,6 +1,6 @@
 # Roadmap
 
-**Updated:** 2026-08-30
+**Updated:** 2026-08-31
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
@@ -18,6 +18,15 @@ are open and recorded below: the plan is invisible to the person, it costs seven
 model calls against three, and nothing constrains the emission because the
 served model does not use guided decoding.
 `reports/2026-08-31_v2_todo_live_failure.md`.
+
+**Then three live tests on a task big enough for a plan** — the same task board
+built three times. The plan never caused a failure and never changed an outcome:
+it fired the first live steering twice, and both times the model answered it by
+closing its list. One run shipped an application that does not work, one hit a
+defect of ours in `write_file`, and the open question is now stated as a
+question in the report: what a plan adds when the prompt already asks for the
+work to be checked. Defects from these runs are ISS-0005 to ISS-0008 in
+`ISSUES.md`, which is new and holds observed defects only.
 
 Earlier the same day, before that: live acceptance failed twice, and a
 four-variant GPU measurement found the cause is **not ours and not `todo`**: the served
