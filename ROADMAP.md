@@ -238,13 +238,6 @@ was built.
 
      `reports/2026-08-31_v2_todo_live_failure.md`, `ISSUES.md` ISS-0004 to
      ISS-0009.
-   - **Finish the `todo` tool.** What 4.4 left, and the next thing to approve:
-     get one live turn where a plan and the work finish together, on a fresh
-     conversation so the model is not copying its own previous turn; separate
-     the two jobs one line of wording now does at once — when a list is worth
-     opening, and how coarse its items should be; and test the stopping
-     extension against a turn that ends with an item the model does not want to
-     close. Blocked on nothing.
    - **The plan is invisible outside the running turn.** It is shown while the
      work happens and deleted with the status, by choice. What is not solved is
      correcting one: the person can read a plan and cannot change it.
@@ -316,6 +309,13 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
 
 Recorded, not approved, not begun, and not in the order above. One line each.
 
+- **Finish the `todo` tool.** What 4.4 left: one live turn where a plan and the
+  work finish together, on a fresh conversation so the model is not copying its
+  own previous turn; separating the two jobs one line of wording now does at
+  once, which is when a list is worth opening and how coarse its items should
+  be; and a turn that ends with an item the model does not want to close, which
+  is the only thing that would test the stopping extension.
+  `reports/2026-08-31_v2_todo_live_failure.md`.
 - **The assistant does not hand over what it made.** Live on 2026-08-30, with
   standing instructions that said not to send code into the chat: asked for an
   HTML page it wrote `house.html`, inspected it, and answered with the literal
