@@ -4,9 +4,10 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. 4.5.5 closed 2026-09-03, accepted offline, on
-a real browser, live and in the deployed profile the same day; 4.6a is next
-and is not approved.
+**Current approved step:** none. 4.5 and 4.5.5 closed 2026-09-03, accepted
+offline and live; deployed to `assistant-control` the same day, and the
+deployed `/check` on that code has not been run yet. 4.6a is next and is not
+approved.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -189,8 +190,9 @@ What exists. How it was reached, and every number, is in the linked report.
      result, not a failed request; names resolve against the allowlist and
      nothing is invented. Every family carries its codes; `write_file` is
      atomic. Accepted: `scripts/loop_live.py` A–E live, including a failing
-     tool read and answered by the model, and `/check` 9/9 in the deployed
-     profile. `docs/v2_tool_system.md`,
+     tool read and answered by the model. Deployed 2026-09-03; the `/check`
+     9/9 reported that day ran on the earlier container and is not evidence
+     for it. `docs/v2_tool_system.md`,
      `reports/2026-09-03_v2_tool_system_implementation.md`,
      `DECISIONS.md` 2026-09-03.
    - **4.5.5 Browser capability — done 2026-09-03.** One `BrowserSession` with
@@ -200,8 +202,9 @@ What exists. How it was reached, and every number, is in the linked report.
      with refs. No click, type or navigate tool in this version. The trust
      boundary is a property of the session, offline for a local artifact and a
      request policy for the isolated renderer, which drives the same session.
-     Live: `scripts/loop_live.py` F passed 2026-09-03; `/check` 9/9 in the
-     deployed profile the same day. `reports/2026-09-03_v2_browser_session.md`,
+     Live: `scripts/loop_live.py` F passed 2026-09-03; deployed the same
+     day; the `/check` 9/9 reported that day ran on the container before this
+     deploy and is not evidence for it. `reports/2026-09-03_v2_browser_session.md`,
      `docs/v2_tool_system.md`, `ISSUES.md` ISS-0008.
    - **4.6a Context engine.** Context preparation before every model step rather
      than folding after a turn: measure the surface, shorten old tool results

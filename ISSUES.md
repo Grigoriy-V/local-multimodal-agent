@@ -51,6 +51,45 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0011 — every look at a page carried the whole page back as its address
+
+- **Status:** fixed in the tree, 2026-09-03 — not yet seen in the deployed profile
+- **Seen:** 2026-09-03, deployed, thread `afb9d76a`, runs `8ffab1aa` and
+  `240f09ea`
+- **Costs:** `inspect_page` reported `url: location.href`, and for a local
+  document that is the `data:` URL — the entire page, base64. A 7 KB page put
+  about 9 KB of base64 into the model's context on every look, for nothing
+  the model can read; the third call of run `8ffab1aa` was 17 764 input
+  tokens. Stored history carries it too.
+- **Reproduce:** `inspect_page` on any local file, on code before 4.5.5.
+- **Cause:** the old evidence script returned the location of a data URL.
+- **Fixed by:** roadmap 4.5.5, `page_report` in `app/tools/browser.py`, which
+  reports no address for a local document. Fixed status once seen in the
+  deployed profile.
+- **Related:** 4.6a, which will have to shorten such results anyway
+
+### ISS-0010 — "here is the screenshot", and nothing was sent
+
+- **Status:** open
+- **Seen:** 2026-09-03, deployed, thread `afb9d76a`, twice in one session
+- **Costs:** asked "пришли скрин", the assistant calls `inspect_page`, sees
+  the screenshot itself, and answers "Вот скриншот вашего приложения". The
+  person receives text. Told "Я не получил изображение", it answers that it
+  cannot attach an image to the chat and offers the workspace path instead.
+  Only "скриншот отправь", the third request, produced a `send_file` and the
+  picture. Both claims are false: `send_file` delivered that same PNG one turn
+  later, and the brief says so in words ("a direct request to receive a
+  screenshot or file is such a decision: perform the send_file call").
+- **Reproduce:** make a page, then ask for a screenshot in one word.
+- **Cause:** unknown. The 2026-08-29 note in `app/capabilities.py` records the
+  same belief ("output supports only text") before the brief was written to
+  contradict it, so the brief has not displaced it.
+- **Evidence:** runs `8ffab1aa` (inspect, "вот скриншот", nothing outbound),
+  `240f09ea` (same), `eda12665` ("не могу прикрепить"), `29c2bd17`
+  (`send_file` of the PNG, delivered), 2026-09-03T04:06–04:09Z
+- **Related:** ISS-0003 is the same shape for a file; 4.7 scenario suite is
+  where a prompt change would be accepted
+
 ### ISS-0009 — the person reads an answer for a minute and then it is deleted
 
 - **Status:** open
@@ -91,6 +130,12 @@ Rules that keep the file honest:
   rendered or read back; the answer described the application as working. So
   the gap is not only that the loop cannot exercise an artifact — an explicit
   instruction to check did not produce a look either.
+- **Also seen:** 2026-09-03, thread `afb9d76a`, "Task Board test 3": written
+  in one call and described as done without a look (run `0bf67569`). Asked
+  for a screenshot, the assistant first **rewrote the person's file** to seed
+  it with sample tasks so the picture would show columns in use (run
+  `8ffab1aa`) — an unasked change to the deliverable made for the sake of the
+  evidence. The person reports the application itself works.
 - **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`, section "Three
   live tests on a task big enough for a plan"
 - **Related:** ISS-0004; roadmap 4.5.5. Since 2026-09-03 `BrowserSession`
@@ -185,6 +230,10 @@ Rules that keep the file honest:
   by name.
 - **Cause:** handing something over is `send_file`, and the model reaches for a
   link. Why it prefers the link is unknown.
+- **Also seen:** 2026-09-03, deployed, thread `afb9d76a`, run `00e46d2a`:
+  "и файл приложения" answered with the path `Task Board test 3/index.html`
+  and "you can open it in any browser"; the file came only after "пришли
+  файлы" (run `fb42cdb7`, `send_file`, delivered).
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`
 
 ### ISS-0002 — a picture someone sends is never kept
