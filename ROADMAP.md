@@ -251,6 +251,8 @@ What exists. How it was reached, and every number, is in the linked report.
      actually said, returning real messages and tool results rather than another
      summary, so a detail a summary lost is recoverable. Full-text in both
      profiles; it joins the `ConversationStore` contract suite. No vector store.
+     Reviewed against the references, not yet approved:
+     `reports/2026-09-03_v2_history_recovery_review.md`.
    - **4.7 Restart, resume and the scenario suite**, asserting on harness events
      and outcomes rather than model wording, and compared against item 3's
      numbers, including that a turn continues correctly across a compaction.
