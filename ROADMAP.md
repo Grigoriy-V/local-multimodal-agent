@@ -314,6 +314,8 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
 Recorded, not approved, not begun, and not in the order above. One line each;
 an observed defect is described in `ISSUES.md`, not here.
 
+- **The whole-code review of 2026-09-03**, thirteen findings ranked and an
+  order proposed, none approved: `reports/2026-09-03_v2_whole_code_review.md`.
 - **Finish the `todo` tool.** What 4.4 left: a live turn where a plan and the
   finished work arrive together, the wording split into when a list is worth
   opening and how coarse its items are, and a turn ending on an item the model
