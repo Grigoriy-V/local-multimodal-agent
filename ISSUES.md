@@ -386,6 +386,11 @@ Rules that keep the file honest:
   the one file was still listed as a path and not sent. Second (thread
   `052869f2`): three files as paths and the markdown image again, no send at
   all. The brief does not hold; the status stays open.
+- **Mitigated again:** 2026-09-03, every tool that leaves a workspace item
+  now says in its result `to hand it to the person: send_file(path="…")`
+  (`DECISIONS.md` 2026-09-03). If that does not hold live, the human has
+  reopened an adapter delivery of a markdown image, on the condition that
+  no delivery path blocks another.
 - **Decided:** 2026-09-03, the human rejected a mechanical backstop in the
   adapter (delivering a markdown image the model wrote) as a crutch.
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`

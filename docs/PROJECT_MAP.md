@@ -240,6 +240,10 @@ in the text is what the model reads and is not a protocol. Stored history
 carries the text projection until the schema-3 migration adds the column.
 `BaseException` alone propagates, because a stop must be able to stop.
 
+A tool whose result is a workspace item says in the result how it reaches
+the person, as the call to make (`handover` in `app/tools/base.py`); the
+decision stays the model's. `DECISIONS.md` 2026-09-03.
+
 A call whose arguments could not be read as a JSON object still reaches the
 loop, with the text kept on `ToolCall.raw_arguments`, and is refused as one
 `bad_arguments` result with the tool's signature; the request is not failed.

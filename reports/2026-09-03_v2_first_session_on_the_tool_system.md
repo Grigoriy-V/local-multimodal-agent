@@ -236,6 +236,23 @@ is gone at the next message anyway. `FinishesItsOwnList` defaults to no
 objection; the seam and the class stay for an extension whose objection is
 worth a second generation. `DECISIONS.md` 2026-09-03.
 
+## The turn on the seam-free code, and what the tools now say
+
+Thread of 07:36Z, run `752486c1`: 8 model calls, 7 tool calls, no steering,
+no failure, the answer written once and delivered once, 74 s. Clean, except
+the markdown image and the paths again, and the same needless rewrite of
+`index.html` after the plan update. "Пришли скриншот в чат" then produced
+`send_file` at once (run `a2e69c53`): with a direct command the model sends
+without hesitation; it is the unprompted delivery it gets wrong.
+
+Every tool that leaves something in the workspace now names the action in its
+result: `to hand it to the person: send_file(path="…"); nothing is sent
+otherwise` — `write_file`, `inspect_page`, `view_pages`, `view_web_page`, one
+phrase in `app/tools/base.py`. `DECISIONS.md` 2026-09-03 makes it the rule:
+a tool result names the action its output enables. The human's condition for
+the adapter fallback, if this does not hold: one delivery path never blocks
+another.
+
 ## Next gate
 
 The person's own turn in Telegram on this code.

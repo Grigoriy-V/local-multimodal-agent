@@ -28,7 +28,7 @@ from app.documents import (
     render_pages,
 )
 from app.models import ContentPart
-from app.tools.base import BAD_ARGUMENTS, Tool, ToolError
+from app.tools.base import BAD_ARGUMENTS, Tool, ToolError, handover
 from app.tools.filesystem import NOT_A_FILE, NOT_FOUND, TOO_LARGE, resolve_in_root
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -131,7 +131,7 @@ def view_pages(root: Path, path: str, page: int = 1, pages: int = 1) -> list[Con
     note = (
         f"{target.name}: page(s) {numbers} of {total}, rendered as images for your "
         f"inspection. Saved rendered page path(s): {', '.join(saved)}. Nothing was sent "
-        "to the person; use send_file only if you decide to present one."
+        f"to the person; {handover(saved[0], 'a page')}"
     )
     if last < total:
         note += f" Call view_pages again with page={last + 1} for what follows."

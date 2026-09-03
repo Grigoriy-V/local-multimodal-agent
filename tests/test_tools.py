@@ -107,7 +107,7 @@ def test_write_file_creates_a_file(workspace: Path) -> None:
     result = tools(workspace)["write_file"].run(path="fresh.txt", content="hello")
 
     assert (workspace / "fresh.txt").read_text(encoding="utf-8") == "hello"
-    assert result == "created fresh.txt (5 characters)"
+    assert result == 'created fresh.txt (5 characters); to hand it to the person: send_file(path="fresh.txt"); nothing is sent otherwise'
 
 
 def test_write_file_accepts_an_absolute_path_inside_the_root(workspace: Path) -> None:

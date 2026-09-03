@@ -54,6 +54,19 @@ class ToolOutcome:
     failure: ToolFailure | None = None
 
 
+def handover(path: str, what: str = "it") -> str:
+    """How a workspace item reaches the person, said by the tool that made it.
+
+    A tool result names the action its output enables, in the shape of the
+    call. The model was handing a bare path over as a markdown image, live,
+    four turns in a row on 2026-09-03: a path looks like something to embed,
+    a call looks like something to make. The decision is still the model's;
+    the sentence only says what the option is.
+    """
+
+    return f"to hand {what} to the person: send_file(path={json.dumps(path)}); nothing is sent otherwise"
+
+
 def tool_failed(message: Message) -> bool:
     """Whether this tool result reports a failure rather than a result."""
 

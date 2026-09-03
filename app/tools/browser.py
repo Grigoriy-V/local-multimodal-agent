@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models import ContentPart
-from app.tools.base import Tool, ToolError
+from app.tools.base import Tool, ToolError, handover
 from app.tools.chromium import (
     LOAD_FAILED,
     MAX_SNAPSHOT_CHARS,
@@ -122,7 +122,7 @@ def page_report(
         f"browser: {browser}\n"
         f"network: the workspace's own files are served to the page; public addresses are "
         f"reachable under the same policy as view_web_page; private ones are refused\n"
-        f"screenshot: {screenshot}\n"
+        f"screenshot: {screenshot}; {handover(screenshot, 'this screenshot')}\n"
         f"\nconsole errors:\n{errors}\n"
         f"\nrequests refused (the page asked for these and the policy said no):\n{blocked}\n"
         f"\nstructure{cut}; an interactive element carries a ref:\n{structure or '(empty page)'}\n"
@@ -177,7 +177,7 @@ async def inspect_local_page(
             report, image = await observe(session, artifact)
     except BrowserError as error:
         raise ToolError(str(error), code=error.code, detail=error.detail) from error
-    report = report.replace(artifact.as_posix(), artifact.relative_to(root).as_posix(), 1)
+    report = report.replace(artifact.as_posix(), artifact.relative_to(root).as_posix())
     return [
         ContentPart(kind="text", text=report),
         ContentPart(kind="image", data=image, media_type="image/png"),

@@ -22,7 +22,7 @@ from typing import Any
 
 from app.config import WebSettings
 from app.models import ContentPart
-from app.tools.base import Tool, ToolError
+from app.tools.base import Tool, ToolError, handover
 from app.web import (
     WebError,
     fetch_page,
@@ -87,8 +87,7 @@ async def _view(
         rendered.as_text(),
         "",
         f"Screenshot saved at {artifact.relative_to(root).as_posix()} for your inspection. "
-        "Nothing was sent to the person; call send_file with that path only if you decide "
-        "they should see it.",
+        f"Nothing was sent to the person; {handover(artifact.relative_to(root).as_posix(), 'this screenshot')}",
     ]
     if rendered.console_errors:
         note.append(f"Browser errors on the page: {'; '.join(rendered.console_errors)}")

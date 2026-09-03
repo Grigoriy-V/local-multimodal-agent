@@ -831,6 +831,34 @@ Supersedes / Superseded by
 Fills the seam left deliberately empty by 2026-08-30, "Whether a turn may end is
 a seam, not a policy". Does not change what that seam does or its default.
 
+## 2026-09-03 — A tool result names the action its output enables
+
+Decision
+
+A tool whose result is a workspace item the person might want says, in the
+result, how that item reaches them, in the shape of the call:
+`to hand it to the person: send_file(path="…"); nothing is sent otherwise`.
+One phrase, `app/tools/base.py` `handover`, used by every such tool —
+`write_file`, `inspect_page`, `view_pages`, `view_web_page` — and by any
+tool added later that leaves something in the workspace. The decision to
+send stays the model's; the result only names the option where the model
+reads it.
+
+Why
+
+Four live turns on 2026-09-03 ended with `![Screenshot](.agent/browser/….png)`
+and a list of paths, on a brief that said in words the person cannot see the
+workspace. A bare path reads as something to embed; a call reads as something
+to make. Two tools already said "call send_file with that path" in their own
+words and one did not; the human had asked for tools that tell the agent what
+to do with their output and asked why that was not canon. It is now.
+
+Consequences
+
+`reports/2026-09-03_v2_first_session_on_the_tool_system.md`. If the phrase does not hold live, the human has reopened the adapter
+option — treating a markdown image of a workspace file in the answer as a
+delivery — on one condition: one delivery path must never block another.
+
 ## 2026-09-03 — An open plan item no longer refuses the ending
 
 Decision

@@ -23,7 +23,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from app.tools.base import BAD_ARGUMENTS, Tool, ToolError
+from app.tools.base import BAD_ARGUMENTS, Tool, ToolError, handover
 
 MAX_ENTRIES = 200
 MAX_CHARS = 20_000
@@ -208,7 +208,7 @@ def _write_file(root: Path, path: str, content: str) -> str:
             f"path {path!r} could not be written", code=IO, detail=_detail(error)
         ) from error
     verb = "overwrote" if existed else "created"
-    return f"{verb} {path} ({len(content)} characters)"
+    return f"{verb} {path} ({len(content)} characters); {handover(path)}"
 
 
 def _edit_file(root: Path, path: str, old_text: str, new_text: str) -> str:
