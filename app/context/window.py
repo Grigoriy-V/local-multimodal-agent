@@ -222,10 +222,12 @@ def stub(call, text: str, media: Sequence[ContentPart], position: int | None = N
         size = f"{size}, {kinds}" if size else kinds
     if position is None:
         return f"[{what}{about}: {size}; shortened, call the tool again for the full result]"
-    return (
-        f"[{what}{about}: {size}; shortened — read_history {position} for the full result,"
-        " or call the tool again for a fresh one]"
-    )
+    # Only where the result is. The first wording offered "or call the tool
+    # again for a fresh one" as well, and live (run `live-90`, 2026-09-03)
+    # the model took that, found the file gone, and never came back for the
+    # stored words. It can call any tool anyway; the stub's one job is to
+    # say where the whole result is.
+    return f"[{what}{about}: {size}; shortened — the full result is stored: read_history {position}]"
 
 
 def within_media_budget(

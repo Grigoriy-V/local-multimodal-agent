@@ -51,6 +51,43 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0027 — a shortened result's stub invited the model to run the tool again
+
+- **Status:** fixed in the tree, 2026-09-03 — the stub says only where the
+  whole result is stored. Deployed the same day
+- **Seen:** 2026-09-03, `scripts/loop_live.py I`, run `live-90` (second
+  run): a `read_file` result shown as `[read_file config.ini: 342
+  characters; shortened — read_history 2 for the full result, or call the
+  tool again for a fresh one]`; the file was gone; the model called
+  `read_file`, got `fs.not_found`, listed the workspace and asked the person
+  for the file. It never took the position it had been given.
+- **Costs:** the way back to a stored result exists and is not used; a
+  non-repeatable result is lost to the person in practice.
+- **Reproduce:** the scenario as it stood in `101718c`.
+- **Cause:** the stub offered two ways and the model took the familiar one,
+  then treated its failure as the end. With the wording "the full result is
+  stored: read_history 2" the third run tried the file, then read history,
+  and quoted the line.
+- **Evidence:** `reports/2026-09-03_v2_history_recovery_review.md`
+- **Related:** ISS-0026
+
+### ISS-0026 — reading a call back did not show what the call returned
+
+- **Status:** fixed in the tree, 2026-09-03 — `read_history` of a message
+  that made calls appends their results; a `search_history` hit on a call
+  shows what came back on the next line. Deployed the same day
+- **Seen:** 2026-09-03, `scripts/loop_live.py H`, run `live-80` (first
+  run): asked for the exact text of an earlier failed write, the model
+  searched `write_file`, found the call at #1, read #1, saw no error in it,
+  and answered that no error was recorded. The failure was #2.
+- **Costs:** the exact detail the summary lost stays lost, with a confident
+  wrong answer.
+- **Reproduce:** the scenario as it stood in `101718c`.
+- **Cause:** a call and its result are two stored rows and the tools
+  returned one of them; to a reader they are one thing.
+- **Evidence:** `reports/2026-09-03_v2_history_recovery_review.md`
+- **Related:** ISS-0027
+
 ### ISS-0025 — `/compact` is recorded as a failed turn
 
 - **Status:** fixed in the tree, 2026-09-03 — the command finishes its trace

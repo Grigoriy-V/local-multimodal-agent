@@ -563,8 +563,8 @@ def test_a_stub_in_history_says_where_the_whole_result_is() -> None:
     surface = context.surface(turn)
 
     assert surface.history[2].content[0].text == (
-        "[fetch_page https://example.com/: 500 characters; shortened — read_history 42 "
-        "for the full result, or call the tool again for a fresh one]"
+        "[fetch_page https://example.com/: 500 characters; shortened — the full result is "
+        "stored: read_history 42]"
     )
     assert surface.turn[1].content[0].text.endswith("shortened, call the tool again for the full result]")
     assert surface.stubbed == 2

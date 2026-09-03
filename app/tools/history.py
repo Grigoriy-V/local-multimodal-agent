@@ -16,7 +16,6 @@ asked otherwise.
 
 from __future__ import annotations
 
-import json
 import re
 
 from app.memory import ConversationStore
@@ -59,13 +58,31 @@ def snippet(text: str, query: str, width: int = SNIPPET_CHARS) -> str:
 
 
 def describe(message: Message) -> str:
-    """A stored message as words: its text, its calls, its failure."""
+    """A stored message as words: its text, its failure, its calls."""
 
-    parts = [message_text(message)]
-    for call in message.tool_calls:
-        arguments = json.dumps(call.arguments, ensure_ascii=False)
-        parts.append(f"[called {call.name} {arguments}]")
-    return "\n".join(part for part in parts if part)
+    return message_text(message)
+
+
+def with_results(
+    store: ConversationStore, thread_id: str, position: int, messages: list[Message]
+) -> list[Message]:
+    """The messages read, plus the results of the calls the last one made.
+
+    A call and what came back are one thing to a reader: live on 2026-09-03
+    (run `live-80`) the model read the call it had found, saw no error in
+    it, and said none had happened — the failure was the next message.
+    """
+
+    last = messages[-1]
+    if not last.tool_calls:
+        return messages
+    wanted = {call.id for call in last.tool_calls}
+    after = position + len(messages) - 1
+    for message in store.messages(thread_id, after=after, limit=len(wanted)):
+        if message.role != "tool" or message.tool_call_id not in wanted:
+            break
+        messages.append(message)
+    return messages
 
 
 def _search(
@@ -87,9 +104,25 @@ def _search(
         place = f" in conversation {hit.thread_id}" if all_conversations else ""
         lines.append(
             f"#{hit.position} {hit.role} {hit.created_at[:16]}{place}\n"
-            f"{snippet(hit.text, query)}"
+            f"{snippet(hit.text, query)}{outcome(store, hit)}"
         )
     return "\n\n".join(lines)
+
+
+def outcome(store: ConversationStore, hit) -> str:
+    """For a hit that is a call, what the tool said back, on the next line."""
+
+    if hit.role != "assistant":
+        return ""
+    following = store.messages(hit.thread_id, after=hit.position, limit=1)
+    if not following or following[0].role != "tool":
+        return ""
+    result = following[0]
+    said = message_text(result)
+    if not said:
+        return ""
+    word = "failed" if result.failure is not None else "returned"
+    return f"\n  → #{hit.position + 1} {word}: {snippet(said, '', 160)}"
 
 
 def _read(
@@ -117,6 +150,7 @@ def _read(
             f"{store.message_count(target)} messages",
             code=NOT_FOUND,
         )
+    messages = with_results(store, target, position, messages)
     text = "\n\n".join(
         f"#{position + index} {message.role}\n{describe(message)}"
         for index, message in enumerate(messages)

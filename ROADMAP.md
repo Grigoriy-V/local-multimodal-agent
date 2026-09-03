@@ -260,9 +260,14 @@ What exists. How it was reached, and every number, is in the linked report.
      by opening), `search_messages` on the contract, `search_history` and
      `read_history` as the model's own tools, the stub naming its position,
      the summary saying the words behind it are kept, and `offset` on
-     `read_file`, `fetch_page` and `read_history`. Offline suite green.
-     **Next gate:** the Neon migration to schema 4, then deploy and the
-     after-deploy check, then the two live turns of the review's step 5.
+     `read_file`, `fetch_page` and `read_history`. Same day, after the
+     human's word: Neon migrated to schema 4 (906 rows filled), deployed,
+     after-deploy check passed. The two live turns are scenarios H and I of
+     `scripts/loop_live.py`; each found a defect on its first run (ISS-0026
+     a call read without its result, ISS-0027 a stub inviting a re-run),
+     both fixed, both scenarios passed, redeployed, after-deploy check
+     passed on the redeploy (G: 60 s, three files and the screenshot in one
+     delivery). **Owed:** the human's own turn.
    - **4.7 Restart, resume and the scenario suite**, asserting on harness events
      and outcomes rather than model wording, and compared against item 3's
      numbers, including that a turn continues correctly across a compaction.

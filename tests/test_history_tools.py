@@ -80,11 +80,23 @@ def test_other_conversations_are_searched_only_when_asked(store: SqliteStore) ->
 def test_reading_returns_the_message_as_it_was_said(store: SqliteStore) -> None:
     a_conversation(store)
 
-    text = tools(store)["read_history"].run(position=1, count=2)
+    text = tools(store)["read_history"].run(position=1)
 
-    assert text.startswith("#1 assistant\n")
-    assert '[called write_file {"path": "board/index.html", "content": "<html>"}]' in text
-    assert "#2 tool\nerror\nfs.not_found: no such folder: board" in text
+    assert text.startswith("#1 assistant\nwrite_file {\"path\": \"board/index.html\", \"content\": \"<html>\"}")
+    assert "#2 tool\nerror\nfs.not_found: no such folder: board" in text, "a call comes with its result"
+    assert "#3" not in text
+
+
+def test_a_hit_on_a_call_shows_what_came_back(store: SqliteStore) -> None:
+    """Run `live-80`, 2026-09-03: the model found the call, not the failure
+    one message later, and said no error had happened."""
+
+    a_conversation(store)
+
+    found = tools(store)["search_history"].run(query="write_file")
+
+    assert found.startswith("#1 assistant 20")
+    assert "\n  → #2 failed: error fs.not_found: no such folder: board" in found
 
 
 def test_a_long_message_comes_in_pages(store: SqliteStore) -> None:

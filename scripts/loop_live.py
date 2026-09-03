@@ -19,6 +19,10 @@ scripted answer:
     G  the person's own request       an app, a look, and the files and the
                                       screenshot handed over unprompted, with
                                       no plan tool in the toolbox
+    H  a detail behind the summary    the exact error text is found in stored
+                                      history, not guessed from the summary
+    I  a result already shortened     read back by position rather than the
+                                      tool run again
 
 Each scenario is checked, not only printed: a line starting with PASS or FAIL
 says whether what happened is what the scenario expects, and the exit code is
@@ -35,8 +39,9 @@ A to D are the acceptance evidence for roadmap sub-step 4.1; E is the live
 half of 4.5 (`docs/v2_tool_system.md`, "Acceptance for 4.5"); F is the live
 half of 4.5.5 and needs a browser where this runs; G is the request the
 person tested live all day on 2026-09-03, in the plan-off shape that is the
-default, with the numbers a plan-on run can be compared against. Every run of
-it costs GPU time and needs permission at the time.
+default, with the numbers a plan-on run can be compared against. H and I are
+the live half of 4.6b: the way back to what a summary or a stub stands for.
+Every run of it costs GPU time and needs permission at the time.
 """
 
 from __future__ import annotations
@@ -50,7 +55,7 @@ from pathlib import Path
 from app.agent.runtime import create_agent, text_message
 from app.agent.stop import MemoryStopRequests
 from app.config import AgentSettings
-from app.models import Message, ToolFailure
+from app.models import ContentPart, Message, ToolCall, ToolFailure
 from app.telemetry import TurnRun
 from app.telemetry.open import open_telemetry
 
@@ -194,8 +199,8 @@ def chosen(argv: list[str]) -> frozenset[str]:
 
     if "--after-deploy" in argv:
         return frozenset(AFTER_DEPLOY)
-    letters = {arg.upper() for arg in argv if len(arg) == 1 and arg.upper() in "ABCDEFG"}
-    return frozenset(letters) if letters else frozenset("ABCDEFG")
+    letters = {arg.upper() for arg in argv if len(arg) == 1 and arg.upper() in "ABCDEFGHI"}
+    return frozenset(letters) if letters else frozenset("ABCDEFGHI")
 
 
 async def main() -> int:
@@ -384,6 +389,91 @@ async def main() -> int:
                 print("  note        the closing text repeats the text beside the call (ISS-0009)")
             elif len(g.text) > 1:
                 print(f"  note        {len(g.text)} texts in the turn; the adapter shows each once")
+
+        if wanted("H"):
+            # H — the exact words behind the summary. A stored turn with one
+            # failure, folded into a summary that keeps the fact of the failure
+            # and loses its text, the way a summary does. The question is for
+            # the text; the only place it exists is history.
+            exact = "no such folder: board-7/assets — the parent 'board-7' is a file"
+            agent.store.append(
+                "chat-h",
+                [
+                    text_message("Create board-7/assets/app.js with a hello function."),
+                    Message(
+                        role="assistant",
+                        tool_calls=(ToolCall(id="h1", name="write_file", arguments={"path": "board-7/assets/app.js", "content": "function hello() {}"}),),
+                    ),
+                    Message(
+                        role="tool",
+                        tool_call_id="h1",
+                        content=[ContentPart(kind="text", text=f"error: {exact}")],
+                        failure=ToolFailure(code="fs.blocked", message=exact),
+                    ),
+                    Message(role="assistant", content=[ContentPart(kind="text", text="The write failed: something in the way is a file. Shall I remove it?")]),
+                    text_message("Not now."),
+                    Message(role="assistant", content=[ContentPart(kind="text", text="Okay.")]),
+                ],
+                USER,
+            )
+            agent.store.set_summary(
+                "chat-h",
+                "Goal: create board-7/assets/app.js with a hello function.\n"
+                "Done: one write_file attempt, which failed because of something in the path.\n"
+                "Open: the person said not now.",
+                6,
+            )
+            agent.store.record_compaction("chat-h", through=6, folded=6, trigger="asked", summary_chars=150)
+            h = await Turn(agent, telemetry, 80).ask(
+                "chat-h",
+                "Какой точно был текст ошибки при той записи? Процитируй его дословно.",
+            )
+            failed += h.report(
+                "H the exact words behind the summary",
+                {
+                    "history was searched or read": "search_history" in h.tools or "read_history" in h.tools,
+                    "the exact text is in the answer": "board-7/assets" in h.answer and "is a file" in h.answer,
+                    "nothing was written or retried": "write_file" not in h.tools,
+                    "no tool failed": not h.failures,
+                },
+            )
+
+        if wanted("I"):
+            # I — a result already shortened on the surface. Three stored results,
+            # so the first is a stub naming its position; the detail asked for is
+            # in that one. The file is not on disk any more (the first run of
+            # this, `live-90`, left it there and the model simply read it again,
+            # which was fair), so the words exist only in history and the stub's
+            # locator is the way back. Trying the file first is allowed.
+            config = "\n".join(f"setting_{n} = {n * 7}" for n in range(1, 40)) + "\nretry_timeout = 4711\n"
+            listing = "\n".join(f"file_{n}.txt" for n in range(1, 40))
+            agent.store.append(
+                "chat-i",
+                [
+                    text_message("Read config.ini, then list the workspace twice so I can compare."),
+                    Message(role="assistant", tool_calls=(ToolCall(id="i1", name="read_file", arguments={"path": "config.ini"}),)),
+                    Message(role="tool", tool_call_id="i1", content=[ContentPart(kind="text", text=config)]),
+                    Message(role="assistant", tool_calls=(ToolCall(id="i2", name="list_files", arguments={"path": "."}),)),
+                    Message(role="tool", tool_call_id="i2", content=[ContentPart(kind="text", text=listing)]),
+                    Message(role="assistant", tool_calls=(ToolCall(id="i3", name="list_files", arguments={"path": "."}),)),
+                    Message(role="tool", tool_call_id="i3", content=[ContentPart(kind="text", text=listing)]),
+                    Message(role="assistant", content=[ContentPart(kind="text", text="Read config.ini (40 settings) and listed the workspace twice; the listings match.")]),
+                ],
+                USER,
+            )
+            i = await Turn(agent, telemetry, 90).ask(
+                "chat-i",
+                "What was the retry_timeout in the config we read earlier? Quote the line.",
+            )
+            failed += i.report(
+                "I a shortened result, read back",
+                {
+                    "the value is in the answer": "4711" in i.answer,
+                    "read back by position": "read_history" in i.tools,
+                },
+            )
+            if "read_file" in i.tools:
+                print("  note        the model tried the file first, then read history")
     finally:
         await agent.aclose()
         telemetry.close()

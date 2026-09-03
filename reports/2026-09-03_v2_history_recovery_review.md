@@ -227,5 +227,47 @@ Steps 1 and 2 of §7, after the human's "делай". In the tree, not deployed:
   footer now tells the page's cut apart from the download's own cut.
 
 Tests: 13 new (contract, migration, tools, surface, paging); the offline
-suite 1006 passed, 27 skipped. Not done: the Neon migration (gate), deploy,
-the two live turns.
+suite 1006 passed, 27 skipped.
+
+## Migrated, deployed, and the two live turns
+
+Neon to schema 4 with `tools/setup_control_plane.py` after the human's word:
+906 message rows, all filled, 789k characters of text, `messages_search`
+present, a search for `index | html` returning today's `write_file` calls.
+`assistant-control` deployed; `loop_live.py --after-deploy` passed (G: three
+writes, `inspect_page`, one `send_file` with the three files and the
+screenshot, 66 s). Tool schemas grew from 2.8k to 5.2k estimated tokens on
+the local profile's toolbox, 1.6k of it the two new tools.
+
+The two live turns of §7 step 5 are now scenarios H and I of
+`scripts/loop_live.py`, so they can be run again. Each was run until it
+passed, and each first run found a defect of the design as built:
+
+**H, the exact words behind the summary.** A stored turn with one failed
+write, folded into a summary that keeps the fact of the failure and loses
+its text; the question asks for the text. First run (`live-80`): the model
+searched `write_file`, found the call, read it, and said no error was
+recorded — the failure was the next message (ISS-0026). Fix: reading a
+message that made calls returns their results with it, and a hit on a call
+shows what came back. Second run: one `search_history`, the failure shown
+under the hit, the exact text quoted, 20 s, 2 model calls.
+
+**I, a result already shortened.** Three stored results, the first a stub
+naming its position, the detail asked for in that one, the file no longer
+on disk. First run with the file still on disk: the model read the file
+again, fairly, and the check was withdrawn as too strong. Second run with
+the file gone (`live-90`): the model read the file, got `fs.not_found`,
+listed the workspace and asked for the file — never the position in the
+stub, which also offered "or call the tool again" (ISS-0027). Fix: the
+stub says only where the result is stored. Third run: `read_file`
+(not found), `list_files`, `search_history`, `read_history` 2, the line
+quoted; 19 s, 5 model calls. The model still tries the file first, which
+is allowed; the way back is taken when the file is gone.
+
+What this says about the design: the tools are right and the wording around
+them decided both outcomes. A locator is used when it is the only thing
+offered; a call is useful only with its result. Neither needed a schema or
+a store change. Redeployed after both fixes; the after-deploy check passed
+again on that redeploy (G: 6 model calls, 5 tool calls, 60 s, the three
+files and the screenshot in one `send_file`). Offline suite after the fixes:
+1008 passed, 27 skipped.
