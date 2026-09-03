@@ -262,9 +262,9 @@ class Agent:
                 ),
                 # Planning is not a granted capability: it reaches nothing, costs
                 # nothing to hold and has no root to be confined to. It is part
-                # of what an agent is here, in the way memory is — unless the
-                # person switched it off (`/plan off`), in which case the tool
-                # and every brief line about it are simply absent.
+                # of what an agent is here, in the way memory is — when the
+                # person has switched it on (`/plan on`). Off, the tool and
+                # every brief line about it are simply absent.
                 *(todo_tools() if planning_enabled(self.workspace) else ()),
             ],
         )

@@ -178,7 +178,9 @@ What exists. How it was reached, and every number, is in the linked report.
      message, so there is no store table and no schema 3. An open item no
      longer refuses an ending (2026-09-03: every live objection bought a tick
      and a duplicate answer); the plan is shown inside the transient Telegram
-     status message. **Never observed: a live turn where a
+     status message. Off by default since 2026-09-03, `/plan on` in Telegram
+     turns it on: measured on one request it cost 12 model calls and 90 s
+     where 5 and 62 s did the same work. **Never observed: a live turn where a
      plan and the finished work arrive together.** The open problems are in
      `ISSUES.md`; the follow-up is in Not started.
      `reports/2026-08-31_v2_todo_live_failure.md`.

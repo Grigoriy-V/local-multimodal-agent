@@ -14,6 +14,9 @@ scripted answer:
                                       model recovers, telemetry says why
     F  a page the model made          it looks at it with inspect_page, and the
                                       structure with refs is what it read
+    G  the person's own request       an app, a look, and the files and the
+                                      screenshot handed over unprompted, with
+                                      no plan tool in the toolbox
 
 Each scenario is checked, not only printed: a line starting with PASS or FAIL
 says whether what happened is what the scenario expects, and the exit code is
@@ -28,8 +31,10 @@ conversations. The run ids it prints can be read back with
 
 A to D are the acceptance evidence for roadmap sub-step 4.1; E is the live
 half of 4.5 (`docs/v2_tool_system.md`, "Acceptance for 4.5"); F is the live
-half of 4.5.5 and needs a browser where this runs. Every run of it costs GPU
-time and needs permission at the time.
+half of 4.5.5 and needs a browser where this runs; G is the request the
+person tested live all day on 2026-09-03, in the plan-off shape that is the
+default, with the numbers a plan-on run can be compared against. Every run of
+it costs GPU time and needs permission at the time.
 """
 
 from __future__ import annotations
@@ -297,6 +302,41 @@ async def main() -> int:
                 "an answer was given": bool(f.answer),
             },
         )
+
+        # G — the person's own request, plan off (the default). What the checks
+        # ask is what the person asked for: it was built, looked at, and both
+        # the files and the screenshot came without a second request.
+        g = await Turn(agent, telemetry, 70).ask(
+            "chat-g",
+            "Создай небольшое веб-приложение Task Board. В отдельной папке Task Board\n\n"
+            "три колонки: To Do, In Progress, Done;\n"
+            "можно создавать и удалять задачи;\n"
+            "задачи можно переносить между колонками;\n"
+            "состояние сохраняется в localStorage и восстанавливается после перезагрузки;\n"
+            "добавь фильтр по тексту задачи;\n"
+            "интерфейс должен нормально выглядеть на desktop и mobile;\n\n"
+            "В итоге пришли в чат скриншот и файлы программы",
+        )
+        sent = [
+            part.name or part.kind
+            for message in g.tool_results
+            for part in message.content
+            if getattr(part, "outbound", False)
+        ]
+        failed += g.report(
+            "G the person's request, plan off",
+            {
+                "no plan tool was offered or called": "todo_write" not in g.tools
+                and "todo_write" not in agent.toolbox("chat-g").names,
+                "write_file then inspect_page": "write_file" in g.tools and "inspect_page" in g.tools,
+                "the files were sent": any(name.endswith(".html") for name in sent),
+                "the screenshot was sent": any(name.endswith(".png") for name in sent),
+                "no path was offered as delivery": "![" not in g.answer,
+                "one answer, not two": len(g.text) == 1,
+                "no tool failed": not g.failures,
+            },
+        )
+        print(f"  sent        {sent}")
     finally:
         await agent.aclose()
         telemetry.close()

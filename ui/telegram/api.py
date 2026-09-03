@@ -29,7 +29,8 @@ rather than dropped.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+import json
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from html import escape
 from typing import Any, Self
@@ -617,6 +618,30 @@ class TelegramClient:
         body = response.json()
         if not body.get("ok"):
             raise TelegramError(f"telegram refused {method}: {body.get('description')}")
+
+    async def send_media_group(
+        self, chat_id: int, kind: str, items: Sequence[tuple[str, bytes]]
+    ) -> None:
+        """Several photos, or several documents, as one album.
+
+        `kind` is "photo" or "document"; Telegram does not mix them in one
+        group. Between two and ten items; the caller splits and singles out.
+        """
+
+        media = [
+            {"type": kind, "media": f"attach://file{index}"} for index in range(len(items))
+        ]
+        try:
+            response = await self._client.post(
+                "/sendMediaGroup",
+                data={"chat_id": str(chat_id), "media": json.dumps(media)},
+                files={f"file{index}": (name, data) for index, (name, data) in enumerate(items)},
+            )
+        except httpx.HTTPError as error:
+            raise TelegramError(f"telegram could not be reached ({error})") from error
+        body = response.json()
+        if not body.get("ok"):
+            raise TelegramError(f"telegram refused sendMediaGroup: {body.get('description')}")
 
     async def send_document(self, chat_id: int, name: str, data: bytes) -> None:
         await self._upload(

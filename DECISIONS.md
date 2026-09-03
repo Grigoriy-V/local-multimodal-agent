@@ -831,6 +831,35 @@ Supersedes / Superseded by
 Fills the seam left deliberately empty by 2026-08-30, "Whether a turn may end is
 a seam, not a policy". Does not change what that seam does or its default.
 
+## 2026-09-03 — The plan is off unless the person turns it on
+
+Decision
+
+The `todo_write` tool and the planning guidance are offered only when the
+person has switched planning on (`/plan on` in Telegram, the marker
+`.agent/plan.on` in their workspace). The default is off. The switch is per
+person, across every conversation and interface. `send_file` takes several
+paths in one call, and the Telegram adapter delivers several outbound items
+of one kind as one album.
+
+Why
+
+The same request, "Task Board", with the plan on and off on 2026-09-03: 12
+model calls, 11 tool calls and 90 s against 5, 4 and 62 s, the same files
+delivered either way; with the plan on the page was written twice and the
+answer twice (ISS-0016, ISS-0019). The plan's own defects go to 4.7; until it
+earns its cost, it is not part of what the agent is by default. The switch
+exists so the plan's defects can be measured apart from everything else's.
+Files went one per model call, about 1.2 s and 6.6 k input tokens each; one
+call carrying them all is the shape a person asks for.
+
+Consequences
+
+Amends 2026-08-31 "The agent's plan is the state of one turn": the lifetime,
+storage and display of the plan are unchanged; its presence is opt-in.
+`Agent.rewire` rebuilds the toolbox when the switch flips. `scripts/loop_live.py`
+G is the plan-off shape of the person's request.
+
 ## 2026-09-03 — A tool result names the action its output enables
 
 Decision

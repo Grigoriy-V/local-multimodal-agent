@@ -24,6 +24,22 @@ def test_send_file_marks_only_the_chosen_workspace_item_outbound(tmp_path: Path)
     assert result[1].data == b"png"
 
 
+def test_send_file_takes_several_paths_in_one_call(tmp_path: Path) -> None:
+    """Live 2026-09-03: three files, three model calls. One call carries them."""
+
+    for name in ("index.html", "style.css", "script.js"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    tools = presentation_tools(tmp_path)
+
+    result = tools[0].run(paths=["index.html", "style.css", "script.js"])
+
+    assert [part.name for part in result[1:]] == ["index.html", "style.css", "script.js"]
+    assert all(part.outbound for part in result[1:])
+    assert "index.html, style.css, script.js" in (result[0].text or "")
+    refused = Toolbox(tools).run(ToolCall("s", "send_file", {}))
+    assert refused.failure is not None and refused.failure.code == "bad_arguments"
+
+
 def test_send_file_remains_confined_to_the_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

@@ -334,7 +334,7 @@ Current formats in this subsystem include PDF, DOCX, TXT, Markdown and CSV.
 
 `app/tools/presentation.py` owns `send_file`.
 
-Observation tools do not send their media automatically. `send_file` selects one workspace item and marks its `ContentPart` as `outbound=True`; adapters transport that explicit outbound action.
+Observation tools do not send their media automatically. `send_file` selects one workspace item, or several in one call, and marks each `ContentPart` as `outbound=True`; adapters transport that explicit outbound action, and Telegram delivers several items of one kind as one album.
 
 This distinction applies to document previews and web screenshots as well as ordinary files.
 

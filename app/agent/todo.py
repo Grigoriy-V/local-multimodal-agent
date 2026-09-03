@@ -37,31 +37,33 @@ INSTRUCTION = (
     "answer with nothing."
 )
 
-# Whether this person's agent gets a plan at all. A marker file in their own
-# workspace, so it survives a restarted worker and is the same in every
-# interface, and so the person can see it beside `AGENTS.md`. Off means the
-# `todo_write` tool is not offered, and with it every brief line about
-# planning disappears, because the brief is generated from the toolbox. Asked
-# for on 2026-09-03 to tell the plan's defects apart from everything else's.
-PLAN_SWITCH = Path(".agent") / "plan.off"
+# Whether this person's agent gets a plan at all. Off unless a marker file in
+# their own workspace says on, so the choice survives a restarted worker, is
+# the same in every interface, and sits beside `AGENTS.md` where the person
+# can see it. Off means the `todo_write` tool is not offered, and with it every
+# brief line about planning disappears, because the brief is generated from
+# the toolbox. Off by default since 2026-09-03: measured on one request, the
+# plan cost 12 model calls and 90 s where 5 and 62 s did the same work
+# (`DECISIONS.md` 2026-09-03), and its own defects wait for 4.7.
+PLAN_SWITCH = Path(".agent") / "plan.on"
 
 
 def planning_enabled(workspace: Path | str) -> bool:
-    """Never raises: an unreadable marker is a plan that is on."""
+    """Never raises: an unreadable marker is a plan that is off."""
 
     try:
-        return not (Path(workspace) / PLAN_SWITCH).exists()
+        return (Path(workspace) / PLAN_SWITCH).is_file()
     except OSError:
-        return True
+        return False
 
 
 def set_planning(workspace: Path | str, enabled: bool) -> None:
     marker = Path(workspace) / PLAN_SWITCH
-    if enabled:
+    if not enabled:
         marker.unlink(missing_ok=True)
         return
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text("planning is off; /plan on in Telegram turns it back on\n", encoding="utf-8")
+    marker.write_text("planning is on; /plan off in Telegram turns it off\n", encoding="utf-8")
 
 
 # How many open items are named back to the model. The list is bounded already;

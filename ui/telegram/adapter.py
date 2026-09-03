@@ -46,6 +46,7 @@ from app.memory import ConversationStore, Thread
 from app.models import ContentPart, Message
 from app.telemetry import NO_TRACE, Telemetry, TurnTrace
 from ui.telegram.api import (
+    MAX_PHOTO_BYTES,
     PRODUCT_COMMANDS,
     Formatted,
     TelegramClient,
@@ -98,6 +99,9 @@ HELP_MARKDOWN = "\n".join(
     ]
 )
 HELP = Formatted.from_markdown(HELP_MARKDOWN)
+
+# Telegram's own limit on one album.
+ALBUM_LIMIT = 10
 
 # What `_send_media` can actually put in this chat, declared where that method
 # is, so the two cannot drift apart. Images go as photos and sound as a file,
@@ -863,18 +867,18 @@ class TelegramAdapter:
             await self.client.send_message(
                 chat_id,
                 "Planning is on from your next message: I may keep a task list for "
-                "longer work."
+                f"longer work. Kept as {PLAN_SWITCH.as_posix()} in your workspace; "
+                "/plan off turns it off again."
                 if argument == "on"
                 else "Planning is off from your next message: no task list, no "
-                f"planning tool. Kept as {PLAN_SWITCH.as_posix()} in your workspace; "
-                "/plan on turns it back on.",
+                "planning tool. That is the default; /plan on turns it on.",
             )
             return
-        state = "on" if planning_enabled(workspace) else "off"
+        state = "on" if planning_enabled(workspace) else "off (the default)"
         await self.client.send_message(
             chat_id,
-            f"Planning is {state}. /plan off removes my task list and the planning "
-            "tool from the next message on; /plan on brings them back.",
+            f"Planning is {state}. /plan on gives me a task list and the planning "
+            "tool from the next message on; /plan off takes them away.",
         )
 
     async def _show_conversations(
@@ -1039,8 +1043,15 @@ class TelegramAdapter:
     async def _send_media(
         self, chat_id: int, produced: Message, *, outbound_only: bool = False
     ) -> None:
-        """Translate media the application explicitly selected to Telegram."""
+        """Translate media the application explicitly selected to Telegram.
 
+        Consecutive items of one kind — photos, or documents — go as one album,
+        which is what one `send_file` with several paths asks for. A single
+        item goes as it always did, and an album Telegram refuses falls back
+        to one message per item rather than to nothing.
+        """
+
+        runs: list[tuple[str, list[tuple[str, bytes]]]] = []
         for index, part in enumerate(produced.content, start=1):
             if part.kind == "text" or not part.data:
                 continue
@@ -1049,10 +1060,23 @@ class TelegramAdapter:
             name = part.name or (
                 f"{part.kind}-{index}{MEDIA_SUFFIXES.get(part.media_type or '', '.bin')}"
             )
-            if part.kind == "image":
-                await self.client.send_photo(chat_id, name, part.data)
+            kind = "photo" if part.kind == "image" and len(part.data) <= MAX_PHOTO_BYTES else "document"
+            if runs and runs[-1][0] == kind and len(runs[-1][1]) < ALBUM_LIMIT:
+                runs[-1][1].append((name, part.data))
             else:
-                await self.client.send_document(chat_id, name, part.data)
+                runs.append((kind, [(name, part.data)]))
+        for kind, items in runs:
+            if len(items) > 1:
+                try:
+                    await self.client.send_media_group(chat_id, kind, items)
+                    continue
+                except TelegramError:
+                    pass
+            for name, data in items:
+                if kind == "photo":
+                    await self.client.send_photo(chat_id, name, data)
+                else:
+                    await self.client.send_document(chat_id, name, data)
 
     async def _ask_pending_calls(
         self, agent: Agent, chat_id: int, thread_id: str

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +73,7 @@ class FakeTelegram:
         self.keyboards: list[dict[str, Any]] = []
         self.documents: list[str] = []
         self.photos: list[str] = []
+        self.albums: list[tuple[str, list[str]]] = []
         self.files: dict[str, bytes] = {}
         self._next_message_id = 100
 
@@ -85,6 +87,15 @@ class FakeTelegram:
             return httpx.Response(200, content=self.files.get(name, b""))
 
         method = path.rsplit("/", 1)[-1]
+        if method == "sendMediaGroup":
+            body = request.content.decode("latin-1")
+            names = re.findall(r'filename="([^"]+)"', body)
+            media = body.partition('name="media"')[2].partition("\r\n\r\n")[2].partition("\r\n")[0]
+            kind = json.loads(media)[0]["type"]
+            self.albums.append((kind, names))
+            (self.photos if kind == "photo" else self.documents).extend(names)
+            self.calls.append((method, {}))
+            return httpx.Response(200, json={"ok": True, "result": []})
         if method in {"sendDocument", "sendPhoto"}:
             # Uploads are multipart, so the filename is read off the body rather
             # than from JSON like every other call.
@@ -945,28 +956,52 @@ async def test_agents_shows_how_to_start_when_there_are_none(
     assert "as you wrote them" in said or "as you wrote it" in said
 
 
-async def test_plan_off_removes_the_planning_tool_from_the_next_turn(
+async def test_plan_on_adds_the_planning_tool_from_the_next_turn(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    """Asked for 2026-09-03, to tell the plan's defects from everything else's."""
+    """Asked for 2026-09-03, to tell the plan's defects from everything else's;
+    off by default the same day, once the plan was measured to cost only."""
 
-    backend = ScriptedBackend(says("ok"), says("ok again"))
+    backend = ScriptedBackend(says("ok"), says("ok again"), says("and again"))
     adapter = build(telegram, settings, tmp_path, backend)
 
-    await adapter.handle_update(text_update("/plan off"))
     await adapter.handle_update(text_update("hello"))
-
-    assert "Planning is off" in telegram.sent[0]
-    assert (tmp_path / "workspace" / ".agent" / "plan.off").is_file()
     offered = [tool["function"]["name"] for tool in backend.tools_seen[-1]]
-    assert "todo_write" not in offered
-    assert "write_file" in offered
+    assert "todo_write" not in offered and "write_file" in offered
 
     await adapter.handle_update(text_update("/plan on"))
     await adapter.handle_update(text_update("hello again"))
 
-    assert not (tmp_path / "workspace" / ".agent" / "plan.off").exists()
+    assert "Planning is on" in telegram.sent[-2]
+    assert (tmp_path / "workspace" / ".agent" / "plan.on").is_file()
     assert "todo_write" in [tool["function"]["name"] for tool in backend.tools_seen[-1]]
+
+    await adapter.handle_update(text_update("/plan off"))
+    await adapter.handle_update(text_update("once more"))
+
+    assert not (tmp_path / "workspace" / ".agent" / "plan.on").exists()
+    assert "todo_write" not in [tool["function"]["name"] for tool in backend.tools_seen[-1]]
+
+
+async def test_several_sent_files_arrive_as_one_album(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Live 2026-09-03: three files, three model calls, three messages."""
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    for name in ("index.html", "style.css", "script.js"):
+        (workspace / name).write_text(name, encoding="utf-8")
+    backend = ScriptedBackend(
+        calls("send_file", paths=["index.html", "style.css", "script.js"]),
+        says("Sent."),
+    )
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("send me the app"))
+
+    assert telegram.albums == [("document", ["index.html", "style.css", "script.js"])]
+    assert telegram.calls.count(("sendDocument", {})) == 0
 
 
 async def test_plan_alone_says_which_way_it_is(
@@ -976,8 +1011,8 @@ async def test_plan_alone_says_which_way_it_is(
 
     await adapter.handle_update(text_update("/plan"))
 
-    assert telegram.sent[-1].startswith("Planning is on")
-    assert needs_model(Incoming(CHAT, ALLOWED, "/plan off")) is False
+    assert telegram.sent[-1].startswith("Planning is off (the default)")
+    assert needs_model(Incoming(CHAT, ALLOWED, "/plan on")) is False
 
 
 async def test_agents_set_writes_the_workspace_file_itself(
