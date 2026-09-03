@@ -100,9 +100,9 @@ on request, never another user's — the same `user_id` fence as facts.
 Failures are searchable too: `failure` is a JSON column and the error message
 is exactly the detail a summary drops, so the text column includes it.
 
-**Tool 2, `read_history(position, count=1, conversation=current)`.** The
-whole stored message(s) at a position, through the same `post_execute`
-backstop as any result. This is what turns a hit into the exact wording, and
+**Tool 2, `read_history(position, count=1, offset=0, conversation=current)`.**
+The whole stored message(s) at a position, through the same `post_execute`
+backstop as any result, `offset` to read past it (§6). This is what turns a hit into the exact wording, and
 it is what the stub points at.
 
 **Locator.** The stub gains the position:
@@ -149,14 +149,33 @@ Recommendation: **A**, and record it, so the sentence "the full result stays
 in history" reads with its cap. If a live case ever needs the middle of a
 result over 32k, that is the evidence for B.
 
+**Accepted 2026-09-03 (the human, after asking whether A cuts the agent's
+reach): A, plus paging.** A takes nothing away, because the cap already
+stands and the model has never seen the middle of a result past it. The
+actual limit on reach is elsewhere: `read_file` and `fetch_page` have no way
+to read a part, so the middle of a result over 32k characters is out of
+reach now and later, and B would not change that — `read_history` would hand
+it back through the same backstop. What keeps the agent whole is paging:
+
+- `read_file(path, offset=0, limit=…)` and `fetch_page(url, offset=0)` —
+  the model reaches any part of a repeatable source itself, the way a file is
+  read in pieces elsewhere;
+- `read_history(position, offset=0)` — the same for a stored message.
+
+A few lines per tool and one test each, inside 4.6b. What stays
+unrecoverable is only the middle of a *non-repeatable* result over 32k — a
+command's output, a page as it was at that moment — and no live turn to date
+has produced one.
+
 ## 7. Order of work, if approved
 
 1. `text` column and both indexes, `search_history`/`read_history` on the
    `ConversationStore` contract with the suite's tests: hits ranked, other
    users invisible, failures found by their message, a hit beyond a
    compaction found. Schema 4 on the local profile. No gate.
-2. The two tools, the locator in the stub, the prelude sentence. Offline
-   tests on the projection.
+2. The two tools, the locator in the stub, the prelude sentence; `offset`
+   on `read_file`, `fetch_page` and `read_history` (§6). Offline tests on
+   the projection and one per paged tool.
 3. **Gate:** the Neon migration to schema 4.
 4. Deploy; `/check` and `loop_live.py --after-deploy` (rule).
 5. Live, with permission: a folded conversation from today (the 26-message
