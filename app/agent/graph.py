@@ -42,10 +42,11 @@ from app.models import (
     ModelBackend,
     TextDelta,
     ToolCall,
+    ToolFailure,
     Usage,
 )
 from app.telemetry import NO_TRACE, Telemetry, TurnTrace
-from app.tools import ToolExecutor, Toolbox, tool_failed
+from app.tools import DECLINED, NOT_RUN, ToolExecutor, Toolbox, refusal_message, tool_failed
 
 # The key a text delta travels under on LangGraph's custom stream channel. The
 # channel carries anything, so the runtime and the graph have to agree on one
@@ -191,15 +192,12 @@ def declined(call: ToolCall) -> Message:
     a second question to a user who has already said no.
     """
 
-    return Message(
-        role="tool",
-        content=[
-            ContentPart(
-                kind="text",
-                text=f"error: the user declined the call to {call.name}; do not try it again",
-            )
-        ],
-        tool_call_id=call.id,
+    return refusal_message(
+        call,
+        ToolFailure(
+            code=DECLINED,
+            message=f"the user declined the call to {call.name}; do not try it again",
+        ),
     )
 
 
@@ -225,6 +223,7 @@ def failed_before(messages: Sequence[Message], call: ToolCall) -> int:
                 earlier.id in failures
                 and earlier.name == call.name
                 and earlier.arguments == call.arguments
+                and earlier.raw_arguments == call.raw_arguments
             ):
                 seen += 1
     return seen
@@ -237,11 +236,7 @@ def halted(call: ToolCall, reason: str) -> Message:
     something, and the honest answer to it is a result, not silence.
     """
 
-    return Message(
-        role="tool",
-        content=[ContentPart(kind="text", text=f"error: {reason}")],
-        tool_call_id=call.id,
-    )
+    return refusal_message(call, ToolFailure(code=NOT_RUN, message=reason))
 
 
 BUDGET_REASON = (
@@ -331,7 +326,7 @@ def build_agent(
 
     With a `checkpointer`, a turn that stops to ask a question — or dies — can be
     resumed from where it stopped. Without one the graph still runs; it just
-    cannot stop and come back, so a destructive call has nowhere to wait and is
+    cannot stop and come back, so a call needing approval has nowhere to wait and is
     refused rather than run unasked.
 
     `stops` is asked at each step boundary and never at the start: a turn that
@@ -747,7 +742,9 @@ def build_agent(
             call = item.call
             if not allowed[call.id]:
                 # Never run, so never counted as a tool call the turn spent.
-                trace.event("tool_failed", tool=call.name, status="declined")
+                trace.event(
+                    "tool_failed", tool=call.name, status="declined", code=DECLINED
+                )
                 messages.append(declined(call))
                 continue
             result = await executor.run(item)

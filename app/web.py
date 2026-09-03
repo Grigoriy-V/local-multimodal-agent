@@ -77,8 +77,21 @@ MAX_SEARCH_RESULTS = 10
 Resolver = Callable[[str, int], Sequence[tuple]]
 
 
+# What went wrong, for the tool that quotes it. `refused` is a destination this
+# will not go to; `unreachable` is one it tried and could not read;
+# `no_provider` is a capability not configured here. A page too large is
+# truncated and returned, not refused, so it has no code.
+REFUSED = "web.refused"
+UNREACHABLE = "web.unreachable"
+NO_PROVIDER = "web.no_provider"
+
+
 class WebError(RuntimeError):
     """A destination, a response or a provider that this refuses to work with."""
+
+    def __init__(self, message: str, *, code: str = UNREACHABLE) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 # --- where a request is allowed to go -----------------------------------------
@@ -165,24 +178,25 @@ def check_destination(url: str, resolve: Resolver = socket.getaddrinfo) -> Desti
     try:
         parts = urlsplit(url.strip())
     except ValueError as error:
-        raise WebError(f"{url!r} is not a URL: {error}") from error
+        raise WebError(f"{url!r} is not a URL: {error}", code=REFUSED) from error
     scheme = parts.scheme.lower()
     if scheme not in ALLOWED_SCHEMES:
         raise WebError(
-            f"only http and https addresses are allowed, not {parts.scheme or 'a relative path'!r}"
+            f"only http and https addresses are allowed, not {parts.scheme or 'a relative path'!r}",
+            code=REFUSED,
         )
     if parts.username or parts.password:
-        raise WebError("a URL carrying a username or password is refused")
+        raise WebError("a URL carrying a username or password is refused", code=REFUSED)
     try:
         host = parts.hostname
         port = parts.port
     except ValueError as error:
-        raise WebError(f"{url!r} has an unusable host or port: {error}") from error
+        raise WebError(f"{url!r} has an unusable host or port: {error}", code=REFUSED) from error
     if not host:
-        raise WebError(f"{url!r} has no host")
+        raise WebError(f"{url!r} has no host", code=REFUSED)
     port = port or (443 if scheme == "https" else 80)
     if port not in ALLOWED_PORTS:
-        raise WebError(f"port {port} is not one of the public web ports 80 and 443")
+        raise WebError(f"port {port} is not one of the public web ports 80 and 443", code=REFUSED)
 
     bare = host.strip("[]")
     literal = _public_address(bare)
@@ -194,7 +208,7 @@ def check_destination(url: str, resolve: Resolver = socket.getaddrinfo) -> Desti
         except ValueError:
             pass
         else:
-            raise WebError(f"{host} is not a public internet address")
+            raise WebError(f"{host} is not a public internet address", code=REFUSED)
         try:
             answers = resolve(host, port)
         except OSError as error:
@@ -205,7 +219,8 @@ def check_destination(url: str, resolve: Resolver = socket.getaddrinfo) -> Desti
         for candidate in addresses:
             if _public_address(candidate) is None:
                 raise WebError(
-                    f"{host} resolves to {candidate}, which is not on the public internet"
+                    f"{host} resolves to {candidate}, which is not on the public internet",
+                    code=REFUSED,
                 )
         # Every answer was checked; the first is the one the connection uses, so
         # no later resolution can substitute one that was not.
@@ -428,7 +443,8 @@ async def _fetch_hops(
                 if media_type not in TEXT_MEDIA_TYPES:
                     raise WebError(
                         f"{target} returned {media_type}, which fetch_page does not read. "
-                        "Save it to the workspace and read it there, or use view_web_page."
+                        "Save it to the workspace and read it there, or use view_web_page.",
+                        code=REFUSED,
                     )
                 body = bytearray()
                 truncated = False
@@ -497,7 +513,8 @@ async def search_web(
     if not settings.firecrawl_api_key:
         raise WebError(
             "web search is not configured here (WEB_FIRECRAWL_API_KEY is unset); "
-            "fetch_page and view_web_page still work on an address you already have"
+            "fetch_page and view_web_page still work on an address you already have",
+            code=NO_PROVIDER,
         )
     wanted = max(1, min(int(count or settings.search_results), MAX_SEARCH_RESULTS))
     owned = client is None
@@ -689,7 +706,8 @@ def renderer_headers(settings: WebSettings) -> dict[str, str]:
     if not separator or not key.startswith("wk-") or not secret.startswith("ws-"):
         raise WebError(
             "WEB_RENDERER_KEY must be '<wk-token-id>.<ws-token-secret>' for the "
-            "renderer's proxy authentication"
+            "renderer's proxy authentication",
+            code=NO_PROVIDER,
         )
     return {"Modal-Key": key, "Modal-Secret": secret}
 
@@ -710,7 +728,7 @@ async def render_remotely(
 
     settings = settings or WebSettings()
     if not settings.renderer_url:
-        raise WebError("no separate renderer is configured (WEB_RENDERER_URL is unset)")
+        raise WebError("no separate renderer is configured (WEB_RENDERER_URL is unset)", code=NO_PROVIDER)
     target = check_public_url(url, resolve)
     owned = client is None
     http = client or httpx.AsyncClient(timeout=settings.renderer_timeout)
@@ -767,6 +785,7 @@ async def render_page(
     if not settings.local_browser:
         raise WebError(
             "this environment may not open a web page itself and no isolated renderer is "
-            "configured (WEB_RENDERER_URL), so the page was not opened"
+            "configured (WEB_RENDERER_URL), so the page was not opened",
+            code=NO_PROVIDER,
         )
     return await render_locally(url, settings, full_page)

@@ -75,6 +75,9 @@ def _step(thread_id: str, position: int, message: Message, created_at: str) -> S
         step_type = "tool"
         name = "Tool"
     output = _text(message)
+    # Stored history has no failure column until the schema-3 migration in
+    # roadmap 4.6a, so a stored tool result is read by its text projection, which
+    # is all the model ever read from it. Live results ask `message.failure`.
     if message.role == "tool" and not output.startswith("error:"):
         output = "Completed."
     if message.tool_calls and not output:

@@ -35,6 +35,9 @@ IN_PROGRESS = "in_progress"
 COMPLETED = "completed"
 STATUSES = (PENDING, IN_PROGRESS, COMPLETED)
 
+# The one way this tool fails: the list could not be recorded honestly.
+INVALID = "todo.invalid"
+
 # Bounds on what one call may cost. Every update resends the whole list, and the
 # accepted call stays in the turn's messages for the rest of the turn, so an
 # unbounded list is paid for again on every model step that follows it.
@@ -99,32 +102,36 @@ def normalise(todos: Any) -> list[dict[str, str]]:
     """
 
     if not isinstance(todos, list):
-        raise ToolError("todos must be a list")
+        raise ToolError("todos must be a list", code=INVALID)
     if len(todos) > MAX_ITEMS:
-        raise ToolError(f"a list may hold at most {MAX_ITEMS} items")
+        raise ToolError(f"a list may hold at most {MAX_ITEMS} items", code=INVALID)
     items: list[dict[str, str]] = []
     seen: set[str] = set()
     for entry in todos:
         if not isinstance(entry, dict):
-            raise ToolError("each todo must be an object with content and status")
+            raise ToolError(
+                "each todo must be an object with content and status", code=INVALID
+            )
         unexpected = sorted(set(entry) - {"content", "status"})
         if unexpected:
-            raise ToolError(f"a todo has no field(s): {', '.join(unexpected)}")
+            raise ToolError(f"a todo has no field(s): {', '.join(unexpected)}", code=INVALID)
         content = entry.get("content")
         status = entry.get("status")
         if not isinstance(content, str) or not content.strip():
-            raise ToolError("each todo needs a non-empty content line")
+            raise ToolError("each todo needs a non-empty content line", code=INVALID)
         content = content.strip()
         if len(content) > MAX_CONTENT_CHARS:
             raise ToolError(
-                f"a todo line must be shorter than {MAX_CONTENT_CHARS} characters"
+                f"a todo line must be shorter than {MAX_CONTENT_CHARS} characters",
+                code=INVALID,
             )
         if content in seen:
-            raise ToolError(f"the list repeats {content!r}")
+            raise ToolError(f"the list repeats {content!r}", code=INVALID)
         seen.add(content)
         if status not in STATUSES:
             raise ToolError(
-                f"a todo status must be one of {', '.join(STATUSES)}, not {status!r}"
+                f"a todo status must be one of {', '.join(STATUSES)}, not {status!r}",
+                code=INVALID,
             )
         items.append({"content": content, "status": status})
     active = sum(1 for item in items if item["status"] == IN_PROGRESS)
@@ -133,7 +140,7 @@ def normalise(todos: Any) -> list[dict[str, str]]:
         # a property of the recorded shape: a list written when several steps
         # really do run at once would still be a coherent list, and nothing that
         # reads one back depends on the count.
-        raise ToolError(f"at most one todo may be in_progress, not {active}")
+        raise ToolError(f"at most one todo may be in_progress, not {active}", code=INVALID)
     return items
 
 

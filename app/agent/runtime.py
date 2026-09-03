@@ -59,6 +59,7 @@ CHECKPOINT_TYPES = [
     ("app.models.base", "Message"),
     ("app.models.base", "ContentPart"),
     ("app.models.base", "ToolCall"),
+    ("app.models.base", "ToolFailure"),
     ("app.models.base", "Usage"),
     ("app.context.window", "Context"),
     ("app.agent.stopping", "Steered"),

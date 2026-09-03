@@ -1,11 +1,11 @@
 # Roadmap
 
-**Updated:** 2026-08-31
+**Updated:** 2026-09-03
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. 4.4 closed 2026-08-31 with known problems
-rather than acceptance; 4.5 is next and is not approved.
+**Current approved step:** none. 4.5 closed 2026-09-03, accepted offline, live
+and in the deployed profile the same day; 4.5.5 is next and is not approved.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -180,13 +180,26 @@ What exists. How it was reached, and every number, is in the linked report.
      plan and the finished work arrive together.** The open problems are in
      `ISSUES.md`; the follow-up is in Not started.
      `reports/2026-08-31_v2_todo_live_failure.md`.
-   - **4.5 `ask_user`** for a genuinely missing decision, not for permission.
-   - **4.5.5 Saying only what was observed.** The assistant describes artifacts
-     and sources it did not open. Deliberately after the steps above, because
-     three rounds of prompt wording settled nothing, and deliberately not fixed
-     inside `inspect_page`, which the browser capability replaces. Includes the
-     residual acceptance 4.3 did not demonstrate. `ISSUES.md` ISS-0004,
-     `reports/2026-08-30_v2_prompt_assembly.md`.
+   - **4.5 Tool system — done 2026-09-03.** A typed outcome replaces the `error:` string protocol: a tool
+     returns content or raises `ToolError` with a code, the executor owns
+     resolution, coercion, validation, bounds, sanitizing, timeout, the
+     telemetry reason and the model projection, and `Message.failure` rides
+     through the checkpoint. A call with unreadable arguments is one refused
+     result, not a failed request; names resolve against the allowlist and
+     nothing is invented. Every family carries its codes; `write_file` is
+     atomic. Accepted: `scripts/loop_live.py` A–E live, including a failing
+     tool read and answered by the model, and `/check` 9/9 in the deployed
+     profile. `docs/v2_tool_system.md`,
+     `reports/2026-09-03_v2_tool_system_implementation.md`,
+     `DECISIONS.md` 2026-09-03.
+   - **4.5.5 Browser capability.** One `BrowserSession` designed for the full
+     set — open, snapshot with element refs, screenshot, evaluate, console,
+     navigate, click, type, press — with only observation exposed first:
+     `inspect_page` re-implemented on it and returning the snapshot. No click,
+     type or navigate tool in this version. The trust boundary is a property of
+     the session: a local artifact renders where the agent runs with the
+     network blocked, an internet page in the isolated renderer. `ISSUES.md`
+     ISS-0008; the session API is in `docs/v2_tool_system.md`.
    - **4.6a Context engine.** Context preparation before every model step rather
      than folding after a turn: measure the surface, shorten old tool results
      first, summarize only if that was not enough, and record what was done
@@ -208,6 +221,16 @@ What exists. How it was reached, and every number, is in the linked report.
      numbers, including that a turn continues correctly across a compaction.
      Live suites run as one warm window and only with explicit permission,
      because every run wakes a GPU.
+   - **4.8 `ask_user`** for a genuinely missing decision, not for permission.
+     Was 4.5; moved behind the tool system it returns through, and behind the
+     suite that can accept it.
+   - **4.9 Saying only what was observed.** The assistant describes artifacts
+     and sources it did not open. Was 4.5.5. Deliberately last, because three
+     rounds of prompt wording settled nothing, because the browser capability
+     is what lets a generated page be exercised, and because the scenario
+     suite is the only way to accept a change in what the model does. Includes
+     the residual acceptance 4.3 did not demonstrate. `ISSUES.md` ISS-0004,
+     `reports/2026-08-30_v2_prompt_assembly.md`.
 
 5. **Isolated execution.** A sandbox backend behind the 4.2 seam: shell, Python
    and package installation in a restricted workspace holding no control-plane
@@ -237,17 +260,8 @@ an observed defect is described in `ISSUES.md`, not here.
   opening and how coarse its items are, and a turn ending on an item the model
   does not want to close. `reports/2026-08-31_v2_todo_live_failure.md`.
 - **Let a plan be corrected by the person**, who can currently only read it.
-- **Constrain what the model emits.** Guided decoding for tool calls on the
-  served model, or the corrected parser in `tools/gemma4_parser.py`. A model App
-  redeploy and its own gate. `ISSUES.md` ISS-0001.
 - **Hand over what was made.** Delivery is `send_file` and the model reaches for
   a Markdown link instead. `ISSUES.md` ISS-0003.
-- **One browser capability instead of `inspect_page`**: open/navigate, snapshot,
-  screenshot, click, type, evaluate. A snapshot is the page as text where a
-  screenshot is pixels, and clicking is how a generated page is judged.
-  `inspect_page` is deliberately left unpatched until this replaces it. The
-  trust boundary is unchanged: a local artifact renders where the agent runs, an
-  internet page goes to the isolated renderer. `ISSUES.md` ISS-0008.
 - **Latency to the first visible word**, to give 4.1 a "before" number.
   `reports/2026-08-30_v2_first_visible_latency_handoff.md`.
 - **Throttle the edits that write a streamed answer.** How often to edit is a

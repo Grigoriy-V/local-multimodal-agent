@@ -145,10 +145,11 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
     """
 
     def _text(result) -> str:
-        text = " ".join(part.text or "" for part in result.content)
-        if text.startswith("error:"):
-            raise ToolError(text)
-        return text
+        """The result's text, or the failure it reports, exactly as the model has it."""
+
+        if result.failure is not None:
+            raise ToolError(result.failure.message, code=result.failure.code)
+        return " ".join(part.text or "" for part in result.content)
 
     def call(name: str, **arguments: object) -> str:
         return _text(tools.run(ToolCall(f"preflight-{name}", name, arguments)))
@@ -185,9 +186,7 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
             result = await tools.run_async(
                 ToolCall("preflight-browser", "inspect_page", {"path": name})
             )
-            text = " ".join(part.text or "" for part in result.content)
-            if text.startswith("error:"):
-                raise ToolError(text)
+            _text(result)
             images = [part for part in result.content if part.kind == "image"]
             if not images:
                 raise RuntimeError("the page rendered but returned no screenshot")
@@ -255,9 +254,7 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
             result = await tools.run_async(
                 ToolCall("preflight-pages", "view_pages", {"path": name})
             )
-            text = " ".join(part.text or "" for part in result.content)
-            if text.startswith("error:"):
-                raise ToolError(text)
+            _text(result)
             images = [part for part in result.content if part.kind == "image"]
             if not images or not (images[0].data or b"").startswith(b"\x89PNG"):
                 raise RuntimeError("a page was requested and no image came back")
@@ -277,6 +274,7 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
         (root / name).write_bytes(marker)
         try:
             result = tools.run(ToolCall("preflight-presentation", "send_file", {"path": name}))
+            _text(result)
             outgoing = [part for part in result.content if part.outbound]
             if len(outgoing) != 1 or outgoing[0].data != marker:
                 raise RuntimeError("the selected file did not become one outbound item")
@@ -311,9 +309,7 @@ def tool_probes(tools: Toolbox, root: Path) -> list[Probe]:
         result = await tools.run_async(
             ToolCall("preflight-view", "view_web_page", {"url": "https://example.com/"})
         )
-        text = " ".join(part.text or "" for part in result.content)
-        if text.startswith("error:"):
-            raise ToolError(text)
+        text = _text(result)
         if "example domain" not in text.lower():
             raise RuntimeError("the page was rendered but its text did not come back")
         images = [part for part in result.content if part.kind == "image"]

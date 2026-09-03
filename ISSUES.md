@@ -98,7 +98,7 @@ Rules that keep the file honest:
 
 ### ISS-0007 — `tool_failed` carries no reason
 
-- **Status:** open
+- **Status:** fixed, 2026-09-03 — seen live the same day in `scripts/loop_live.py` E
 - **Seen:** 2026-08-31, deployed telemetry
 - **Costs:** nobody investigating a live failure can tell from the logs why a
   tool refused. Diagnosing ISS-0006 needed the volume and an offline
@@ -106,6 +106,9 @@ Rules that keep the file honest:
 - **Reproduce:** make any tool raise, then read the `tool_failed` event: tool,
   call index, stage, path, duration, and no error text.
 - **Cause:** the event is emitted without the error the caller already holds.
+- **Fixed by:** the typed outcome of roadmap 4.5. The executor records
+  `code` and `message` on every `tool_failed`, and `tools/show_run.py` prints
+  them under the call. `tests/test_tool_outcomes.py`.
 - **Evidence:** run `e9bae9a5`, two `write_file` failures, 2026-08-31T04:14Z
 
 ### ISS-0006 — a path meant as a directory becomes a file, and poisons the folder
@@ -150,9 +153,11 @@ Rules that keep the file honest:
 - **Reproduce:** the ISS-0006 sequence raises `FileExistsError`, not `ToolError`.
 - **Cause:** `resolve_in_root` wrapped `OSError`; the write, the `mkdir`, the
   read and the listing did not.
-- **Fixed by:** wrapping them, in `app/tools/filesystem.py`. `edit_file`'s
-  atomic replace is deliberately left as it is: it has its own recovery path
-  and its own test.
+- **Fixed by:** wrapping them, in `app/tools/filesystem.py`. Since 2026-09-03
+  every filesystem failure is an `fs.*` code with the `strerror` as detail,
+  `write_file` is atomic like `edit_file`, and an exception that still escapes
+  any tool becomes an `internal` result with the traceback in the log rather
+  than a failed turn.
 - **Related:** ISS-0006
 
 ### ISS-0004 — the assistant describes what it did not observe
@@ -211,6 +216,11 @@ Rules that keep the file honest:
   error now carries the tool's signature; and a call that failed twice
   identically is refused a third time. Live afterwards, the model recovered by
   itself after one refusal. A corrected parser exists and is tested offline in
-  `tools/gemma4_parser.py`; putting it in front of the served model is a model
-  redeploy and its own gate.
+  `tools/gemma4_parser.py`. Deploying it was rejected on 2026-09-03 as a fix for
+  one model on one server; the runtime is instead made to survive any model's
+  emission (`DECISIONS.md` 2026-09-03): since 2026-09-03 a call whose arguments
+  are not a JSON object is delivered and refused as one `bad_arguments` result
+  with the tool's signature, where until then the adapter raised and the whole
+  request failed. Offline only, not yet seen live. The defect itself stays
+  upstream and open.
 - **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`

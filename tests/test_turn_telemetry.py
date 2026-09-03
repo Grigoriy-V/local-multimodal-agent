@@ -385,7 +385,7 @@ async def test_a_turn_that_stops_to_ask_is_successful_not_failed(
         description="destroy",
         parameters={"type": "object", "properties": {}},
         run=lambda: "gone",
-        destructive=True,
+        requires_approval=True,
     )
     backend = ScriptedBackend(calls("wipe"))
     adapter = build(telegram, tmp_path, backend, telemetry, tools=[tool])

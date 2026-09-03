@@ -38,14 +38,14 @@ async def _fetch(settings: WebSettings, url: str) -> str:
     try:
         return (await fetch_page(url, settings)).as_text()
     except WebError as error:
-        raise ToolError(str(error)) from error
+        raise ToolError(str(error), code=error.code) from error
 
 
 async def _search(settings: WebSettings, query: str, count: int | None) -> str:
     try:
         return format_results(query, await search_web(query, settings, count))
     except WebError as error:
-        raise ToolError(str(error)) from error
+        raise ToolError(str(error), code=error.code) from error
 
 
 def _artifact(root: Path, url: str) -> Path:
@@ -77,7 +77,7 @@ async def _view(
     try:
         rendered = await render_page(url, settings, full_page)
     except WebError as error:
-        raise ToolError(str(error)) from error
+        raise ToolError(str(error), code=error.code) from error
 
     artifact = _artifact(root, rendered.url)
     artifact.parent.mkdir(parents=True, exist_ok=True)

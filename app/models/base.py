@@ -65,9 +65,40 @@ class ContentPart:
 
 @dataclass(frozen=True)
 class ToolCall:
+    """What the model asked for.
+
+    `raw_arguments` is the argument text as it arrived, kept only when it could
+    not be read as a JSON object. The call is still delivered — with empty
+    arguments and the text beside them — because a model that emitted one bad
+    call must get one bad result and keep its turn, not lose the request. The
+    executor is what refuses it, with the tool's signature, and the text is what
+    makes two different unreadable attempts two different calls to the loop's
+    repeat guard.
+    """
+
     id: str
     name: str
     arguments: dict[str, Any]
+    raw_arguments: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolFailure:
+    """Why a tool call did not do what was asked.
+
+    `code` is stable and lower_snake, family-prefixed for a family's own
+    failures (`fs.not_found`), and is what the runtime, telemetry and the
+    context engine branch on. `message` is the one sentence the model reads.
+    `detail` is the sanitized diagnostic, when it adds something.
+
+    Its absence is the only definition of success. A shell command that exits
+    non-zero or a page that renders with console errors is a successful call
+    whose content says so: this is for the tool not doing what was asked.
+    """
+
+    code: str
+    message: str
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +114,11 @@ class Message:
     content: Sequence[ContentPart] = ()
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
+    # Tool messages only. The typed failure rides on the message so the loop's
+    # repeat guard, the plan reader and both interfaces ask a field and never a
+    # string; it is checkpointed with the turn and joins stored history with the
+    # schema-3 migration, until which stored rows carry the text projection.
+    failure: ToolFailure | None = None
 
     def __post_init__(self) -> None:
         # Callers pass lists; a checkpoint gives lists back. Normalizing here is
@@ -91,6 +127,8 @@ class Message:
         object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
         if not self.content and not self.tool_calls:
             raise ValueError("a message requires content or tool calls")
+        if self.failure is not None and self.role != "tool":
+            raise ValueError("only a tool message carries a failure")
 
 
 def measure_request(messages: Sequence[Message]) -> tuple[int, int]:

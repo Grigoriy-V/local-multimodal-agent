@@ -67,7 +67,8 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change deployed PostgreSQL persistence | `app/memory/postgres.py` | `PostgresStore`, `turn_context`, `append` |
 | Change store selection | `app/memory/open.py` | `open_store` |
 | Change graph checkpoints | `app/checkpoints.py` | `CheckpointHandle`, `setup_postgres_checkpoints` |
-| Add/change a tool primitive or execution lifecycle | `app/tools/base.py`, `app/tools/execution.py` | `Tool`, `Toolbox`, `ToolExecutor`, `pre_execute`, `execute`, `post_execute` |
+| Add/change a tool primitive or execution lifecycle | `app/tools/base.py`, `app/tools/execution.py` | `Tool`, `ToolError`, `Toolbox`, `ToolExecutor`, `pre_execute`, `execute`, `post_execute`, `project`, `tests/test_tool_outcomes.py` |
+| Add a failure code, or read one | `app/models/base.py`, `app/tools/base.py`, each family module | `ToolFailure`, `Message.failure`, `UNKNOWN_TOOL` … `FAILED`, a family's own constants |
 | Add/change a capability/grant | `app/tools/capabilities.py` | `CapabilityRegistry`, `CapabilityGrant`, `DEFAULT_CAPABILITIES` |
 | Change what assistant says it can do, or assemble its system message | `app/capabilities.py` | `system_message`, `capability_brief`, `capability_report`, `tool_inventory` |
 | Change filesystem tools/path scope | `app/tools/filesystem.py` | `resolve_in_root`, `filesystem_tools` |
@@ -100,6 +101,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Append/search work journals | `tools/work_log.py` | `reports/agent_tasks.jsonl`, `reports/ml_work.jsonl` |
 | Diagnose local installation | `scripts/doctor.py` | diagnostics |
 | Measure model endpoint wake | `scripts/measure_endpoint_wake.py` | wake measurement |
+| Run the live loop acceptance (wakes the GPU) | `scripts/loop_live.py` | scenarios A–E, `Turn`, PASS/FAIL per check, exit code |
 | Run broad smoke/live legacy checks | `scripts/smoke_test.py`, `scripts/stage3_live.py`, `scripts/v1_live.py` | historical stage runners |
 | Migrate local workspace data | `scripts/migrate_workspace.py` | migration logic |
 
@@ -207,8 +209,8 @@ Do not merge these concepts by accident.
 ### Tool ownership
 
 ```text
-base.py          Tool / Toolbox contract and execution errors
-execution.py     pre_execute / execute / post_execute runtime lifecycle
+base.py          Tool / Toolbox contract, ToolError, runtime failure codes, coercion
+execution.py     pre_execute / execute / post_execute lifecycle, bounds, sanitizing, projection
 filesystem.py    list/read/write/edit workspace files
 documents.py     read_document / view_pages
 presentation.py  send_file (explicit outbound action)

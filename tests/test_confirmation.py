@@ -59,7 +59,7 @@ def open_agent(
                 "additionalProperties": False,
             },
             run=publish,
-            destructive=True,
+            requires_approval=True,
         )
         agent.toolbox = lambda _thread_id: Toolbox([tool])  # type: ignore[assignment]
     return agent

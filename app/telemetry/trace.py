@@ -286,6 +286,8 @@ class TurnTrace:
             tool=name,
             call_index=call.index,
             status=call.status,
+            code=call.code,
+            message=call.message,
             **data,
         )
 
@@ -341,13 +343,22 @@ class ToolCall:
         self.name = name
         self.index = index
         self.status = "success"
+        # Why it failed, when it did. A `tool_failed` event that named no reason
+        # (ISS-0007) is what these two close: the code is what a reader groups
+        # by and the message is what the model was told.
+        self.code: str | None = None
+        self.message: str | None = None
         self._started = time.monotonic()
 
     def duration_ms(self) -> int:
         return int((time.monotonic() - self._started) * 1000)
 
-    def failed(self, status: str = "failed") -> None:
+    def failed(
+        self, status: str = "failed", *, code: str | None = None, message: str | None = None
+    ) -> None:
         self.status = status
+        self.code = code
+        self.message = message
 
 
 class NullTrace(TurnTrace):

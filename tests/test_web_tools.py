@@ -50,7 +50,7 @@ def test_no_web_tool_asks_for_approval(tmp_path: Path) -> None:
 
     box = Toolbox(web_tools(tmp_path, settings(firecrawl_api_key="k")))
 
-    assert [name for name in box.names if box.destructive(name)] == []
+    assert [name for name in box.names if box.requires_approval(name)] == []
 
 
 async def test_fetching_an_internal_address_comes_back_as_a_readable_refusal(

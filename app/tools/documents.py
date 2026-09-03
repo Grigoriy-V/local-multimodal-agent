@@ -28,11 +28,29 @@ from app.documents import (
     render_pages,
 )
 from app.models import ContentPart
-from app.tools.base import Tool, ToolError
-from app.tools.filesystem import resolve_in_root
+from app.tools.base import BAD_ARGUMENTS, Tool, ToolError
+from app.tools.filesystem import NOT_A_FILE, NOT_FOUND, TOO_LARGE, resolve_in_root
 
 MAX_BYTES = 20 * 1024 * 1024
 MAX_CHARS = 12_000
+
+# The family's codes: a file this does not read, and one it tried to and could not.
+UNSUPPORTED = "doc.unsupported"
+UNREADABLE = "doc.unreadable"
+
+
+def _existing_file(root: Path, path: str) -> Path:
+    target = resolve_in_root(root, path)
+    if not target.exists():
+        raise ToolError(f"path {path!r} does not exist", code=NOT_FOUND)
+    if not target.is_file():
+        raise ToolError(f"path {path!r} is not a file", code=NOT_A_FILE)
+    if target.stat().st_size > MAX_BYTES:
+        raise ToolError(
+            f"{target.name} is larger than the {MAX_BYTES // (1024 * 1024)} MB limit",
+            code=TOO_LARGE,
+        )
+    return target
 
 
 def _render(name: str, sections: list[Section], start: int, budget: int) -> str:
@@ -59,22 +77,21 @@ def _render(name: str, sections: list[Section], start: int, budget: int) -> str:
 
 
 def read_document(root: Path, path: str, from_section: int = 1) -> str:
-    target = resolve_in_root(root, path)
-    if not target.is_file():
-        raise ToolError(f"path {path!r} is not a file")
-    if target.stat().st_size > MAX_BYTES:
-        raise ToolError(f"{target.name} is larger than the {MAX_BYTES // (1024 * 1024)} MB limit")
+    target = _existing_file(root, path)
     media_type = media_type_for(target.name, None)
     if media_type is None:
         readable = ", ".join(sorted(DOCUMENT_MEDIA_TYPES.values()))
-        raise ToolError(f"{target.name} is not a document this reads ({readable})")
+        raise ToolError(
+            f"{target.name} is not a document this reads ({readable})", code=UNSUPPORTED
+        )
     try:
         sections = read_sections(target.read_bytes(), media_type)
     except DocumentError as error:
-        raise ToolError(str(error)) from error
+        raise ToolError(str(error), code=UNREADABLE) from error
     if from_section < 1 or from_section > len(sections):
         raise ToolError(
-            f"from_section must be between 1 and {len(sections)} for {target.name}"
+            f"from_section must be between 1 and {len(sections)} for {target.name}",
+            code=BAD_ARGUMENTS,
         )
     return _render(target.name, sections, from_section - 1, MAX_CHARS)
 
@@ -88,20 +105,18 @@ def view_pages(root: Path, path: str, page: int = 1, pages: int = 1) -> list[Con
     becoming confident nonsense.
     """
 
-    target = resolve_in_root(root, path)
-    if not target.is_file():
-        raise ToolError(f"path {path!r} is not a file")
+    target = _existing_file(root, path)
     if media_type_for(target.name, None) != PDF:
-        raise ToolError(f"{target.name} is not a PDF, so there are no pages to look at")
-    if target.stat().st_size > MAX_BYTES:
-        raise ToolError(f"{target.name} is larger than the {MAX_BYTES // (1024 * 1024)} MB limit")
+        raise ToolError(
+            f"{target.name} is not a PDF, so there are no pages to look at", code=UNSUPPORTED
+        )
     wanted = max(1, min(int(pages), MAX_PAGES_PER_VIEW))
     data = target.read_bytes()
     try:
         total = page_count(data)
         rendered = render_pages(data, int(page), wanted)
     except DocumentError as error:
-        raise ToolError(str(error)) from error
+        raise ToolError(str(error), code=UNREADABLE) from error
 
     numbers = ", ".join(str(number) for number, _ in rendered)
     last = rendered[-1][0]

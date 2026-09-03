@@ -132,7 +132,9 @@ async def test_an_os_failure_stays_inside_the_tool_loop(store: SqliteStore) -> N
 
     result = await agent.ainvoke(ask("Read the blocked file."))
 
-    assert result["messages"][2].content[0].text == "error: blocked failed: permission denied"
+    failed = result["messages"][2]
+    assert failed.content[0].text == "error: blocked failed: PermissionError (permission denied)"
+    assert failed.failure is not None and failed.failure.code == "internal"
     assert result["messages"][-1].content[0].text == "I could not read it."
 
 

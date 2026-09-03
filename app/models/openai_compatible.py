@@ -147,16 +147,30 @@ def build_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
     return payload
 
 
-def parse_arguments(name: str, arguments: str) -> dict[str, Any]:
-    """Read one tool call's arguments, which arrive as a JSON string."""
+def read_arguments(arguments: str) -> dict[str, Any] | None:
+    """Read one tool call's arguments, which arrive as a JSON string.
+
+    `None` when they are not a JSON object. That is not a failed request: the
+    call is delivered with the text kept beside it, and the executor answers it
+    with one refused result and the tool's signature, so a model that emitted
+    one bad call keeps its turn. Failing the request here — which is what this
+    did until 2026-09-03 — turned one corrupted call into a lost conversation.
+    """
 
     try:
         parsed = json.loads(arguments or "{}")
-    except json.JSONDecodeError as error:
-        raise BackendError(f"tool call {name} sent invalid JSON: {arguments!r}") from error
-    if not isinstance(parsed, dict):
-        raise BackendError(f"tool call {name} sent arguments that are not an object: {parsed!r}")
-    return parsed
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def tool_call(identifier: str, name: str, arguments: str) -> ToolCall:
+    """The call as the loop receives it, readable or not."""
+
+    parsed = read_arguments(arguments)
+    if parsed is None:
+        return ToolCall(id=identifier, name=name, arguments={}, raw_arguments=arguments)
+    return ToolCall(id=identifier, name=name, arguments=parsed)
 
 
 # --- a tool call the server could not read ------------------------------------
@@ -283,13 +297,7 @@ def parse_completion(payload: dict[str, Any]) -> Completion:
         name = function.get("name")
         if not name:
             raise BackendError(f"a tool call arrived without a name: {raw}")
-        calls.append(
-            ToolCall(
-                id=raw.get("id") or "",
-                name=name,
-                arguments=parse_arguments(name, function.get("arguments") or "{}"),
-            )
-        )
+        calls.append(tool_call(raw.get("id") or "", name, function.get("arguments") or "{}"))
 
     return Completion(
         text=message.get("content") or "",
@@ -437,13 +445,7 @@ class StreamedCompletion:
         for _, partial in sorted(self._calls.items()):
             if not partial.name:
                 raise BackendError(f"a streamed tool call arrived without a name: {partial}")
-            calls.append(
-                ToolCall(
-                    id=partial.id,
-                    name=partial.name,
-                    arguments=parse_arguments(partial.name, partial.arguments),
-                )
-            )
+            calls.append(tool_call(partial.id, partial.name, partial.arguments))
         return Completion(
             text="".join(self._text),
             tool_calls=tuple(calls),

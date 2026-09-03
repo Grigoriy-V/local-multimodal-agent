@@ -276,22 +276,31 @@ def test_several_tool_calls_keep_their_order() -> None:
     assert calls[0].arguments == {}
 
 
-def test_malformed_tool_arguments_raise_rather_than_look_empty() -> None:
+def test_malformed_tool_arguments_are_delivered_with_their_text_kept() -> None:
+    """One bad call is one bad result, not a failed request.
+
+    The call reaches the loop with empty arguments and the text beside them;
+    the executor is what refuses it, with the tool's signature. Raising here
+    — which this did until 2026-09-03 — lost the whole turn over one call.
+    """
+
     payload = completion_payload(
         tool_calls=[{"id": "a", "function": {"name": "read_file", "arguments": "{path: x"}}]
     )
 
-    with pytest.raises(BackendError, match="invalid JSON"):
-        parse_completion(payload)
+    call = parse_completion(payload).tool_calls[0]
+
+    assert call == ToolCall(id="a", name="read_file", arguments={}, raw_arguments="{path: x")
 
 
-def test_tool_arguments_that_are_not_an_object_are_refused() -> None:
+def test_tool_arguments_that_are_not_an_object_are_kept_as_text_too() -> None:
     payload = completion_payload(
         tool_calls=[{"id": "a", "function": {"name": "read_file", "arguments": '"x"'}}]
     )
 
-    with pytest.raises(BackendError, match="not an object"):
-        parse_completion(payload)
+    call = parse_completion(payload).tool_calls[0]
+
+    assert call.arguments == {} and call.raw_arguments == '"x"'
 
 
 def test_a_nameless_tool_call_is_refused() -> None:
@@ -428,13 +437,14 @@ def test_a_streamed_tool_call_without_a_name_is_refused() -> None:
         streamed.result()
 
 
-def test_streamed_arguments_that_are_not_json_are_refused() -> None:
+def test_streamed_arguments_that_are_not_json_are_delivered_unread() -> None:
     streamed = StreamedCompletion()
     streamed.add(delta({"tool_calls": [{"id": "a", "index": 0, "function": {"name": "cut"}}]}))
     streamed.add(delta({"tool_calls": [{"index": 0, "function": {"arguments": "{oops"}}]}))
 
-    with pytest.raises(BackendError, match="invalid JSON"):
-        streamed.result()
+    call = streamed.result().tool_calls[0]
+
+    assert call.arguments == {} and call.raw_arguments == "{oops"
 
 
 def test_reasoning_is_not_shown_and_does_not_break_assembly() -> None:

@@ -155,8 +155,7 @@ async def render(produced: AsyncIterator[Message]) -> None:
                 # step to fill in; show the result on its own instead of losing it.
                 step = cl.Step(name="tool result", type="tool")
                 await step.send()
-            result = spoken(message)
-            step.output = result if result.startswith("error:") else "Completed."
+            step.output = spoken(message) if message.failure is not None else "Completed."
             await step.update()
             shown = attachments(message, outbound_only=True)
             if shown:

@@ -9,6 +9,7 @@ from app.models.base import (
     StreamEvent,
     TextDelta,
     ToolCall,
+    ToolFailure,
     Usage,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "StreamEvent",
     "TextDelta",
     "ToolCall",
+    "ToolFailure",
     "Usage",
 ]

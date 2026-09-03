@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app.models import ToolCall
+from app.models import ToolCall, ToolFailure
 from app.tools import Tool, Toolbox, ToolError, filesystem_tools, tool_failed
 
 
@@ -196,10 +196,12 @@ def test_edit_file_refuses_an_empty_match(workspace: Path) -> None:
 
 
 def test_edit_file_on_a_missing_file_is_refused(workspace: Path) -> None:
-    with pytest.raises(ToolError, match="is not a file"):
+    with pytest.raises(ToolError, match="does not exist") as refused:
         tools(workspace)["edit_file"].run(
             path="missing.txt", old_text="old", new_text="new"
         )
+
+    assert refused.value.code == "fs.not_found"
 
 
 def test_edit_file_leaves_the_original_when_atomic_replace_fails(
@@ -211,10 +213,12 @@ def test_edit_file_leaves_the_original_when_atomic_replace_fails(
         raise PermissionError(13, "permission denied")
 
     monkeypatch.setattr("app.tools.filesystem.os.replace", fail_replace)
-    with pytest.raises(PermissionError, match="permission denied"):
+    with pytest.raises(ToolError, match="could not be written") as refused:
         tools(workspace)["edit_file"].run(
             path="notes.txt", old_text="kept", new_text="changed"
         )
+
+    assert refused.value.code == "fs.io" and refused.value.detail == "permission denied"
 
     assert (workspace / "notes.txt").read_text(encoding="utf-8") == before
     assert sorted(path.name for path in workspace.iterdir()) == ["notes.txt", "sub"]
@@ -226,10 +230,10 @@ def test_workspace_write_and_edit_are_autonomous(workspace: Path) -> None:
     assert [name for name in box.names if box.requires_approval(name)] == []
 
 
-def test_an_unknown_tool_is_not_destructive(workspace: Path) -> None:
+def test_an_unknown_tool_needs_no_approval(workspace: Path) -> None:
     # It never runs, so there is nothing to ask about — it only produces the
     # error that tells the model the tool does not exist.
-    assert toolbox(workspace).destructive("rm") is False
+    assert toolbox(workspace).requires_approval("rm") is False
 
 
 # --- the toolbox -------------------------------------------------------------
@@ -306,25 +310,41 @@ def test_an_empty_result_still_produces_content(workspace: Path) -> None:
     assert message.content[0].text == "(empty)"
 
 
-def test_an_operating_system_failure_becomes_a_readable_tool_result() -> None:
+def test_an_operating_system_failure_a_tool_did_not_catch_is_internal() -> None:
+    """A family wraps its own OS errors with its codes; one that escaped is a surprise."""
+
     def denied() -> str:
         raise PermissionError(13, "permission denied")
 
     box = Toolbox([Tool(name="blocked", description="", parameters={}, run=denied)])
 
-    text = box.run(ToolCall(id="call_1", name="blocked", arguments={})).content[0].text
+    message = box.run(ToolCall(id="call_1", name="blocked", arguments={}))
 
-    assert text == "error: blocked failed: permission denied"
+    assert message.content[0].text == "error: blocked failed: PermissionError (permission denied)"
+    assert message.failure is not None and message.failure.code == "internal"
 
 
-def test_a_programming_error_is_not_hidden_as_a_tool_result() -> None:
+def test_a_programming_error_becomes_an_internal_failure_the_model_can_read(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The turn goes on and the developer gets the traceback, in the log.
+
+    Killing the run over a bug in one tool loses the conversation; hiding the
+    bug loses the developer. The model reads that the tool failed and why in
+    one sentence, and the full traceback is in the process log.
+    """
+
     def broken() -> str:
         raise ValueError("bug")
 
     box = Toolbox([Tool(name="broken", description="", parameters={}, run=broken)])
 
-    with pytest.raises(ValueError, match="bug"):
-        box.run(ToolCall(id="call_1", name="broken", arguments={}))
+    with caplog.at_level("ERROR", logger="app.tools.execution"):
+        message = box.run(ToolCall(id="call_1", name="broken", arguments={}))
+
+    assert message.content[0].text == "error: broken failed: ValueError (bug)"
+    assert message.failure == ToolFailure(code="internal", message="broken failed: ValueError", detail="bug")
+    assert "ValueError: bug" in caplog.text
 
 
 def test_every_way_a_call_can_fail_is_recognisable_as_a_failure() -> None:

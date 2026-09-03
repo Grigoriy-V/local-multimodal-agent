@@ -6,6 +6,15 @@ supplies is resolved and checked against that root before anything is opened.
 
 The granted root is the autonomy boundary: reads, writes and edits inside it do
 not ask one call at a time. Resolution and confinement still apply every time.
+
+One implementation, parameterized by the root. That is the whole difference
+between a Windows workspace, a Linux one and a mounted volume, so there is no
+`Filesystem` protocol here; the first real second implementation is the
+sandbox, and it arrives with its own interface when it arrives.
+
+Every failure is an `fs.*` code with a message in the words a person would use
+and the operating system's own `strerror` as detail. Nothing platform-specific
+— no `[WinError 183]`, no resolved absolute path — reaches the model.
 """
 
 from __future__ import annotations
@@ -14,10 +23,25 @@ import os
 import tempfile
 from pathlib import Path
 
-from app.tools.base import Tool, ToolError
+from app.tools.base import BAD_ARGUMENTS, Tool, ToolError
 
 MAX_ENTRIES = 200
 MAX_CHARS = 20_000
+
+# The family's codes. Added only when something has to branch on one.
+OUTSIDE_ROOT = "fs.outside_root"
+NOT_FOUND = "fs.not_found"
+NOT_A_FILE = "fs.not_a_file"
+NOT_A_DIRECTORY = "fs.not_a_directory"
+IS_DIRECTORY = "fs.is_directory"
+BLOCKED_BY_FILE = "fs.blocked_by_file"
+AMBIGUOUS_EDIT = "fs.ambiguous_edit"
+TOO_LARGE = "fs.too_large"
+IO = "fs.io"
+
+
+def _detail(error: BaseException) -> str:
+    return getattr(error, "strerror", None) or str(error) or type(error).__name__
 
 
 def resolve_in_root(root: Path, path: str) -> Path:
@@ -31,24 +55,39 @@ def resolve_in_root(root: Path, path: str) -> Path:
         supplied = Path(path or ".")
         candidate = supplied.resolve() if supplied.is_absolute() else (root / supplied).resolve()
     except (OSError, RuntimeError) as error:
-        detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
-        raise ToolError(f"path {path!r} cannot be resolved: {detail}") from error
+        raise ToolError(
+            f"path {path!r} cannot be resolved", code=IO, detail=_detail(error)
+        ) from error
     if candidate != root and root not in candidate.parents:
-        raise ToolError(f"path {path!r} is outside the allowed root")
+        raise ToolError(f"path {path!r} is outside the allowed root", code=OUTSIDE_ROOT)
     return candidate
+
+
+def _existing_file(root: Path, path: str) -> Path:
+    """The file this path names, or the reason it does not."""
+
+    target = resolve_in_root(root, path)
+    if not target.exists():
+        raise ToolError(f"path {path!r} does not exist", code=NOT_FOUND)
+    if not target.is_file():
+        raise ToolError(f"path {path!r} is not a file", code=NOT_A_FILE)
+    return target
 
 
 def _list_files(root: Path, path: str = ".") -> str:
     target = resolve_in_root(root, path)
+    if not target.exists():
+        raise ToolError(f"path {path!r} does not exist", code=NOT_FOUND)
     if not target.is_dir():
-        raise ToolError(f"path {path!r} is not a directory")
+        raise ToolError(f"path {path!r} is not a directory", code=NOT_A_DIRECTORY)
     try:
         entries = sorted(
             f"{entry.name}/" if entry.is_dir() else entry.name for entry in target.iterdir()
         )
     except OSError as error:
-        detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
-        raise ToolError(f"path {path!r} could not be listed: {detail}") from error
+        raise ToolError(
+            f"path {path!r} could not be listed", code=IO, detail=_detail(error)
+        ) from error
     if not entries:
         return f"{path}: empty"
     shown = entries[:MAX_ENTRIES]
@@ -59,14 +98,13 @@ def _list_files(root: Path, path: str = ".") -> str:
 
 
 def _read_file(root: Path, path: str) -> str:
-    target = resolve_in_root(root, path)
-    if not target.is_file():
-        raise ToolError(f"path {path!r} is not a file")
+    target = _existing_file(root, path)
     try:
         text = target.read_text(encoding="utf-8", errors="replace")
     except OSError as error:
-        detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
-        raise ToolError(f"path {path!r} could not be read: {detail}") from error
+        raise ToolError(
+            f"path {path!r} could not be read", code=IO, detail=_detail(error)
+        ) from error
     if len(text) > MAX_CHARS:
         return text[:MAX_CHARS] + f"\n... truncated at {MAX_CHARS} characters"
     return text
@@ -90,47 +128,13 @@ def _blocked_by(root: Path, target: Path) -> Path | None:
     return next((parent for parent in target.parents if parent.is_file()), None)
 
 
-def _write_file(root: Path, path: str, content: str) -> str:
-    if _names_a_directory(path):
-        raise ToolError(
-            f"path {path!r} names a directory, not a file. Write the file you want "
-            "and any directories it needs are created for you."
-        )
-    target = resolve_in_root(root, path)
-    if target.is_dir():
-        raise ToolError(f"path {path!r} is a directory")
-    existed = target.is_file()
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-    except OSError as error:
-        # A platform error code is not something a model can act on. Say what is
-        # in the way when that is knowable, and otherwise say what failed.
-        blocking = _blocked_by(root, target)
-        if blocking is not None:
-            raise ToolError(
-                f"{blocking.name!r} is a file, so nothing can be written inside it"
-            ) from error
-        detail = getattr(error, "strerror", None) or str(error) or type(error).__name__
-        raise ToolError(f"path {path!r} could not be written: {detail}") from error
-    verb = "overwrote" if existed else "created"
-    return f"{verb} {path} ({len(content)} characters)"
+def _replace_atomically(target: Path, text: str) -> None:
+    """Write beside the target and move into place, so no reader sees half a file.
 
-
-def _edit_file(root: Path, path: str, old_text: str, new_text: str) -> str:
-    target = resolve_in_root(root, path)
-    if not target.is_file():
-        raise ToolError(f"path {path!r} is not a file")
-    if not old_text:
-        raise ToolError("old_text cannot be empty")
-
-    current = target.read_text(encoding="utf-8")
-    matches = current.count(old_text)
-    if matches != 1:
-        raise ToolError(
-            f"old_text must occur exactly once in {path!r}; found {matches} matches"
-        )
-    updated = current.replace(old_text, new_text, 1)
+    Temp file, fsync, replace. The bytes are on disk before the name points at
+    them, and an interrupted worker leaves either the old file or the new one,
+    never a torn artifact with the old name.
+    """
 
     temporary: str | None = None
     try:
@@ -138,10 +142,11 @@ def _edit_file(root: Path, path: str, old_text: str, new_text: str) -> str:
             mode="w", encoding="utf-8", dir=target.parent, delete=False
         ) as output:
             temporary = output.name
-            output.write(updated)
+            output.write(text)
             output.flush()
             os.fsync(output.fileno())
-        os.chmod(temporary, target.stat().st_mode)
+        if target.exists():
+            os.chmod(temporary, target.stat().st_mode)
         os.replace(temporary, target)
         temporary = None
     finally:
@@ -150,6 +155,62 @@ def _edit_file(root: Path, path: str, old_text: str, new_text: str) -> str:
                 os.unlink(temporary)
             except FileNotFoundError:
                 pass
+
+
+def _write_file(root: Path, path: str, content: str) -> str:
+    if _names_a_directory(path):
+        raise ToolError(
+            f"path {path!r} names a directory, not a file. Write the file you want "
+            "and any directories it needs are created for you.",
+            code=IS_DIRECTORY,
+        )
+    target = resolve_in_root(root, path)
+    if target.is_dir():
+        raise ToolError(f"path {path!r} is a directory", code=IS_DIRECTORY)
+    existed = target.is_file()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _replace_atomically(target, content)
+    except OSError as error:
+        # A platform error code is not something a model can act on. Say what is
+        # in the way when that is knowable, and otherwise say what failed.
+        blocking = _blocked_by(root, target)
+        if blocking is not None:
+            raise ToolError(
+                f"{blocking.name!r} is a file, so nothing can be written inside it",
+                code=BLOCKED_BY_FILE,
+            ) from error
+        raise ToolError(
+            f"path {path!r} could not be written", code=IO, detail=_detail(error)
+        ) from error
+    verb = "overwrote" if existed else "created"
+    return f"{verb} {path} ({len(content)} characters)"
+
+
+def _edit_file(root: Path, path: str, old_text: str, new_text: str) -> str:
+    target = _existing_file(root, path)
+    if not old_text:
+        raise ToolError("old_text cannot be empty", code=BAD_ARGUMENTS)
+
+    try:
+        current = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ToolError(
+            f"path {path!r} could not be read", code=IO, detail=_detail(error)
+        ) from error
+    matches = current.count(old_text)
+    if matches != 1:
+        raise ToolError(
+            f"old_text must occur exactly once in {path!r}; found {matches} matches",
+            code=AMBIGUOUS_EDIT,
+        )
+    updated = current.replace(old_text, new_text, 1)
+    try:
+        _replace_atomically(target, updated)
+    except OSError as error:
+        raise ToolError(
+            f"path {path!r} could not be written", code=IO, detail=_detail(error)
+        ) from error
     return f"edited {path} (replaced 1 match; {len(updated)} characters)"
 
 

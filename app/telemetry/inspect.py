@@ -120,6 +120,8 @@ def tool_calls(events: Sequence[TraceEvent]) -> list[dict[str, object]]:
             "path": event.data.get("path"),
             "duration_ms": event.duration_ms,
             "status": event.data.get("status", "success"),
+            "code": event.data.get("code"),
+            "message": event.data.get("message"),
         }
         if event.type == "tool_started" and isinstance(index, int):
             started[index] = row
@@ -129,6 +131,8 @@ def tool_calls(events: Sequence[TraceEvent]) -> list[dict[str, object]]:
             started[index].update(
                 duration_ms=event.duration_ms,
                 status=event.data.get("status", "failed"),
+                code=event.data.get("code"),
+                message=event.data.get("message"),
             )
             continue
         rows.append(row)
@@ -250,6 +254,10 @@ def tool_section(events: Sequence[TraceEvent]) -> list[str]:
             f"  {index}  {str(call['tool']) + where:<28}{seconds(call['duration_ms'])}"
             f"  {call['status']:<16}{call['path'] or ''}".rstrip()
         )
+        if call.get("code"):
+            # The reason under the row it belongs to, so a failed call reads as
+            # what happened rather than as a status word.
+            lines.append(f"        {call['code']}: {call.get('message') or ''}".rstrip())
     return lines
 
 

@@ -13,24 +13,30 @@ from pathlib import Path
 from app.attachments import MEDIA_KINDS
 from app.models import ContentPart
 from app.tools.base import Tool, ToolError
-from app.tools.filesystem import resolve_in_root
+from app.tools.filesystem import NOT_A_FILE, NOT_FOUND, TOO_LARGE, resolve_in_root
 
 MAX_OUTBOUND_BYTES = 50 * 1024 * 1024
+
+# The one failure that is this family's own: there is nothing to deliver.
+EMPTY = "presentation.empty"
 
 
 def send_file(root: Path, path: str) -> list[ContentPart]:
     """Return one explicit outbound item selected from the granted workspace."""
 
     target = resolve_in_root(root, path)
+    if not target.exists():
+        raise ToolError(f"path {path!r} does not exist", code=NOT_FOUND)
     if not target.is_file():
-        raise ToolError(f"path {path!r} is not a file")
+        raise ToolError(f"path {path!r} is not a file", code=NOT_A_FILE)
     size = target.stat().st_size
     if size == 0:
-        raise ToolError(f"{target.name} is empty")
+        raise ToolError(f"{target.name} is empty", code=EMPTY)
     if size > MAX_OUTBOUND_BYTES:
         raise ToolError(
             f"{target.name} is larger than the {MAX_OUTBOUND_BYTES // (1024 * 1024)} MB "
-            "delivery limit"
+            "delivery limit",
+            code=TOO_LARGE,
         )
     media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     kind = MEDIA_KINDS.get(media_type, "file")

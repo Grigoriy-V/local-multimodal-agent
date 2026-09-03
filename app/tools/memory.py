@@ -12,15 +12,18 @@ from app.tools.base import Tool, ToolError
 
 MAX_FACT_CHARS = 500
 
+# The one way saving fails: the fact is not one this keeps.
+INVALID = "memory.invalid"
+
 
 def _remember(
     store: ConversationStore, user_id: str, thread_id: str | None, text: str
 ) -> str:
     text = text.strip()
     if not text:
-        raise ToolError("a fact cannot be empty")
+        raise ToolError("a fact cannot be empty", code=INVALID)
     if len(text) > MAX_FACT_CHARS:
-        raise ToolError(f"a fact must be shorter than {MAX_FACT_CHARS} characters")
+        raise ToolError(f"a fact must be shorter than {MAX_FACT_CHARS} characters", code=INVALID)
     store.remember(text, user_id, thread_id=thread_id)
     return f"saved: {text}"
 

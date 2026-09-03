@@ -24,7 +24,7 @@ from app.agent.graph import (
     failed_before,
 )
 from app.memory import LOCAL_USER_ID, SqliteStore
-from app.models import ContentPart, Message, ToolCall
+from app.models import ContentPart, Message, ToolCall, ToolFailure
 from app.models.openai_compatible import StreamedCompletion
 from app.tools import Toolbox, filesystem_tools
 from tests.fakes import ScriptedBackend, calls, says
@@ -58,6 +58,17 @@ def ask(text: str = "go") -> dict[str, object]:
 
 def fragment(**raw: object) -> dict[str, object]:
     return {"choices": [{"delta": {"tool_calls": [raw]}}]}
+
+
+def failed(call_id: str) -> Message:
+    """A tool result that failed, the way the executor marks one: by the field."""
+
+    return Message(
+        role="tool",
+        content=[ContentPart(kind="text", text="error: no path")],
+        tool_call_id=call_id,
+        failure=ToolFailure(code="bad_arguments", message="no path"),
+    )
 
 
 # --- two calls must not become one -------------------------------------------
@@ -159,11 +170,11 @@ def test_the_same_failing_call_is_counted(workspace: Path) -> None:
         Message(role="assistant", content=[], tool_calls=[
             ToolCall(id="1", name="write_file", arguments={"content": "x"})
         ]),
-        Message(role="tool", content=[ContentPart(kind="text", text="error: no path")], tool_call_id="1"),
+        failed("1"),
         Message(role="assistant", content=[], tool_calls=[
             ToolCall(id="2", name="write_file", arguments={"content": "different"})
         ]),
-        Message(role="tool", content=[ContentPart(kind="text", text="error: no path")], tool_call_id="2"),
+        failed("2"),
     ]
 
     assert failed_before(history, call) == 1

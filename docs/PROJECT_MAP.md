@@ -81,7 +81,7 @@ The graph:
 - assembles bounded context;
 - calls the configured `ModelBackend`;
 - validates and runs tools;
-- pauses before destructive tools through LangGraph `interrupt()`;
+- pauses before tools that require approval through LangGraph `interrupt()`;
 - lets tool errors return to the model for recovery;
 - persists the completed turn to `ConversationStore`;
 - folds older conversation into a rolling summary.
@@ -212,17 +212,40 @@ Locally checkpoints use SQLite. Deployed checkpoints use PostgreSQL so a later C
 
 `app/tools/base.py` owns:
 
-- `Tool`: name, description, JSON-schema parameters, callable and the legacy
-  `destructive` field that now declares an approval-requiring external effect;
-- `Toolbox`: actual model-visible tools, validation and execution.
+- `Tool`: name, description, JSON-schema parameters, callable,
+  `requires_approval` for an external effect the person must say yes to, and
+  an optional `timeout_seconds`;
+- `ToolError(message, code, detail)`: the one way a tool fails. A tool returns
+  content on success and raises this on failure; it never returns a failure as
+  text;
+- `Toolbox`: the model-visible tools, name resolution against the allowlist,
+  schema coercion and validation, and the one-line signature a refused call
+  is answered with.
 
 `app/tools/execution.py` owns the one agent-runtime lifecycle around that
-toolbox: `pre_execute -> execute -> post_execute`. It applies the declared
-approval policy, brackets telemetry and preserves the model-visible tool result.
-The graph may pause a prepared batch for an answer, but does not implement a
-second execution path.
+toolbox: `pre_execute -> execute -> post_execute`. It resolves the name, reads
+and coerces the arguments, validates, applies the approval policy, runs the
+tool under its timeout, turns every exception into a typed `ToolFailure(code,
+message, detail)`, bounds the content, sanitizes the failure text, records the
+reason in telemetry and projects the outcome into the tool `Message`. The graph
+may pause a prepared batch for an answer, but does not implement a second
+execution path.
 
-A tool failure is normally returned as a tool result so the model can recover rather than losing the whole turn.
+A tool failure is a tool result the model reads, so it can recover rather than
+losing the turn. The typed failure rides on the message as `Message.failure`,
+which is checkpointed with the turn and is the only thing the loop's repeat
+guard, the plan reader, `/check` and both interfaces ask; the `error:` wording
+in the text is what the model reads and is not a protocol. Stored history
+carries the text projection until the schema-3 migration adds the column.
+`BaseException` alone propagates, because a stop must be able to stop.
+
+A call whose arguments could not be read as a JSON object still reaches the
+loop, with the text kept on `ToolCall.raw_arguments`, and is refused as one
+`bad_arguments` result with the tool's signature; the request is not failed.
+Failure codes: the runtime's `unknown_tool`, `bad_arguments`, `declined`,
+`not_run`, `timeout`, `internal`, `failed`, and a family's own (`fs.*`,
+`doc.*`, `browser.*`, `web.*`, `memory.*`, `todo.*`, `presentation.*`).
+`docs/v2_tool_system.md` is the contract.
 
 ### Capability layer
 
@@ -477,7 +500,7 @@ Filesystem/document/presentation tools cannot resolve paths outside their grante
 
 ### Consequential actions
 
-The current tool primitive marks destructive actions. The ordinary agent graph pauses via durable LangGraph interrupt before running them.
+A tool declares `requires_approval` for an effect beyond the workspace. The ordinary agent graph pauses via durable LangGraph interrupt before running it.
 
 ### Public web
 

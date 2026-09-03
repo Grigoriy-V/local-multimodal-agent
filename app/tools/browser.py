@@ -22,15 +22,20 @@ from typing import Any
 
 from app.models import ContentPart
 from app.tools.base import Tool, ToolError
+from app.tools.documents import UNSUPPORTED
+from app.tools.filesystem import NOT_A_FILE, NOT_FOUND, TOO_LARGE, resolve_in_root
 from app.tools.chromium import (
     MAX_VISIBLE_TEXT,
     container_flags,
     find_chromium_browser,
     open_page,
 )
-from app.tools.filesystem import resolve_in_root
 
 MAX_HTML_BYTES = 2 * 1024 * 1024
+
+# The family's codes: no browser to open, and a page the browser could not show.
+UNAVAILABLE = "browser.unavailable"
+LOAD_FAILED = "browser.load_failed"
 
 __all__ = [
     "MAX_HTML_BYTES",
@@ -83,12 +88,16 @@ async def inspect_local_page(
     """Open one self-contained local HTML file and return multimodal evidence."""
 
     target = resolve_in_root(root, path)
+    if not target.exists():
+        raise ToolError(f"path {path!r} does not exist", code=NOT_FOUND)
     if not target.is_file():
-        raise ToolError(f"path {path!r} is not a file")
+        raise ToolError(f"path {path!r} is not a file", code=NOT_A_FILE)
     if target.suffix.lower() not in {".html", ".htm"}:
-        raise ToolError("inspect_page accepts only .html and .htm files")
+        raise ToolError("inspect_page accepts only .html and .htm files", code=UNSUPPORTED)
     if target.stat().st_size > MAX_HTML_BYTES:
-        raise ToolError(f"HTML file exceeds the {MAX_HTML_BYTES}-byte browser limit")
+        raise ToolError(
+            f"HTML file exceeds the {MAX_HTML_BYTES}-byte browser limit", code=TOO_LARGE
+        )
 
     artifact = root / ".agent" / "browser" / f"{target.stem}-{secrets.token_hex(4)}.png"
     document = base64.b64encode(target.read_bytes()).decode("ascii")
@@ -103,16 +112,23 @@ async def inspect_local_page(
             await session.viewport(900, 700)
             navigation = await session.call("Page.navigate", {"url": document_url})
             if navigation.get("errorText"):
-                raise ToolError(str(navigation["errorText"]))
+                raise ToolError(
+                    "the page could not be opened",
+                    code=LOAD_FAILED,
+                    detail=str(navigation["errorText"]),
+                )
             if not await session.wait_for_load():
-                raise ToolError("page did not finish loading")
+                raise ToolError("page did not finish loading", code=LOAD_FAILED)
             await asyncio.sleep(0.2)
             evidence: Any = await session.evaluate(_PAGE_EVIDENCE)
             image = await asyncio.to_thread(write_png, artifact, await session.screenshot())
             await session.evaluate("0")
             console_errors = list(dict.fromkeys(session.console_errors))
     except RuntimeError as error:
-        raise ToolError(str(error)) from error
+        # `chromium.py` raises one kind for both "no browser here" and "the
+        # browser broke"; which it was is the only thing the model needs.
+        code = UNAVAILABLE if "no installed" in str(error) else LOAD_FAILED
+        raise ToolError(str(error), code=code) from error
 
     relative_artifact = artifact.relative_to(root).as_posix()
     report = {
