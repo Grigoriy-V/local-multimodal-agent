@@ -68,7 +68,7 @@ Rules that keep the file honest:
 
 - **Status:** fixed in the tree, 2026-09-03 — `--enable-prompt-tokens-details`
   on the model server. **Needs a model-app deploy**, which is a new boot and
-  a human gate.
+  a human gate; deferred by the human the same day.
 - **Seen:** 2026-09-03, deployed, run `a459c70e`: every `model_finished`
   without `cached_tokens`, so `/context` and the trace cannot show the cache.
 - **Costs:** the measurement 4.6a's assembly is judged by is blank.

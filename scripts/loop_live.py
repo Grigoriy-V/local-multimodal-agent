@@ -1,6 +1,8 @@
 """A live check of the one loop. Needs the model endpoint, so it wakes a GPU.
 
-    .venv\\Scripts\\python.exe -m scripts.loop_live
+    .venv\\Scripts\\python.exe -m scripts.loop_live                 all of A-G
+    .venv\\Scripts\\python.exe -m scripts.loop_live --after-deploy  A, B and G
+    .venv\\Scripts\\python.exe -m scripts.loop_live G               one by letter
 
 Five things the offline suite can only fake, because each of them is about what
 a real model does with the loop rather than about what the loop does with a

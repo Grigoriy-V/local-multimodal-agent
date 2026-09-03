@@ -230,7 +230,14 @@ What exists. How it was reached, and every number, is in the linked report.
      same day, after the human's word: schema 3 migrated on Neon
      (`tools/setup_control_plane.py`, version 3, 854 messages untouched) and
      the structured summary, the `compactions` record and `messages.failure`
-     deployed (`75245bc`). Live acceptance still owed: a warm repeat turn showing `cached_tokens`
+     deployed (`75245bc`). The first live turn on the engine (`a459c70e`)
+     showed a regression of my own and two defects, all fixed and deployed
+     the same day (`a15bc34`, ISS-0022, ISS-0023, ISS-0025). `cached_tokens`
+     needs `--enable-prompt-tokens-details` on the model server, in the
+     tree; the model-app deploy is **deferred by the human** (ISS-0024). Rule
+     since the same day: after every deploy of the agent, `/check` and
+     `scripts/loop_live.py --after-deploy`. Live acceptance still owed: a
+     warm repeat turn showing `cached_tokens`
      near the previous request, and the Task Board request showing step sizes
      flat against test 8's growth.
    - **4.6b Exact recovery from archived history.** A search over what was

@@ -104,7 +104,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Append/search work journals | `tools/work_log.py` | `reports/agent_tasks.jsonl`, `reports/ml_work.jsonl` |
 | Diagnose local installation | `scripts/doctor.py` | diagnostics |
 | Measure model endpoint wake | `scripts/measure_endpoint_wake.py` | wake measurement |
-| Run the live loop acceptance (wakes the GPU) | `scripts/loop_live.py` | scenarios A–E, `Turn`, PASS/FAIL per check, exit code |
+| Run the live loop acceptance (wakes the GPU) | `scripts/loop_live.py` | scenarios A–G, `--after-deploy` (A, B, G), `Turn`, PASS/FAIL per check, exit code |
 | Run broad smoke/live legacy checks | `scripts/smoke_test.py`, `scripts/stage3_live.py`, `scripts/v1_live.py` | historical stage runners |
 | Migrate local workspace data | `scripts/migrate_workspace.py` | migration logic |
 

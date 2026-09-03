@@ -260,6 +260,19 @@ App name:
 assistant-control
 ```
 
+**After every deploy of `assistant-control`** (rule since 2026-09-03): `/check`
+in Telegram, which is free, and the live check below, which wakes the GPU and
+needs the human's permission for that run:
+
+```text
+.venv\Scripts\python.exe -m scripts.loop_live --after-deploy
+```
+
+It runs two quick answers (A, B) so a change to the loop has not broken the
+simple case, then the person's own Task Board request (G) with the checks
+that caught every defect of 2026-09-03: files and screenshot sent, one
+answer, at most five writes, the turn ended before its ceiling.
+
 The file defines three image shapes:
 
 ```text
