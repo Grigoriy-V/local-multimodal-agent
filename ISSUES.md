@@ -51,6 +51,157 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0037 — the failure message sent to the person carries the endpoint URL and the server's body
+
+- **Status:** open
+- **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.10); the wording itself was
+  seen live on 2026-09-03 in the `<eos>`-era failures
+- **Costs:** "That request failed: BackendError: the endpoint https://… could
+  not be reached (…)" and, for an HTTP failure, the server's own response
+  text, in the chat. For the owner it is a diagnostic; under open access it
+  is infrastructure detail handed to strangers, and it is the one place the
+  product speaks in tracebacks.
+- **Reproduce:** point `MODEL_ENDPOINT` at an unreachable address and send a
+  message; read the reply.
+- **Cause:** `TelegramAdapter.handle_update` sends `f"{type}: {error}"` of
+  any exception; `BackendError` texts include the endpoint and the body.
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`
+- **Related:** none
+
+### ISS-0036 — a transient failure before the first streamed token fails the turn
+
+- **Status:** open
+- **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.9); not yet seen live
+- **Costs:** a 503 or 429 from the proxy while the GPU wakes, on the one
+  path every conversational call takes, is a failed turn with an error in
+  the chat, where the same failure on `invoke` is retried with backoff.
+- **Reproduce:** a scripted transport answering 503 once, then 200, against
+  `OpenAICompatibleBackend.stream`; the first answer is the error.
+- **Cause:** `stream()` retries nothing; its docstring says a retry before
+  the first delta would be safe and is not done "for now".
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`
+- **Related:** none
+
+### ISS-0035 — the approval-resume path in Telegram lost the answer path's fixes
+
+- **Status:** open
+- **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.8); not yet seen live
+- **Costs:** after a person presses approve, a verbatim repeat of the text
+  written beside the call is sent again (the ISS-0009 mitigation is not
+  applied), and a draft the turn withdrew is deleted instead of held, so the
+  person watches an answer vanish where the ordinary path keeps it.
+- **Reproduce:** a turn that stops for approval, then produces the same text
+  twice; compare the chat with the same turn without an approval.
+- **Cause:** `TelegramAdapter._on_callback` re-implements the event loop of
+  `_answer` and was not updated with it: no `delivered` set is passed to
+  `_deliver`, and `AnswerWithdrawn` calls `preview.discard()` where `_answer`
+  calls `preview.hold()`.
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`
+- **Related:** ISS-0009
+
+### ISS-0034 — a worker's lease outlives the container's own kill by five minutes
+
+- **Status:** open
+- **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.7); not yet seen live
+- **Costs:** when a worker container dies mid-turn, the conversation stays
+  `running` with a live lease until 900 s after the claim, and every later
+  message of that person waits silently for it: up to fifteen minutes with
+  no reply and no explanation.
+- **Reproduce:** the three numbers — `TurnBudget.max_seconds` 300, the
+  worker's Modal `timeout` 600, `claim(lease_seconds=900)` — read side by
+  side; a killed container leaves `lease_until` in the future for
+  900 − 600 s at least.
+- **Cause:** the lease length is not derived from the turn's ceiling or the
+  container's timeout and is longer than both.
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`
+- **Related:** none
+
+### ISS-0033 — no tool has a deadline; a hung tool holds the worker until the platform kills it
+
+- **Status:** open
+- **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.5); not yet seen live
+- **Costs:** `read_document` on a large PDF, `view_pages`, a slow database
+  under `search_history` or a stuck volume under `write_file` run on the event
+  loop with no bound; the turn's own `max_seconds` is read only between
+  steps, so a hung call holds the worker to Modal's 600 s kill, and then
+  ISS-0034 holds the conversation longer.
+- **Reproduce:** `grep timeout_seconds= app/tools` finds no tool; a tool whose
+  body sleeps past `max_seconds` ends the turn only when the container ends.
+- **Cause:** `Tool.timeout_seconds` exists, the executor honours it, and no
+  tool sets it; the web tools carry their own httpx deadlines and nothing
+  else carries any.
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`
+- **Related:** ISS-0034
+
+### ISS-0032 — the conversation folds every twelve messages whatever their size
+
+- **Status:** open
+- **Seen:** 2026-09-03, deployed, thread `4fd35f80`: four folds in sixteen
+  turns (`count` at 12, 24, 36, `asked` at 15) with requests between 4k and
+  10k tokens against a 52k budget
+- **Costs:** each fold is a model call, invalidates the served prefix cache
+  behind the summary, and rewrites the summary from the previous summary,
+  so exact wording is lost in steps a person never asked for while most of
+  the window sits empty. Recall of an exact detail then needs
+  `search_history` where verbatim history would have carried it.
+- **Reproduce:** any conversation past sixteen messages; `/context` shows
+  the summary covering messages the window had room for.
+- **Cause:** `ContextPolicy.summarize_after=16` triggers on a message count
+  alone; the size trigger, which is exact, rarely gets to fire first.
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`, `reports/2026-09-03_v2_history_recovery_review.md`
+- **Related:** ISS-0030
+
+### ISS-0031 — a tool call cut at the output limit is reported to the model as bad JSON
+
+- **Status:** open
+- **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.3); not yet seen live
+- **Costs:** a `write_file` whose content runs past `MODEL_MAX_TOKENS`
+  (4096) arrives with `finish_reason="length"` and unterminated arguments;
+  the model is told "bad arguments … could not be read as a JSON object",
+  which is not what happened, and its natural retry is the same file cut
+  at the same place — a rewrite loop with a cause nothing names.
+- **Reproduce:** ask for a single file of about 15,000 characters; read
+  `finish_reason` on the `model_finished` event and the refusal that
+  follows.
+- **Cause:** nothing in `app/agent/graph.py` or the backend reads
+  `Completion.finish_reason`; `read_arguments` sees only the broken JSON.
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`
+- **Related:** ISS-0019, ISS-0001
+
+### ISS-0030 — the summarizer is handed every tool result in full
+
+- **Status:** open
+- **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.1); the cost is visible in
+  today's folds of thread `4fd35f80`, each carrying whole page fetches
+- **Costs:** a fold of twelve messages with three page fetches sends the
+  summarizer ~100k characters, the largest prefill of the conversation, for
+  text of which the summary keeps a sentence; on a long tool turn the
+  summarizer request can itself exceed the window (ISS-0029).
+- **Reproduce:** fold a thread holding three `fetch_page` results; read the
+  summarizer request's `input_tokens` on the trace.
+- **Cause:** `summarize()` renders `pending[:cut]` with `transcript`, which
+  writes every content part whole; the surface's stubbing (`shortened`) is
+  not applied to what the summarizer reads.
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`
+- **Related:** ISS-0029, ISS-0032
+
+### ISS-0029 — a summarizer request that does not fit fails a turn whose answer was already delivered
+
+- **Status:** open
+- **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.1); not yet seen live
+- **Costs:** the answer streams to the person, then `persist` folds, the
+  summarizer's request exceeds the window, the node raises, and the chat
+  gets "That request failed: ContextOverflowError" under a complete answer.
+  The same fold in `fitted` fails the step before the answer instead.
+- **Reproduce:** a thread whose pending messages hold enough full tool
+  results to exceed the window (ISS-0030 makes this reachable), then one
+  more turn.
+- **Cause:** `fold_older_messages` is called in `persist` and in `fitted`
+  with no handling of `ContextOverflowError`; only the overflow-recovery
+  branch of `_ask` catches it.
+- **Evidence:** `reports/2026-09-03_v2_whole_code_review.md`
+- **Related:** ISS-0030
+
 ### ISS-0028 — the model says it checked its memory without calling anything
 
 - **Status:** open — model behaviour, for 4.9 with ISS-0004
@@ -214,6 +365,11 @@ Rules that keep the file honest:
   `write_file` calls on `index.html`.
 - **Cause:** unknown. It follows the `todo_write` update every time, as if
   the model re-executes the step it just marked done.
+- **Also:** 2026-09-03, code review — the loop's repeat guard
+  (`failed_before` in `app/agent/graph.py`) counts identical *failed* calls
+  only, so a run of identical successful writes is bounded by nothing but
+  the turn budget; `write_file`'s `unchanged:` answer is the only brake.
+  `reports/2026-09-03_v2_whole_code_review.md` §2.4.
 - **Also seen, without a plan:** 2026-09-03, run `9c42241c`, the worst so
   far: `index.html` written seven times, `styles.css` and `app.js` twice
   each, ten `write_file` calls where three were the work, 125 s and 5000
@@ -567,6 +723,10 @@ Rules that keep the file honest:
   `fetch_page` call at all (1 model call, 0 tools). Everything said was
   read off the address itself. The previous message in the same thread
   had fetched its page and used `offset` to read the rest unprompted.
+- **Note:** 2026-09-03, code review — one sub-case is a fact about the
+  turn rather than about wording: the person's message carries a URL and
+  the turn made no tool call at all (run `45f78d7e`). The steering seam can
+  refuse that ending once without reading the answer; `reports/2026-09-03_v2_whole_code_review.md` §2.11.
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`,
   `reports/2026-08-31_v2_todo_live_failure.md`
 - **Related:** ISS-0008; roadmap step 4.5.5
