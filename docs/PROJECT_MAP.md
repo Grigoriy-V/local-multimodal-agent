@@ -389,7 +389,7 @@ It owns transport translation, not agent policy:
 - maps Telegram account identity to canonical application user id;
 - finds/creates the current application thread;
 - downloads uploads and passes them through app admission;
-- dispatches `/new`, `/chats`, `/can`, `/check`, `/stop` and help commands;
+- dispatches `/new`, `/chats`, `/can`, `/check`, `/stop`, `/plan` and help commands;
 - passes ordinary messages to the `Agent`, with the update id as the turn's
   sequence so a later `/stop` can be told from an earlier one;
 - renders the consent question, the transient tool status and the step it

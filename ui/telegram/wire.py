@@ -47,7 +47,7 @@ CHATS_CLOSE = f"{CHATS_CALLBACK_PREFIX}close"
 # `tests/test_telegram_adapter.py` answers each of these with a backend that
 # raises on any call, so this list cannot quietly stop being true.
 MODEL_FREE_COMMANDS = frozenset(
-    {"/start", "/help", "/new", "/chats", "/can", "/check", "/stop"}
+    {"/start", "/help", "/new", "/chats", "/can", "/check", "/stop", "/plan"}
 )
 
 # Commands that carry their own text and still never reach the model. `/agents`
@@ -59,7 +59,9 @@ MODEL_FREE_COMMANDS = frozenset(
 # chatted to, and the instructions were silently never saved. A near miss on a
 # command that writes a file has to hit the command, not the GPU.
 INSTRUCTION_COMMANDS = frozenset({"/agents", "/agent"})
-MODEL_FREE_WITH_ARGUMENTS = tuple(sorted(INSTRUCTION_COMMANDS))
+# `/plan on` and `/plan off` write a marker file and answer from it.
+PLAN_COMMANDS = frozenset({"/plan"})
+MODEL_FREE_WITH_ARGUMENTS = tuple(sorted(INSTRUCTION_COMMANDS | PLAN_COMMANDS))
 
 # Buttons that are answered from storage. A settled status button describes
 # something that already happened; a conversation button changes which thread

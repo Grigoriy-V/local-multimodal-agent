@@ -510,6 +510,20 @@ app/capabilities.py -> capability_report()
 ui/telegram/adapter.py -> /can dispatch
 ```
 
+### `/plan`
+
+`/plan` says whether the assistant keeps a task list; `/plan off` and
+`/plan on` flip it. The switch is the marker file `.agent/plan.off` in the
+person's workspace, read when the next turn's toolbox is built: off means no
+`todo_write` tool and, since the brief is generated from the toolbox, no
+planning guidance either. Answered without the model. Asked for on
+2026-09-03 to separate the plan's defects (ISS-0016, ISS-0019) from the rest.
+
+```text
+ui/telegram/adapter.py -> /plan dispatch
+app/agent/todo.py      -> PLAN_SWITCH, planning_enabled, set_planning
+```
+
 ### `/agents`
 
 The person's own standing instructions for how the assistant should work. It

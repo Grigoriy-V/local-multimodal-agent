@@ -22,6 +22,7 @@ be honest about the plan is the other.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 from app.agent.stopping import Candidate, Steering
 from app.tools.todo import current, unfinished
@@ -35,6 +36,33 @@ INSTRUCTION = (
     "you are not going to do. Then add only what is new; if nothing is new, "
     "answer with nothing."
 )
+
+# Whether this person's agent gets a plan at all. A marker file in their own
+# workspace, so it survives a restarted worker and is the same in every
+# interface, and so the person can see it beside `AGENTS.md`. Off means the
+# `todo_write` tool is not offered, and with it every brief line about
+# planning disappears, because the brief is generated from the toolbox. Asked
+# for on 2026-09-03 to tell the plan's defects apart from everything else's.
+PLAN_SWITCH = Path(".agent") / "plan.off"
+
+
+def planning_enabled(workspace: Path | str) -> bool:
+    """Never raises: an unreadable marker is a plan that is on."""
+
+    try:
+        return not (Path(workspace) / PLAN_SWITCH).exists()
+    except OSError:
+        return True
+
+
+def set_planning(workspace: Path | str, enabled: bool) -> None:
+    marker = Path(workspace) / PLAN_SWITCH
+    if enabled:
+        marker.unlink(missing_ok=True)
+        return
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("planning is off; /plan on in Telegram turns it back on\n", encoding="utf-8")
+
 
 # How many open items are named back to the model. The list is bounded already;
 # this keeps one long plan from becoming a long injected message.

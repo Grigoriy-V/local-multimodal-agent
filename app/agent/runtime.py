@@ -26,7 +26,7 @@ from app.agent.graph import (
 )
 from app.agent.stop import NO_STOPS, StopRequests
 from app.agent.stopping import STOP_ON_ANSWER, TurnStopping
-from app.agent.todo import FinishesItsOwnList
+from app.agent.todo import FinishesItsOwnList, planning_enabled
 from app.checkpoints import CheckpointHandle
 from app.capabilities import (
     CHAT_DELIVERY,
@@ -262,8 +262,10 @@ class Agent:
                 ),
                 # Planning is not a granted capability: it reaches nothing, costs
                 # nothing to hold and has no root to be confined to. It is part
-                # of what an agent is here, in the way memory is.
-                *todo_tools(),
+                # of what an agent is here, in the way memory is — unless the
+                # person switched it off (`/plan off`), in which case the tool
+                # and every brief line about it are simply absent.
+                *(todo_tools() if planning_enabled(self.workspace) else ()),
             ],
         )
 
@@ -297,6 +299,18 @@ class Agent:
         if "gpu" in include:
             probes.append(backend_probe(self.backend))
         return report(await run(probes, include))  # type: ignore[arg-type]
+
+    def rewire(self) -> None:
+        """Forget the compiled graphs, so the next turn builds its toolbox afresh.
+
+        The toolbox is read once per thread when its graph is compiled. A
+        switch the person flips between turns — `/plan off` — is read from
+        the workspace at that moment and nowhere later, so the graphs are
+        dropped here. Nothing about the conversation is lost: state lives in
+        the checkpointer and the store, not in the compiled object.
+        """
+
+        self._graphs.clear()
 
     async def _graph(self, thread_id: str) -> CompiledStateGraph:
         if thread_id not in self._graphs:

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.runtime import Agent, AnswerWithdrawn, AssistantDelta, create_agent
+from app.agent.todo import PLAN_SWITCH, planning_enabled, set_planning
 from app.agent.stop import MemoryStopRequests, PostgresStopRequests, StopRequests
 from app.attachments import AttachmentBytes, AttachmentError, admit_uploads
 from app.instructions import (
@@ -58,6 +59,7 @@ from ui.telegram.wire import (
     CHATS_CALLBACK_PREFIX,
     CHATS_CLOSE,
     INSTRUCTION_COMMANDS,
+    PLAN_COMMANDS,
     SETTLED_CALLBACK_PREFIX,
     Incoming,
     canonical_user_id,
@@ -724,6 +726,9 @@ class TelegramAdapter:
             # follows `set` is the person's own writing and must survive.
             await self._on_instructions(agent, incoming.chat_id, argument.strip())
             return
+        if head.lower() in PLAN_COMMANDS:
+            await self._on_plan(agent, incoming.chat_id, argument.strip().lower())
+            return
         if command == "/can":
             # Answered from the wiring, not by the model. When the assistant
             # claims it cannot send a picture, this is what that is checked
@@ -840,6 +845,36 @@ class TelegramAdapter:
             chat_id,
             f"Your standing instructions, from {INSTRUCTIONS_FILE}:\n\n{current}\n\n"
             "/agents followed by new text replaces this, /agents clear removes it.",
+        )
+
+    async def _on_plan(self, agent: Agent, chat_id: int, argument: str) -> None:
+        """Show or flip whether the assistant keeps a task list.
+
+        A marker file in the person's workspace, read when the next turn's
+        toolbox is built, so `off` takes effect from the next message and is
+        the same in every interface. Nothing else is touched: with the tool
+        absent the brief has nothing to say about planning.
+        """
+
+        workspace = agent.workspace
+        if argument in {"on", "off"}:
+            set_planning(workspace, argument == "on")
+            agent.rewire()
+            await self.client.send_message(
+                chat_id,
+                "Planning is on from your next message: I may keep a task list for "
+                "longer work."
+                if argument == "on"
+                else "Planning is off from your next message: no task list, no "
+                f"planning tool. Kept as {PLAN_SWITCH.as_posix()} in your workspace; "
+                "/plan on turns it back on.",
+            )
+            return
+        state = "on" if planning_enabled(workspace) else "off"
+        await self.client.send_message(
+            chat_id,
+            f"Planning is {state}. /plan off removes my task list and the planning "
+            "tool from the next message on; /plan on brings them back.",
         )
 
     async def _show_conversations(

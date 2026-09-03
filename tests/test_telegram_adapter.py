@@ -945,6 +945,41 @@ async def test_agents_shows_how_to_start_when_there_are_none(
     assert "as you wrote them" in said or "as you wrote it" in said
 
 
+async def test_plan_off_removes_the_planning_tool_from_the_next_turn(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Asked for 2026-09-03, to tell the plan's defects from everything else's."""
+
+    backend = ScriptedBackend(says("ok"), says("ok again"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("/plan off"))
+    await adapter.handle_update(text_update("hello"))
+
+    assert "Planning is off" in telegram.sent[0]
+    assert (tmp_path / "workspace" / ".agent" / "plan.off").is_file()
+    offered = [tool["function"]["name"] for tool in backend.tools_seen[-1]]
+    assert "todo_write" not in offered
+    assert "write_file" in offered
+
+    await adapter.handle_update(text_update("/plan on"))
+    await adapter.handle_update(text_update("hello again"))
+
+    assert not (tmp_path / "workspace" / ".agent" / "plan.off").exists()
+    assert "todo_write" in [tool["function"]["name"] for tool in backend.tools_seen[-1]]
+
+
+async def test_plan_alone_says_which_way_it_is(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+
+    await adapter.handle_update(text_update("/plan"))
+
+    assert telegram.sent[-1].startswith("Planning is on")
+    assert needs_model(Incoming(CHAT, ALLOWED, "/plan off")) is False
+
+
 async def test_agents_set_writes_the_workspace_file_itself(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
@@ -1197,7 +1232,7 @@ def test_the_native_menu_is_the_product_and_not_the_diagnostics() -> None:
 
     offered = [entry.command for entry in PRODUCT_COMMANDS]
 
-    assert offered == ["new", "chats", "can", "agents", "stop", "help"]
+    assert offered == ["new", "chats", "can", "agents", "plan", "stop", "help"]
     assert "check" not in offered
     assert all(entry.description and entry.description[0].isupper() for entry in PRODUCT_COMMANDS)
     assert len(BOT_DESCRIPTION) <= 512
@@ -1239,6 +1274,7 @@ async def test_publishing_the_profile_sends_exactly_the_product_menu(
         "chats",
         "can",
         "agents",
+        "plan",
         "stop",
         "help",
     ]
