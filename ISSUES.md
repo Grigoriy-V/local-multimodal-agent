@@ -51,6 +51,26 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0016 — the plan is a list of phases, ticked in bulk
+
+- **Status:** open
+- **Seen:** 2026-09-03, live, three turns: thread `3261ae8f` (Task Board
+  test 4), loop run `live-70`, thread `5cee5866` (Task Board test 5)
+- **Costs:** the list is written before the work as generic phases —
+  "create structure", "implement CSS", "verify and take screenshot" — and
+  not as the request's own requirements (three columns, drag and drop,
+  persistence, filter, responsive). It is then updated in bulk: five items
+  marked completed in one call after the files are written, and "verify"
+  marked completed after one look that exercised nothing. In test 4 it was
+  never updated at all. The person sees a plan that says everything is done
+  and reads nothing that was checked.
+- **Reproduce:** any request with several requirements; compare the list to
+  the request and the ticks to the tool calls.
+- **Cause:** unknown. The 4.4 brief says what a list costs and when to use
+  one; it says nothing about what an item is or what marks one done.
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0004, ISS-0008; roadmap 4.4 "known problems", 4.7
+
 ### ISS-0015 — a written page ends with a markdown fence
 
 - **Status:** open
@@ -315,7 +335,13 @@ Rules that keep the file honest:
 - **Also seen:** 2026-09-03, loop re-run `live-70`: asked for the screenshot
   and the files in one request, the model sent `index.html` with `send_file`
   and handed the screenshot over as `![Screenshot](.agent/browser/….png)` —
-  a markdown image of a workspace path, which no interface renders. `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+  a markdown image of a workspace path, which no interface renders. Then in
+  Telegram, thread `5cee5866`, the same request: three files listed as paths,
+  the screenshot as the same markdown image, nothing sent; both arrived only
+  when asked again in two more turns. `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Mitigated:** 2026-09-03, the brief now says where the person is (the
+  adapter declares `Delivery.place`), that they cannot see the workspace, and
+  that a path, link or markdown image delivers nothing. Not yet seen live.
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`
 
 ### ISS-0002 — a picture someone sends is never kept

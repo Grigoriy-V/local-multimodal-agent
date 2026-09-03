@@ -116,6 +116,37 @@ called for `index.html` and not for the PNG; the answer ends with
 Also seen: the written file ends with a literal markdown fence after
 `</html>` (ISS-0015), visible on the page and in the snapshot the model read.
 
+## The person's turn on the served-origin code: Task Board test 5
+
+Thread `5cee5866`, run `b100a27a`, 79 s, 10 model calls, 8 tool calls, no
+failure. Three files this time (`index.html`, `style.css`, `script.js`), a
+six-item plan, one needless rewrite of `index.html`, one look that reported
+no console error and no refused request — the served origin worked in the
+container, Chrome 151. Then the answer: files as bullet paths and
+`![Screenshot](.agent/browser/index-d100867a.png)`; nothing sent. The files
+came on "в чат пришли файлы" (three `send_file`), the PNG on "скрин" (a
+second `inspect_page`, then `send_file`).
+
+What the brief had not told the model: where the person is. The delivery
+sentence said what the interface can carry and that a request for a
+screenshot means `send_file`; it never said the person cannot see the
+workspace, so a path or a markdown image looked like a way to hand something
+over. `Delivery` now carries `place`, declared by each adapter ("Telegram",
+"the Chainlit web app"), and the brief says the person sees only this chat,
+cannot open or browse the workspace, and that a path, link or markdown image
+of a workspace file delivers nothing; the send is one call per item.
+
+**An option the human has not decided:** a mechanical backstop in the
+adapters, where a markdown image in the final answer that names an existing
+workspace image is taken as the model's explicit decision to show it and is
+delivered as one. It is not automatic forwarding of tool media, which
+2026-08-29 rejected: the model wrote the embed itself. It is also a second
+way to send, next to `send_file`. Left as an option in this report.
+
+On the plan: six phases, five ticked in one call, "verify" ticked after a
+look that pressed nothing (ISS-0016).
+
 ## Next gate
 
-Deploy of the served-origin fix, then the person's own turn in Telegram.
+Deploy of the brief change, then the person's own turn in Telegram; the
+markdown-image backstop needs a decision.

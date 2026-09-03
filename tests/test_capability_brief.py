@@ -130,8 +130,23 @@ def test_an_interface_that_shows_media_says_media_arrives(
 
     assert "image" in brief
     assert "explicitly call send_file" in brief
-    assert "perform the send_file call instead of only saying that you can" in brief
+    assert "perform the send_file call, one per item, instead of only saying" in brief
     assert "nothing else is sent automatically" in brief
+
+
+def test_the_brief_says_where_the_person_is_and_that_a_path_delivers_nothing(
+    registry: CapabilityRegistry,
+) -> None:
+    """Live 2026-09-03: asked for a screenshot in the chat, the model answered
+    with `![Screenshot](.agent/browser/….png)`. Nothing had told it the person
+    is on Telegram and cannot see the workspace."""
+
+    brief = capability_brief(everything(registry), Delivery(place="Telegram"))
+
+    assert "talking to you through Telegram" in brief
+    assert "cannot open, browse or see your workspace" in brief
+    assert "markdown image of a workspace file reaches them as plain text" in brief
+    assert "one per item" in brief
 
 
 def test_an_interface_that_cannot_show_media_says_that_instead(

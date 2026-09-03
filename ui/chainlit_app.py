@@ -57,7 +57,7 @@ from ui.chainlit_history import LOCAL_USER_IDENTIFIER, MemoryStoreDataLayer
 IMAGE = "image"
 AUDIO = "audio"
 CONFIRM_TIMEOUT = 600
-DELIVERY = Delivery(media=(IMAGE, AUDIO))
+DELIVERY = Delivery(media=(IMAGE, AUDIO), place="the Chainlit web app")
 
 
 @cl.header_auth_callback

@@ -35,6 +35,11 @@ class Delivery:
 
     media: tuple[str, ...] = ("image", "audio")
     files: bool = True
+    # Where the person is, in words the model can repeat: "Telegram", "the
+    # Chainlit web app". Live on 2026-09-03 the model, asked to send a
+    # screenshot to the chat, answered with a markdown image of a workspace
+    # path, because nothing had told it the person cannot see the workspace.
+    place: str = "a chat"
 
 
 # Both interfaces that exist show pictures and play sound, so this is the honest
@@ -212,11 +217,15 @@ def _delivery_sentence(tools: Toolbox, delivery: Delivery) -> str:
         )
     kinds = ", ".join((*delivery.media, *(("files",) if delivery.files else ())))
     return (
-        f"This interface can deliver {kinds}. Observation tools keep their evidence "
-        "between you and the tool. When you decide the person should receive one "
-        "workspace item, explicitly call send_file with that path; nothing else is sent "
-        "automatically. A direct request to receive a screenshot or file is such a decision: "
-        "perform the send_file call instead of only saying that you can."
+        f"The person is talking to you through {delivery.place} and sees only this "
+        "chat: they cannot open, browse or see your workspace. A path, a link or a "
+        "markdown image of a workspace file reaches them as plain text and delivers "
+        f"nothing. This interface can deliver {kinds}. Observation tools keep their "
+        "evidence between you and the tool. When you decide the person should receive "
+        "one workspace item, explicitly call send_file with that path; nothing else is "
+        "sent automatically. A direct request to receive a screenshot or file is such a "
+        "decision: perform the send_file call, one per item, instead of only saying that "
+        "you can or naming the path."
     )
 
 

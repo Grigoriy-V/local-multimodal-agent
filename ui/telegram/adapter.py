@@ -100,7 +100,7 @@ HELP = Formatted.from_markdown(HELP_MARKDOWN)
 # What `_send_media` can actually put in this chat, declared where that method
 # is, so the two cannot drift apart. Images go as photos and sound as a file,
 # but both arrive, and the model is told so instead of guessing.
-DELIVERY = Delivery(media=("image", "audio"))
+DELIVERY = Delivery(media=("image", "audio"), place="Telegram")
 
 # Telegram names an upload by its filename, so an outgoing part needs a
 # plausible extension. Only the types the assistant can produce are listed.
