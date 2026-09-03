@@ -280,6 +280,11 @@ an observed defect is described in `ISSUES.md`, not here.
   end marker. `reports/2026-08-30_v2_album_burst_incident.md`.
 - **Show the preview only when it will survive.** `ISSUES.md` ISS-0009.
 - **Put the reason in `tool_failed`.** `ISSUES.md` ISS-0007.
+- **The local interface as a product path.** Chainlit and the agent on the
+  person's machine, the model on Modal: a second way to use the same
+  assistant, beside Telegram. Confirmed as a product path on 2026-09-03 and
+  deferred by the human until the base harness is done; the adapter is
+  covered by tests only since the 4.5 changes and has not been run live.
 
 **Closing criterion:** through Telegram, a normal conversational request is
 answered and a work request completes end to end for two different users without
