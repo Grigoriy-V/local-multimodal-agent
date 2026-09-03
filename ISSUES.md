@@ -402,6 +402,7 @@ Rules that keep the file honest:
 - **Evidence:** runs `94e8bd24` (preview at 15.9 s, 2,075 tokens, withdrawn,
   final answer 17 tokens) and `3e5690ae` (preview at 67.1 s, withdrawn, final
   answer 1 token), 2026-08-31T05:06–05:11Z; `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Also seen:** 2026-09-03, `scripts/loop_live.py --after-deploy` run `live-70`: the closing message was byte-identical to the text written beside `send_file`; in Telegram the adapter drops the verbatim repeat, so the person sees one. The runner prints it as a note, not a check.
 
 ### ISS-0008 — a generated app is delivered as working without ever being used
 

@@ -309,6 +309,20 @@ by prefill time alone.
 Also: `/compact` was recorded as a failed turn because the command path did
 not close its trace (ISS-0025).
 
+## The first after-deploy check, on `a15bc34`
+
+`scripts/loop_live.py --after-deploy`, with permission, 10:22Z. A and B
+passed. G: 6 model calls, 5 tool calls, 82 s; one `write_file` (the model
+put the app in one file — the prompt now names the three files, as the
+person's does), `inspect_page`, the screenshot and the files sent
+unprompted, no path as prose, no failure, no rewrite, far from the ceiling.
+The turn layer stayed at 3.7k tokens across steps with one result stubbed.
+One thing to know: the closing message repeated, byte for byte, the text
+written beside `send_file` (ISS-0009); the Telegram adapter drops such a
+repeat, and the runner now prints it as a note rather than failing on a
+model habit 4.7 owns. Also seen: three `send_file` calls, `index.html`
+twice, where one call with `paths` was the point.
+
 **Not done.** The live numbers. Both acceptances need the human's own turns:
 a repeat question in one thread to read `cached_tokens` against the previous
 request's size, and the Task Board request to compare step sizes with test
