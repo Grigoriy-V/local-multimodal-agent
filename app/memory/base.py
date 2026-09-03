@@ -66,6 +66,17 @@ class Compaction:
 
 
 @dataclass(frozen=True)
+class Hit:
+    """One stored message found by its words: where it is, and what it said."""
+
+    thread_id: str
+    position: int
+    role: str
+    created_at: str
+    text: str
+
+
+@dataclass(frozen=True)
 class TurnContextRecords:
     """Durable records needed to construct one model turn."""
 
@@ -146,6 +157,17 @@ class ConversationStore(ABC):
     @abstractmethod
     def message_count(self, thread_id: str) -> int:
         ...
+
+    @abstractmethod
+    def search_messages(
+        self, query: str, user_id: str, *, thread_id: str | None = None, limit: int = 8
+    ) -> list[Hit]:
+        """Full-text search over this user's stored messages, best match first.
+
+        `thread_id` narrows it to one conversation, which must be this user's;
+        without it every conversation of theirs is searched, and nobody
+        else's ever is. What is found is what was said, not a summary of it.
+        """
 
     # --- rolling summary -----------------------------------------------------
 

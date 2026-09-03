@@ -149,6 +149,8 @@ TOOL_ACTIVITY = {
     "todo_write": "Planning…",
     "remember_fact": "Saving to memory…",
     "search_memory": "Searching memory…",
+    "search_history": "Searching the conversation…",
+    "read_history": "Reading back…",
 }
 UNKNOWN_ACTIVITY = "Working…"
 

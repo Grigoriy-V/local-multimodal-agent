@@ -171,6 +171,8 @@ How much of the model's window a request may occupy is `Agent.budget()`: the lim
 
 The size of the request about to be sent is estimated before every model step (`fitted` in `app/agent/graph.py`), and a conversation over budget is folded before it is sent rather than after the endpoint refuses it. The estimate lives behind the model boundary (`ModelBackend.estimate_tokens`) and calibrates itself from the token counts completions already report. Only stored history folds; shortening the current turn's own accumulated tool results is not implemented, and `ContextOverflowError` remains the backstop under all of it.
 
+What the summary and the stubs stand for stays reachable. Stored history is canonical and never rewritten; the model gets back to it through two tools of its own (`app/tools/history.py`): `search_history` finds a stored message by its words, within this person's conversations only, and `read_history` returns it by position as it was said, in pages. A shortened result's stub names its position, and the summary says the exact words behind it are kept. Nothing is injected: the model asks, and the trace shows that it did.
+
 ### Durable conversation and facts
 
 `app/memory/base.py` defines `ConversationStore`.
@@ -181,7 +183,8 @@ The store owns:
 - ordered messages;
 - rolling summaries;
 - long-term facts;
-- per-turn context records.
+- per-turn context records;
+- full-text search over stored messages (`search_messages`), scoped to one owner.
 
 Implementations:
 

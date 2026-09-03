@@ -52,6 +52,7 @@ from app.tools import (
     CapabilityGrant,
     CapabilityRegistry,
     Toolbox,
+    history_tools,
     memory_tools,
     todo_tools,
 )
@@ -287,6 +288,9 @@ class Agent:
                 *memory_tools(
                     self.store, self.user_id, thread_id, self.policy.retrieved_facts
                 ),
+                # The way back to what a summary or a stub stands for. Like
+                # memory, part of what an agent is here rather than a grant.
+                *history_tools(self.store, self.user_id, thread_id),
                 # Planning is not a granted capability: it reaches nothing, costs
                 # nothing to hold and has no root to be confined to. It is part
                 # of what an agent is here, in the way memory is — when the

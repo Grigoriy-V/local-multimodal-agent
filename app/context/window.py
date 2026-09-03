@@ -105,6 +105,9 @@ class Context:
     history: list[Message] = field(default_factory=list)
     facts: list[Message] = field(default_factory=list)
     keep_results: int = 2
+    # The stored position of `history[0]`, so a stub can say where the whole
+    # result is. The turn's own messages have no position yet.
+    first_position: int = 0
 
     def surface(self, new: Sequence[Message]) -> Surface:
         """The request, shortened on the surface only.
@@ -116,7 +119,9 @@ class Context:
         """
 
         combined = [*self.history, *new]
-        combined, stubbed = shortened(combined, self.keep_results)
+        combined, stubbed = shortened(
+            combined, self.keep_results, stored=len(self.history), base=self.first_position
+        )
         combined, placeholders = within_media_budget(combined, dict(MEDIA_BUDGET))
         split = len(self.history)
         return Surface(
@@ -156,13 +161,17 @@ def count_media(messages: Sequence[Message]) -> dict[str, int]:
 STUB_MIN_CHARS = 200
 
 
-def shortened(messages: Sequence[Message], keep: int) -> tuple[list[Message], int]:
+def shortened(
+    messages: Sequence[Message], keep: int, stored: int = 0, base: int = 0
+) -> tuple[list[Message], int]:
     """Tool results older than the newest `keep` become stubs.
 
     A stub names the tool, what it was asked about, the size of what it said
-    and the way back — the call can be made again, and history still holds
-    the whole result. Failures are kept: they are short, and they are why the
-    model did what it did next. The count is what a trace reports.
+    and the way back: the first `stored` messages are in history at positions
+    from `base`, and their stubs name the position for `read_history`; the
+    rest are this turn's, not stored yet, and can only be called again.
+    Failures are kept: they are short, and they are why the model did what it
+    did next. The count is what a trace reports.
 
     The model's own words — its text and the arguments of its calls — are
     never shortened. They were, for one deployed afternoon (run `a459c70e`,
@@ -189,14 +198,17 @@ def shortened(messages: Sequence[Message], keep: int) -> tuple[list[Message], in
             media = [part for part in message.content if part.kind != "text"]
             if len(text) > STUB_MIN_CHARS or media:
                 call = calls.get(message.tool_call_id or "")
-                out.append(replace(message, content=[ContentPart(kind="text", text=stub(call, text, media))]))
+                position = base + index if index < stored else None
+                out.append(
+                    replace(message, content=[ContentPart(kind="text", text=stub(call, text, media, position))])
+                )
                 count += 1
                 continue
         out.append(message)
     return out, count
 
 
-def stub(call, text: str, media: Sequence[ContentPart]) -> str:
+def stub(call, text: str, media: Sequence[ContentPart], position: int | None = None) -> str:
     what = call.name if call is not None else "tool"
     about = ""
     if call is not None:
@@ -208,7 +220,12 @@ def stub(call, text: str, media: Sequence[ContentPart]) -> str:
     if media:
         kinds = ", ".join(f"{part.kind}" for part in media)
         size = f"{size}, {kinds}" if size else kinds
-    return f"[{what}{about}: {size}; shortened, call the tool again for the full result]"
+    if position is None:
+        return f"[{what}{about}: {size}; shortened, call the tool again for the full result]"
+    return (
+        f"[{what}{about}: {size}; shortened — read_history {position} for the full result,"
+        " or call the tool again for a fresh one]"
+    )
 
 
 def within_media_budget(
@@ -306,7 +323,16 @@ def build_prelude(
     if overlay is not None:
         prelude.append(overlay)
     if summary:
-        prelude.append(system(f"Summary of the earlier conversation:\n{summary}"))
+        # The summary is a projection and may have lost a detail; the words
+        # behind it are stored and reachable, and the model is told so here
+        # rather than asked to keep more of them.
+        prelude.append(
+            system(
+                f"Summary of the earlier conversation:\n{summary}\n\n"
+                "The exact words behind this summary are kept: search_history finds "
+                "them, read_history returns them."
+            )
+        )
     return prelude
 
 

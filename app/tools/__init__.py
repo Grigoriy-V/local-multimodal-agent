@@ -30,6 +30,7 @@ from app.tools.capabilities import (
 from app.tools.documents import document_tools
 from app.tools.execution import PreparedToolCall, ToolExecutor, refusal_message
 from app.tools.filesystem import filesystem_tools
+from app.tools.history import history_tools
 from app.tools.memory import memory_tools
 from app.tools.presentation import presentation_tools, send_file
 from app.tools.todo import todo_tools
@@ -66,6 +67,7 @@ __all__ = [
     "filesystem_tools",
     "find_chromium_browser",
     "inspect_local_page",
+    "history_tools",
     "memory_tools",
     "presentation_tools",
     "refusal_message",

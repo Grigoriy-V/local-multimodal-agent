@@ -36,21 +36,23 @@ from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 
-from app.memory.base import Compaction, ConversationStore, Thread, TurnContextRecords
+from app.memory.base import Compaction, ConversationStore, Hit, Thread, TurnContextRecords
 from app.memory.records import (
     dump_failure,
     dump_content,
     dump_tool_calls,
+    message_text,
     now,
     opening_text,
     row_to_message,
+    stored_text,
 )
 from app.models import Message
 
 # Bumped whenever the schema changes, and stored in the database rather than
 # inferred from which columns happen to exist. Postgres has no `user_version`,
 # so the row below is this project's own equivalent.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -76,7 +78,9 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_calls   TEXT,
     tool_call_id TEXT,
     failure      TEXT,
+    text         TEXT,
     created_at   TEXT NOT NULL,
+    search       tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(text, ''))) STORED,
     UNIQUE (thread_id, position)
 );
 
@@ -143,7 +147,10 @@ def migrate(connection: psycopg.Connection, schema: str) -> int:
     record of which conversation anyone is in; the step to 2 only adds a table,
     so re-running the schema is the whole migration and no conversation is
     touched. Version 3 adds the `failure` column to messages, empty for every
-    existing row, and the `compactions` table. This runs from
+    existing row, and the `compactions` table. Version 4 adds `text`, filled
+    once from what each row holds, and the search vector and index over it:
+    the one migration that writes to every message row, and what it writes is
+    nothing the row did not say. This runs from
     `tools/setup_control_plane.py`, never from a worker starting up.
     """
 
@@ -154,6 +161,26 @@ def migrate(connection: psycopg.Connection, schema: str) -> int:
         cursor.execute(f'SET LOCAL search_path TO "{schema}"')
         cursor.execute(SCHEMA)
         cursor.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS failure TEXT")
+        cursor.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS text TEXT")
+        cursor.execute(
+            "SELECT id, content, tool_calls, failure FROM messages WHERE text IS NULL"
+        )
+        unfilled = cursor.fetchall()
+        if unfilled:
+            cursor.executemany(
+                "UPDATE messages SET text = %s WHERE id = %s",
+                [
+                    (stored_text(r["content"], r["tool_calls"], r["failure"]), r["id"])
+                    for r in unfilled
+                ],
+            )
+        cursor.execute(
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS search tsvector"
+            " GENERATED ALWAYS AS (to_tsvector('simple', coalesce(text, ''))) STORED"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS messages_search ON messages USING GIN (search)"
+        )
         cursor.execute("SELECT version FROM schema_version LIMIT 1")
         row = cursor.fetchone()
         found = 0 if row is None else int(row["version"])
@@ -353,10 +380,12 @@ class PostgresStore(ConversationStore):
             """
             WITH input AS (
                 SELECT ordinality - 1 AS offset,
-                       role, content, tool_calls, tool_call_id, failure
-                FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[], %s::text[])
+                       role, content, tool_calls, tool_call_id, failure, text
+                FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[], %s::text[],
+                            %s::text[])
                      WITH ORDINALITY
-                     AS item(role, content, tool_calls, tool_call_id, failure, ordinality)
+                     AS item(role, content, tool_calls, tool_call_id, failure, text,
+                             ordinality)
             ),
             owned_thread AS (
                 INSERT INTO {}.threads
@@ -374,10 +403,10 @@ class PostgresStore(ConversationStore):
             inserted AS (
                 INSERT INTO {}.messages
                     (thread_id, position, role, content, tool_calls,
-                     tool_call_id, failure, created_at)
+                     tool_call_id, failure, text, created_at)
                 SELECT %s, (base.next + input.offset)::integer, input.role,
                        input.content, input.tool_calls, input.tool_call_id,
-                       input.failure, %s
+                       input.failure, input.text, %s
                 FROM input
                 CROSS JOIN base
                 CROSS JOIN owned_thread
@@ -406,6 +435,7 @@ class PostgresStore(ConversationStore):
                             [dump_tool_calls(message.tool_calls) for message in pending],
                             [message.tool_call_id for message in pending],
                             [dump_failure(message.failure) for message in pending],
+                            [message_text(message) for message in pending],
                             thread_id,
                             user_id,
                             stamp,
@@ -447,6 +477,37 @@ class PostgresStore(ConversationStore):
                 "SELECT COUNT(*) AS n FROM messages WHERE thread_id = %s", (thread_id,)
             )
             return int(cursor.fetchone()["n"])  # type: ignore[index]
+
+    def search_messages(
+        self, query: str, user_id: str, *, thread_id: str | None = None, limit: int = 8
+    ) -> list[Hit]:
+        match = match_query(query)
+        if not match:
+            return []
+        sql = (
+            "SELECT m.thread_id, m.position, m.role, m.created_at, m.text"
+            " FROM messages m JOIN threads t ON t.id = m.thread_id"
+            " WHERE t.user_id = %s AND m.search @@ to_tsquery('simple', %s)"
+        )
+        parameters: list[Any] = [user_id, match]
+        if thread_id is not None:
+            sql += " AND m.thread_id = %s"
+            parameters.append(thread_id)
+        sql += " ORDER BY ts_rank(m.search, to_tsquery('simple', %s)) DESC, m.id DESC LIMIT %s"
+        parameters.extend([match, limit])
+        with self._cursor() as cursor:
+            cursor.execute(sql, parameters)
+            rows = cursor.fetchall()
+        return [
+            Hit(
+                thread_id=row["thread_id"],
+                position=int(row["position"]),
+                role=row["role"],
+                created_at=row["created_at"],
+                text=row["text"] or "",
+            )
+            for row in rows
+        ]
 
     # --- rolling summary -----------------------------------------------------
 

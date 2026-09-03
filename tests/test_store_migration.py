@@ -156,3 +156,18 @@ def test_a_fresh_database_starts_at_the_current_version(tmp_path: Path) -> None:
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     finally:
         db.close()
+
+
+def test_the_words_of_old_messages_become_searchable_with_schema_4(tmp_path: Path) -> None:
+    """A version-0 file has no text column; after opening, its one message is
+    found by a word it contains, and reads back unchanged."""
+
+    path = tmp_path / "memory.sqlite3"
+    write_v0(path)
+
+    with SqliteStore(path) as store:
+        [hit] = store.search_messages("older", LOCAL_USER_ID)
+        assert (hit.thread_id, hit.position, hit.role) == ("old-chat", 0, "user")
+        assert hit.text == "an older conversation"
+        [message] = store.messages("old-chat")
+        assert message.content[0].text == "an older conversation"

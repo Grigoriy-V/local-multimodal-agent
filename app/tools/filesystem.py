@@ -24,6 +24,7 @@ import tempfile
 from pathlib import Path
 
 from app.tools.base import BAD_ARGUMENTS, Tool, ToolError, handover
+from app.tools.paging import page
 
 MAX_ENTRIES = 200
 MAX_CHARS = 20_000
@@ -121,7 +122,7 @@ def _list_files(root: Path, path: str = ".") -> str:
     return listing
 
 
-def _read_file(root: Path, path: str) -> str:
+def _read_file(root: Path, path: str, offset: int = 0) -> str:
     target = _existing_file(root, path)
     try:
         text = target.read_text(encoding="utf-8", errors="replace")
@@ -129,9 +130,7 @@ def _read_file(root: Path, path: str) -> str:
         raise ToolError(
             f"path {path!r} could not be read", code=IO, detail=_detail(error)
         ) from error
-    if len(text) > MAX_CHARS:
-        return text[:MAX_CHARS] + f"\n... truncated at {MAX_CHARS} characters"
-    return text
+    return page(text, offset, MAX_CHARS, f"read_file {path!r} again with offset={{offset}}")
 
 
 def _names_a_directory(path: str) -> bool:
@@ -287,7 +286,8 @@ def filesystem_tools(root: Path) -> list[Tool]:
             name="read_file",
             description=(
                 "Read a UTF-8 text file inside the allowed workspace root. Accepts either "
-                "an absolute path inside that root or a path relative to it."
+                "an absolute path inside that root or a path relative to it. A long file "
+                "comes in pages: the end of a page says which offset to ask for next."
             ),
             parameters={
                 "type": "object",
@@ -297,12 +297,17 @@ def filesystem_tools(root: Path) -> list[Tool]:
                         "description": (
                             "Absolute path inside the workspace root, or a path relative to it."
                         ),
-                    }
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Character offset to continue a long file from. Defaults to 0.",
+                    },
                 },
                 "required": ["path"],
                 "additionalProperties": False,
             },
-            run=lambda path: _read_file(resolved, path),
+            run=lambda path, offset=0: _read_file(resolved, path, int(offset)),
         ),
         Tool(
             name="write_file",

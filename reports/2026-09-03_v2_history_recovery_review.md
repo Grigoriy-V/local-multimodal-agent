@@ -191,3 +191,41 @@ Two store methods, two tools, one column, one migration, a sentence in the
 prelude and an integer in the stub. Contract tests in the existing suite.
 The Neon backfill is milliseconds at 854 rows. No new service, no new model,
 no GPU beyond the two live turns of step 5.
+
+## Built, 2026-09-03
+
+Steps 1 and 2 of §7, after the human's "делай". In the tree, not deployed:
+
+- `records.message_text` / `stored_text`: text parts, then `code: message`
+  of a failure, then each call as `name {arguments}`; media contributes
+  nothing. `messages.text` in both stores, written at `append`; migration
+  to schema 4 fills it for existing rows and builds the index (FTS5 with
+  triggers and a rebuild locally; a `simple` tsvector generated column with
+  a GIN index on Postgres, added by `ALTER … IF NOT EXISTS` in the order the
+  generated column needs).
+- `ConversationStore.search_messages(query, user_id, thread_id=None,
+  limit=8) -> list[Hit]`, joined through `threads.user_id`, so a thread id
+  from another person finds nothing even when guessed. Contract tests in
+  `tests/test_store_contract.py` run against Postgres too when
+  `AGENT_TEST_DATABASE_URL` is set; here they ran on SQLite.
+- `search_history` and `read_history` (`app/tools/history.py`), wired next
+  to the memory tools in `Agent.toolbox`. Hits show `#position role time`
+  and a 300-character snippet around the first matching word;
+  `read_history` shows `#position role` and the message with its calls, in
+  12k pages. Telegram labels: "Searching the conversation…", "Reading
+  back…".
+- The stub: `[fetch_page https://…: 500 characters; shortened —
+  read_history 42 for the full result, or call the tool again for a fresh
+  one]` for a result in history; a result of the current turn has no
+  position yet and keeps "call the tool again". `Context.first_position`
+  carries the base from `summarized_through`.
+- The summary layer ends with: "The exact words behind this summary are
+  kept: search_history finds them, read_history returns them."
+- `offset` on `read_file`, `fetch_page` (`Fetched.as_text(offset=)`) and
+  `read_history`, all through `paging.page`: a page ends with "showing
+  characters a-b of n; for the rest, <the call> with offset=b". The fetch
+  footer now tells the page's cut apart from the download's own cut.
+
+Tests: 13 new (contract, migration, tools, surface, paging); the offline
+suite 1006 passed, 27 skipped. Not done: the Neon migration (gate), deploy,
+the two live turns.

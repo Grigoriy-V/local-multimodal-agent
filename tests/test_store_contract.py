@@ -348,3 +348,49 @@ def test_scope_survives_reopening(tmp_path: Path) -> None:
         assert second.threads(BOB) == []
         assert second.search("PowerShell", BOB) == []
         assert second.search("PowerShell", ALICE) == ["Alice uses PowerShell"]
+
+
+# --- what was said, found by its words ----------------------------------------
+
+
+def test_what_was_said_is_found_by_its_words(store: ConversationStore) -> None:
+    """Schema 4: a detail a summary lost is recoverable from the stored words,
+    within this person's conversations and never beyond them."""
+
+    from app.models import ToolFailure
+
+    failed = Message(
+        role="tool",
+        tool_call_id="c1",
+        content=[ContentPart(kind="text", text="error")],
+        failure=ToolFailure(code="fs.not_found", message="no such file notes.txt"),
+    )
+    store.append("t1", [user("read the notes"), failed], ALICE)
+    store.append("t2", [user("notes again, elsewhere")], ALICE)
+    store.append("t3", [user("bob's own notes")], BOB)
+
+    everywhere = store.search_messages("notes", ALICE)
+    here = store.search_messages("notes", ALICE, thread_id="t1")
+
+    assert {(hit.thread_id, hit.position) for hit in everywhere} == {("t1", 0), ("t1", 1), ("t2", 0)}
+    assert {(hit.thread_id, hit.position) for hit in here} == {("t1", 0), ("t1", 1)}
+    found = next(hit for hit in here if hit.role == "tool")
+    assert "fs.not_found: no such file notes.txt" in found.text, "the failure's message is searchable"
+    assert found.created_at
+    assert store.search_messages("notes", BOB, thread_id="t1") == [], "another person's thread, even by id"
+    assert store.search_messages("", ALICE) == []
+
+
+def test_a_filename_the_model_wrote_is_found_where_it_wrote_it(store: ConversationStore) -> None:
+    from app.models import ToolCall
+
+    wrote = Message(
+        role="assistant",
+        tool_calls=(ToolCall(id="c1", name="write_file", arguments={"path": "board/index.html", "content": "<html>"}),),
+    )
+    store.append("t1", [user("build it"), wrote], ALICE)
+
+    [hit] = store.search_messages("index.html", ALICE)
+
+    assert (hit.position, hit.role) == (1, "assistant")
+    assert "write_file" in hit.text and "board/index.html" in hit.text

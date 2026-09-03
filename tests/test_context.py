@@ -538,3 +538,41 @@ async def test_nothing_is_lost_when_a_thread_is_folded(store: SqliteStore) -> No
     await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy())
 
     assert store.message_count("t1") == 24
+
+
+def test_a_stub_in_history_says_where_the_whole_result_is() -> None:
+    """4.6b: a shortened result names its stored position, so the model can
+    read it back rather than run the tool again; a result of this turn has
+    no position yet and can only be called again."""
+
+    history = [
+        user("fetch it"),
+        call("c1", "fetch_page", url="https://example.com/"),
+        result("c1", "p" * 500),
+    ]
+    context = Context(history=history, first_position=40)
+    turn = [
+        call("c2", "fetch_page", url="https://example.com/2"),
+        result("c2", "q" * 500),
+        call("c3", path="a"),
+        result("c3", "r" * 500),
+        call("c4", path="b"),
+        result("c4", "s" * 500),
+    ]
+
+    surface = context.surface(turn)
+
+    assert surface.history[2].content[0].text == (
+        "[fetch_page https://example.com/: 500 characters; shortened — read_history 42 "
+        "for the full result, or call the tool again for a fresh one]"
+    )
+    assert surface.turn[1].content[0].text.endswith("shortened, call the tool again for the full result]")
+    assert surface.stubbed == 2
+
+
+def test_the_summary_says_where_its_exact_words_are() -> None:
+    [_, summary] = build_prelude("they built a board")
+    [alone] = build_prelude(None)
+
+    assert "search_history finds them, read_history returns them" in summary.content[0].text
+    assert "search_history" not in alone.content[0].text

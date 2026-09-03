@@ -29,4 +29,5 @@ def load_turn_context(
         history=records.messages,
         facts=facts_layer(records.facts),
         keep_results=keep_results,
+        first_position=records.summarized_through,
     )

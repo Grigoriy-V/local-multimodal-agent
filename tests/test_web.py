@@ -493,3 +493,21 @@ async def test_the_profile_decides_where_the_browser_runs(monkeypatch) -> None:
     await render_page("https://example.com/", settings())
 
     assert called == ["remote", "local"]
+
+
+async def test_a_long_page_comes_in_pages() -> None:
+    """The fetch limit bounds one result, not the reach: the next page is a
+    call away, and the download's own cut is told apart from the page's."""
+
+    body = "<p>" + ("word " * 5_000) + "</p>"
+
+    async with transport(lambda request: html_response(body)) as client:
+        fetched = await fetch_page("https://example.com/", settings(), client, PUBLIC)
+
+    first = fetched.as_text()
+    rest = fetched.as_text(offset=12_000)
+    last = fetched.as_text(offset=24_000)
+    assert not fetched.truncated
+    assert "stopped at 12000 of" in first and "fetch_page again with offset=12000" in first
+    assert "Continuing from character 12000." in rest and "offset=24000" in rest
+    assert "for the rest" not in last and "Continuing from character 24000." in last

@@ -19,21 +19,23 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from app.memory.base import Compaction, LOCAL_USER_ID, ConversationStore, Thread
+from app.memory.base import Compaction, LOCAL_USER_ID, ConversationStore, Hit, Thread
 from app.memory.records import (
     dump_failure,
     dump_content,
     dump_tool_calls,
+    message_text,
     now,
     opening_text,
     row_to_message,
+    stored_text,
 )
 from app.models import Message
 
 # Bumped whenever the schema changes. `PRAGMA user_version` is SQLite's own
 # integer on the file, so the database states its shape rather than the code
 # guessing it from which columns happen to exist.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
@@ -54,6 +56,9 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_calls   TEXT,
     tool_call_id TEXT,
     failure      TEXT,
+    -- The message's words, for full-text search: `records.message_text`.
+    -- Not an expression over `content`, which carries base64 media. Schema 4.
+    text         TEXT,
     created_at   TEXT NOT NULL,
     UNIQUE (thread_id, position)
 );
@@ -107,6 +112,17 @@ END;
 CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
     INSERT INTO facts_fts(facts_fts, rowid, text) VALUES ('delete', old.id, old.text);
 END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+    USING fts5(text, content='messages', content_rowid='id');
+
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
 """
 
 TOKEN = re.compile(r"\w+", re.UNICODE)
@@ -146,6 +162,11 @@ def migrate(db: sqlite3.Connection) -> int:
     The column is added empty — every stored row predates the typed outcome
     and reads as a message without one — and the table appears from the
     schema. No row is rewritten.
+
+    Version 3 has no `text` column and no index over it. The column is added
+    and filled from what each row already holds, then the FTS table is built
+    from it. `text` is derived, so this is the one migration that writes to
+    every message row, and what it writes is nothing the row did not say.
     """
 
     found = int(db.execute("PRAGMA user_version").fetchone()[0])
@@ -164,7 +185,17 @@ def migrate(db: sqlite3.Connection) -> int:
             )
     if "messages" in tables and "failure" not in _columns(db, "messages"):
         db.execute("ALTER TABLE messages ADD COLUMN failure TEXT")
+    if "messages" in tables and "text" not in _columns(db, "messages"):
+        db.execute("ALTER TABLE messages ADD COLUMN text TEXT")
+        rows = db.execute(
+            "SELECT id, content, tool_calls, failure FROM messages WHERE text IS NULL"
+        ).fetchall()
+        db.executemany(
+            "UPDATE messages SET text = ? WHERE id = ?",
+            [(stored_text(r["content"], r["tool_calls"], r["failure"]), r["id"]) for r in rows],
+        )
     db.executescript(SCHEMA)
+    db.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     db.commit()
     return found
@@ -296,8 +327,8 @@ class SqliteStore(ConversationStore):
             self._db.execute(
                 "INSERT INTO messages"
                 " (thread_id, position, role, content, tool_calls, tool_call_id, failure,"
-                "  created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "  text, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     thread_id,
                     position,
@@ -306,6 +337,7 @@ class SqliteStore(ConversationStore):
                     dump_tool_calls(message.tool_calls),
                     message.tool_call_id,
                     dump_failure(message.failure),
+                    message_text(message),
                     stamp,
                 ),
             )
@@ -331,6 +363,36 @@ class SqliteStore(ConversationStore):
             "SELECT COUNT(*) AS n FROM messages WHERE thread_id = ?", (thread_id,)
         ).fetchone()
         return row["n"]
+
+    def search_messages(
+        self, query: str, user_id: str, *, thread_id: str | None = None, limit: int = 8
+    ) -> list[Hit]:
+        match = match_query(query)
+        if not match:
+            return []
+        sql = (
+            "SELECT m.thread_id, m.position, m.role, m.created_at, m.text"
+            " FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid"
+            " JOIN threads t ON t.id = m.thread_id"
+            " WHERE messages_fts MATCH ? AND t.user_id = ?"
+        )
+        parameters: list[Any] = [match, user_id]
+        if thread_id is not None:
+            sql += " AND m.thread_id = ?"
+            parameters.append(thread_id)
+        sql += " ORDER BY bm25(messages_fts), m.id DESC LIMIT ?"
+        parameters.append(limit)
+        rows = self._db.execute(sql, parameters).fetchall()
+        return [
+            Hit(
+                thread_id=row["thread_id"],
+                position=row["position"],
+                role=row["role"],
+                created_at=row["created_at"],
+                text=row["text"] or "",
+            )
+            for row in rows
+        ]
 
     # --- rolling summary -----------------------------------------------------
 

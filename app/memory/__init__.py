@@ -2,6 +2,7 @@ from app.memory.base import (
     LOCAL_USER_ID,
     Compaction,
     ConversationStore,
+    Hit,
     Thread,
     TurnContextRecords,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "Compaction",
     "ConversationStore",
+    "Hit",
     "SqliteStore",
     "Thread",
     "TurnContextRecords",

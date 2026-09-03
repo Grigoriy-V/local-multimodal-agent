@@ -251,8 +251,18 @@ What exists. How it was reached, and every number, is in the linked report.
      actually said, returning real messages and tool results rather than another
      summary, so a detail a summary lost is recoverable. Full-text in both
      profiles; it joins the `ConversationStore` contract suite. No vector store.
-     Reviewed against the references, not yet approved:
-     `reports/2026-09-03_v2_history_recovery_review.md`.
+     Reviewed against the references and **approved 2026-09-03** in the
+     shape of `reports/2026-09-03_v2_history_recovery_review.md`, with option
+     A (the 32k cap stays) plus paging.
+
+     **State, 2026-09-03:** built in the tree, not deployed. `messages.text`
+     and a full-text index in both stores (schema 4; local profile migrated
+     by opening), `search_messages` on the contract, `search_history` and
+     `read_history` as the model's own tools, the stub naming its position,
+     the summary saying the words behind it are kept, and `offset` on
+     `read_file`, `fetch_page` and `read_history`. Offline suite green.
+     **Next gate:** the Neon migration to schema 4, then deploy and the
+     after-deploy check, then the two live turns of the review's step 5.
    - **4.7 Restart, resume and the scenario suite**, asserting on harness events
      and outcomes rather than model wording, and compared against item 3's
      numbers, including that a turn continues correctly across a compaction.

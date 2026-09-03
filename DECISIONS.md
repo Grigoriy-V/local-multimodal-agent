@@ -1064,3 +1064,52 @@ declaration is renamed `requires_approval` and the consent path is unchanged.
 Refines the tool execution seam of 2026-08-30: the same three stages, now owning
 what flows through them. Rejects the parser-redeploy option recorded in
 `reports/2026-08-31_v2_todo_live_failure.md`.
+
+## 2026-09-03 — What a summary or a stub stands for is reachable by search and by position
+
+Decision
+
+The model gets back to stored history through two tools of its own.
+`search_history` is full-text search over the words of stored messages —
+text, failure message, and the calls the model made — within this person's
+conversations and never anyone else's, the current one unless asked.
+`read_history` returns messages by position as they were said, in pages. A
+shortened result's stub names its stored position; the summary says the
+exact words behind it are kept. Nothing found is injected into the prompt:
+the model asks, and the trace shows that it did. The words live in a derived
+`text` column with an index in both profiles (schema 4); ranking is match
+then recency, nothing else.
+
+The 32k per-result cap stays where it is, before the store: history is exact
+up to it, and what keeps the agent's reach whole is paging, not a larger
+row — `read_file`, `fetch_page` and `read_history` take an `offset`, and a
+capped page ends by naming the call for the rest.
+
+Why
+
+The 2026-08-30 decision that history is canonical was justified by
+recoverability, and until now recovery existed on paper: the model's only
+way back to an old result was to run the tool again. The question 4.6b
+answers — the exact filename, error, number — is keyword search by nature,
+so BM25 over the person's own words is the right tool and vectors are not
+needed (2026-08-01 stands). A spill store would be a second source of truth
+for text the store already holds. A condensing model over the hits would be
+another summary, which is the thing being recovered from. On the cap: no
+live result to date has reached 32k, and the actual limit on reach was that
+a capped reader had no way to the rest, which B would not have fixed.
+`reports/2026-09-03_v2_history_recovery_review.md`.
+
+Consequences
+
+`app/tools/history.py` owns the two tools, `app/tools/paging.py` the page
+shape, `ConversationStore.search_messages` the search, `records.message_text`
+the one definition of a message's words. Schema 4 is 4.6b's one gate on the
+deployed database. What stays unrecoverable is the middle of a
+non-repeatable result over 32k; if a live case ever needs it, that is the
+evidence to store the uncapped result.
+
+Supersedes / Superseded by
+
+Builds on 2026-08-30 "Stored history is canonical; what the model sees is a
+projection" and 2026-09-03 "The model-visible surface is shortened by age".
+None superseded.

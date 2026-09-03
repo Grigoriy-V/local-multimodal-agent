@@ -161,15 +161,20 @@ turn has no other way to hear about it.
 
 The normal runtime intentionally does not run these migrations on each request.
 
-Store schema version is **3** in both implementations (`PRAGMA user_version` for
+Store schema version is **4** in both implementations (`PRAGMA user_version` for
 SQLite, the `schema_version` row for PostgreSQL). Version 2 adds the `user_state`
 table, which records which conversation each person is in. Version 3 adds the
 `failure` column on messages (the tool system's typed outcome, empty for every
 row written before it) and the `compactions` table (one row per fold: the
 position the summary came to cover, how many messages it took in, and why).
-Every step is additive: re-running the schema is the whole migration and no
-conversation is touched, so no reset is needed to adopt one. Running it on the
-populated deployed database is still the human gate for migrating one.
+Version 4 adds the `text` column on messages — the message's words, derived
+from what the row already holds — and a full-text index over it (FTS5 locally,
+a `simple` tsvector with a GIN index on PostgreSQL), which `search_history`
+reads. Every step is additive and no conversation is touched; version 4 is the
+one step that writes to every existing message row, and what it writes is
+derived from that row. Running a migration on the populated deployed database
+is still the human gate for migrating one. **Deployed state:** Neon is at
+version 3; the migration to 4 has not been run.
 
 Resetting a store is a separate destructive operation and stays behind the human
 gate for deleting or migrating a populated database. There is no application

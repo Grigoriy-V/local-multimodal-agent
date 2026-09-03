@@ -55,7 +55,9 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change when a conversation is folded | `app/agent/graph.py` | `fitted`, `context_folded` |
 | Estimate how large a request is | `app/models/base.py`, `app/models/openai_compatible.py` | `estimate_tokens`, `measure_request`, `CHARS_PER_TOKEN`, `MEDIA_TOKENS`, `_calibrate` |
 | Change how much context a request may use | `app/agent/runtime.py`, `app/config.py` | `Agent.budget`, `context_fraction`, `context_tokens` |
-| Change conversation/memory contract | `app/memory/base.py` | `ConversationStore`, `TurnContextRecords` |
+| Change conversation/memory contract | `app/memory/base.py` | `ConversationStore`, `TurnContextRecords`, `Hit`, `search_messages` |
+| Change how the model reaches what a summary or a stub stands for | `app/tools/history.py` | `history_tools`, `search_history`, `read_history`, `snippet` |
+| Change how a capped result is read in parts | `app/tools/paging.py` | `page`, `offset` on `read_file`, `fetch_page`, `read_history` |
 | Measure a turn: identity, timings, counts, outcome | `app/telemetry/` | `TurnTrace`, `Telemetry`, `TurnRun`, `TraceEvent`, `NO_TRACE`, `RUN_ID` |
 | Change where turn telemetry is stored | `app/telemetry/open.py` | `open_telemetry`, `SqliteTelemetry`, `PostgresTelemetry` |
 | Read a measured turn back | `app/telemetry/inspect.py`, `tools/show_run.py` | `render_run`, `render_listing`, `recent_runs` |
@@ -221,6 +223,8 @@ browser.py       inspect_page for local/self-contained HTML (observation only)
 chromium.py      Chrome/Edge launch, CDP session, BrowserSession with snapshot/refs/actions
 web.py           search_web / fetch_page / view_web_page wrappers
 memory.py        remember_fact / search_memory
+history.py       search_history / read_history over stored messages, by position
+paging.py        page(): a window on a long text and the call for the rest
 todo.py          todo_write, and the plan folded back out of a turn
 ```
 

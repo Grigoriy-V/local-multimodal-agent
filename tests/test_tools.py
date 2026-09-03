@@ -417,3 +417,22 @@ def test_a_path_wrapped_in_quotes_or_carrying_a_delimiter_is_refused(tmp_path: P
     assert list(tmp_path.iterdir()) == []
     ok = box.run(ToolCall("w", "write_file", {"path": "it's fine.txt", "content": "x"}))
     assert ok.failure is None
+
+
+def test_a_long_file_comes_in_pages(workspace: Path) -> None:
+    """Until 2026-09-03 a file was cut at the limit with no way to the rest."""
+
+    (workspace / "big.txt").write_text("a" * 25_000, encoding="utf-8")
+    read = tools(workspace)["read_file"]
+
+    first = read.run(path="big.txt")
+    rest = read.run(path="big.txt", offset=20_000)
+
+    assert first.startswith("a" * 20_000)
+    assert first.endswith("showing characters 0-20000 of 25000; for the rest, read_file 'big.txt' again with offset=20000")
+    assert rest == "a" * 5_000
+
+
+def test_an_offset_past_the_end_is_refused(workspace: Path) -> None:
+    with pytest.raises(ToolError, match="offset 99 is past the end: the text is 11 characters"):
+        tools(workspace)["read_file"].run(path="notes.txt", offset=99)

@@ -98,6 +98,35 @@ def row_to_message(row: Mapping[str, Any]) -> Message:
     )
 
 
+def message_text(message: Message) -> str:
+    """The words of a message, for the text column and full-text search.
+
+    Text parts, then the failure — its message is exactly the detail a
+    summary drops first — then the calls the model made, by name and
+    arguments, so a filename the model wrote is found where it wrote it.
+    Media contributes nothing: bytes are not words.
+    """
+
+    return stored_text(
+        dump_content(message.content),
+        dump_tool_calls(message.tool_calls),
+        dump_failure(message.failure),
+    )
+
+
+def stored_text(content: str, tool_calls: str | None, failure: str | None) -> str:
+    """`message_text` from the stored columns, so a migration can backfill
+    rows it never loaded as messages."""
+
+    words = [part.text or "" for part in load_content(content) if part.kind == "text"]
+    outcome = load_failure(failure)
+    if outcome is not None:
+        words.append(f"{outcome.code}: {outcome.message}")
+    for call in load_tool_calls(tool_calls):
+        words.append(f"{call.name} {json.dumps(call.arguments, ensure_ascii=False)}")
+    return "\n".join(word for word in words if word).strip()
+
+
 def opening_text(raw: str | None) -> str:
     """The words a thread began with. A picture on its own leaves none."""
 
