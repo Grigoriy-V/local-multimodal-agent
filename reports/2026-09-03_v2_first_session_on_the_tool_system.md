@@ -146,7 +146,28 @@ way to send, next to `send_file`. Left as an option in this report.
 On the plan: six phases, five ticked in one call, "verify" ticked after a
 look that pressed nothing (ISS-0016).
 
+## The person's turn on the brief with `place`: thread `46c6a9c3`
+
+Run `253ede5d`, 88 s, 5 model calls, 4 tool calls. One `write_file` refused
+for a missing `path` (the parser again), the retry landed. One look: the page
+pulls Tailwind from a CDN, which the offline session refused and reported.
+Then the answer with `send_file` of the PNG attached — the screenshot arrived
+unprompted, which the previous three turns never did — and the single file
+listed as a path, not sent. The human rejected an adapter backstop for the
+markdown case as a crutch; the brief stays the only lever until 4.7.
+
+Two things measured here that were only described before:
+
+- **ISS-0009, the vanishing text, costs real tokens.** The answer was written
+  with the send attached (169 tokens), withdrawn from the chat, and written
+  again after the send (134 tokens, 3.8 s), word for word. The first copy
+  stays in the turn's messages and is re-read as input on the next call.
+- **ISS-0017, the sent screenshot is not what the person's browser shows.**
+  The CDN was refused by design; the picture is of the unstyled page; the
+  model called it "Tailwind CSS" anyway.
+
 ## Next gate
 
-Deploy of the brief change, then the person's own turn in Telegram; the
-markdown-image backstop needs a decision.
+None open on the tool system. What the person decides on: whether a local
+artifact may reach a public CDN under the public renderer's policy
+(ISS-0017); when a change to what the model says goes through 4.7.

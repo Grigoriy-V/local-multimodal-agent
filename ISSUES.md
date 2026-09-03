@@ -51,6 +51,26 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0017 — the screenshot the person receives is of the page without its CDN styles
+
+- **Status:** open
+- **Seen:** 2026-09-03, deployed, thread `46c6a9c3`, run `253ede5d`
+- **Costs:** the page loads Tailwind from `https://cdn.tailwindcss.com/`. The
+  offline session refuses it, as it should, and says so in the report; the
+  screenshot that `send_file` then delivers is of the unstyled page, while
+  the person's own browser, which is online, shows the styled one. The
+  model read "requests refused: https://cdn.tailwindcss.com/" and still wrote
+  "Адаптивный дизайн (Tailwind CSS)".
+- **Reproduce:** a page with a stylesheet or script from a CDN; inspect it;
+  send the screenshot.
+- **Cause:** the local artifact is rendered with no network by design
+  (`DECISIONS.md` 2026-09-03: the boundary is a property of the session), and
+  nothing tells the person or the model that the picture differs from what a
+  browser with internet would show. Whether a local artifact may fetch from
+  a public CDN through the same policy the public renderer uses is undecided.
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0014, ISS-0004; 4.5.5
+
 ### ISS-0016 — the plan is a list of phases, ticked in bulk
 
 - **Status:** open
@@ -206,9 +226,17 @@ Rules that keep the file honest:
   have been shown, and by the time we know it should not have been, the person
   has been reading it for up to 58 s. Nothing in a stream says in advance
   whether it will end in a tool call.
+- **Also seen:** 2026-09-03, thread `46c6a9c3`, run `253ede5d`, with the
+  cost now measured. The model wrote the whole answer (410 characters, 169
+  output tokens) and attached a `send_file` to it; the preview was withdrawn;
+  the send ran; the next model call produced the same 409 characters again
+  as a new message, 134 output tokens and 3.8 s. The first copy is not lost
+  to the model — it stays in the turn as the assistant message that carried
+  the call and is read as input on every later call — but the person watched
+  it vanish and then paid for it twice.
 - **Evidence:** runs `94e8bd24` (preview at 15.9 s, 2,075 tokens, withdrawn,
   final answer 17 tokens) and `3e5690ae` (preview at 67.1 s, withdrawn, final
-  answer 1 token), 2026-08-31T05:06–05:11Z
+  answer 1 token), 2026-08-31T05:06–05:11Z; `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
 
 ### ISS-0008 — a generated app is delivered as working without ever being used
 
@@ -341,7 +369,11 @@ Rules that keep the file honest:
   when asked again in two more turns. `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
 - **Mitigated:** 2026-09-03, the brief now says where the person is (the
   adapter declares `Delivery.place`), that they cannot see the workspace, and
-  that a path, link or markdown image delivers nothing. Not yet seen live.
+  that a path, link or markdown image delivers nothing. First live turn on it
+  (thread `46c6a9c3`): the screenshot was sent with `send_file` unprompted;
+  the one file was still listed as a path and not sent. Half.
+- **Decided:** 2026-09-03, the human rejected a mechanical backstop in the
+  adapter (delivering a markdown image the model wrote) as a crutch.
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`
 
 ### ISS-0002 — a picture someone sends is never kept
