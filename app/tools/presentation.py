@@ -107,5 +107,6 @@ def presentation_tools(root: Path) -> list[Tool]:
                 "additionalProperties": False,
             },
             run=lambda path=None, paths=None: send_file(resolved, path, paths),
+            delivers=True,
         )
     ]

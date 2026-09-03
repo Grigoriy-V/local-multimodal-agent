@@ -51,6 +51,44 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0021 — the end-of-turn token reaches the chat as a message
+
+- **Status:** fixed in the tree, 2026-09-03 — the streamed-completion reader
+  drops `<eos>`, `<end_of_turn>`, `<|im_end|>` and `<|eot_id|>` from the
+  text, so a completion made of one such token is empty and ends the turn
+  without a message. Not yet deployed
+- **Seen:** 2026-09-03, deployed, run `9c42241c`: the last model request of
+  a spent turn answered with the single token `<eos>`, which was delivered
+  to the person as its own message.
+- **Costs:** a message that says `<eos>`.
+- **Reproduce:** a turn whose last request has nothing to add; the served
+  Gemma returns its end token as text.
+- **Cause:** the server hands the end-of-turn token over as content and the
+  client took every content chunk as text.
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0020
+
+### ISS-0020 — a delivery is refused when the turn's budget is spent
+
+- **Status:** fixed in the tree, 2026-09-03 — a tool marked `delivers`
+  (`send_file`) still runs when the step, call or time ceiling is reached;
+  every other call in that batch is halted as before, and the turn still
+  ends. `tests/test_turn_bounds.py`. Not yet deployed
+- **Seen:** 2026-09-03, deployed, run `9c42241c`: after eleven tool calls
+  the model wrote its answer together with one `send_file` of all four
+  items — three files and the screenshot, one call, as asked for that
+  morning — and the call was the twelfth step, refused with "answer now
+  with what you already have". The person received the answer naming the
+  files and none of the files.
+- **Costs:** finished work stays in the workspace with a sentence saying it
+  is done.
+- **Reproduce:** any turn whose delivery is the step at the ceiling.
+- **Cause:** the ceiling halted every call in the batch, a delivery among
+  them, although a delivery costs no model time and is the outcome the
+  ceiling exists to protect.
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0019, ISS-0003
+
 ### ISS-0019 — the page is written twice, identically, after the plan is updated
 
 - **Status:** open
@@ -64,6 +102,15 @@ Rules that keep the file honest:
   `write_file` calls on `index.html`.
 - **Cause:** unknown. It follows the `todo_write` update every time, as if
   the model re-executes the step it just marked done.
+- **Also seen, without a plan:** 2026-09-03, run `9c42241c`, the worst so
+  far: `index.html` written seven times, `styles.css` and `app.js` twice
+  each, ten `write_file` calls where three were the work, 125 s and 5000
+  output tokens before the page was inspected; then the ceiling. Not the
+  plan, then. The identical writes were byte-identical each time.
+- **Mitigated:** 2026-09-03, `write_file` with content the file already has
+  answers `unchanged: … already had exactly this content … nothing was
+  written` instead of `overwrote`, so a rewrite no longer reads as progress.
+  Whether the model stops on that word is for the next live turn.
 - **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
 - **Related:** ISS-0016
 

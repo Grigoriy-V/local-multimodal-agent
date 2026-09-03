@@ -367,6 +367,25 @@ def test_streamed_text_assembles_into_the_same_answer() -> None:
     assert result.usage.output_tokens == 4
 
 
+def test_a_leaked_end_of_turn_marker_is_not_text() -> None:
+    """Run `9c42241c`, 2026-09-03: the last request answered `<eos>`, one token,
+    and the person received it as a message."""
+
+    result = assemble(
+        [
+            delta({"role": "assistant", "content": ""}),
+            delta({"content": "<eos>"}),
+            delta({}, finish="stop"),
+        ]
+    )
+    assert result.text == ""
+
+    trailing = assemble(
+        [delta({"content": "Done."}), delta({"content": "<end_of_turn>"}), delta({}, finish="stop")]
+    )
+    assert trailing.text == "Done."
+
+
 def test_a_fragmented_tool_call_assembles_into_one_call() -> None:
     result = assemble(
         [

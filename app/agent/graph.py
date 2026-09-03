@@ -672,6 +672,10 @@ def build_agent(
         except Exception:  # noqa: BLE001 - a stop that cannot be read is not a stop
             return False
 
+    def delivers(call: ToolCall) -> bool:
+        tool = toolbox.get(toolbox.resolve(call.name) or call.name)
+        return tool is not None and tool.delivers
+
     def exceeded(state: AgentState, incoming: int) -> str:
         """Which limit the next batch of tools would cross, if any."""
 
@@ -727,6 +731,7 @@ def build_agent(
                 "stopping": REPEATED_FAILURE,
             }
         limit = exceeded(state, len(calls))
+        stopping: dict[str, Any] = {}
         if limit:
             trace.event(
                 "turn_budget_exhausted",
@@ -735,10 +740,19 @@ def build_agent(
                 tool_calls=state.tool_calls,
                 spent_ms=int(state.spent_seconds * 1000),
             )
-            return {
-                "messages": [halted(call, BUDGET_REASON) for call in calls],
-                "stopping": BUDGET_EXHAUSTED,
-            }
+            stopping = {"stopping": BUDGET_EXHAUSTED}
+            # A delivery still goes: it is what the person is owed, it costs no
+            # model time, and refusing it left a finished piece of work in the
+            # workspace on 2026-09-03 (run `9c42241c`) with a sentence saying so.
+            halted_calls = [call for call in calls if not delivers(call)]
+            calls = [call for call in calls if delivers(call)]
+            if not calls:
+                return {
+                    "messages": [halted(call, BUDGET_REASON) for call in halted_calls],
+                    **stopping,
+                }
+        else:
+            halted_calls = []
 
         executor = ToolExecutor(toolbox, trace)
         prepared = [executor.pre_execute(call) for call in calls]
@@ -777,10 +791,12 @@ def build_agent(
             result = await executor.run(item)
             spent += 1
             messages.append(result)
+        messages.extend(halted(call, BUDGET_REASON) for call in halted_calls)
         return {
             "messages": messages,
             "tool_calls": state.tool_calls + spent,
             "spent_seconds": state.spent_seconds + (time.monotonic() - started),
+            **stopping,
         }
 
     async def persist(state: AgentState, config: RunnableConfig) -> None:

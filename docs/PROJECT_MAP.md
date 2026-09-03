@@ -122,7 +122,8 @@ load context ─> model ─> tools ─> model ─> … ─> persist
                   └────────┘
         each pass is one step, and before each batch of tools:
           has the person asked to stop?   -> stop, and say so
-          is the budget spent?            -> no more tools; answer with what you have
+          is the budget spent?            -> no more work; a delivery (send_file) still
+                                             goes; answer with what you have
 ```
 
 - `app/agent/graph.py` owns `TurnBudget` (steps, tool calls, wall seconds) and

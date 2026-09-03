@@ -364,6 +364,14 @@ class StreamedCompletion:
       because the request asked for it.
     """
 
+    # End-of-turn markers a served model can leak as text when the server does
+    # not strip them. Seen live on 2026-09-03 (run `9c42241c`): a Gemma turn
+    # ended with the single token `<eos>`, delivered to the person as a
+    # message. A marker is never an answer, so it is dropped from the text;
+    # a model that means to write one literally loses it, and that is the
+    # cheaper mistake.
+    END_MARKERS = ("<eos>", "<end_of_turn>", "<|im_end|>", "<|eot_id|>")
+
     def __init__(self) -> None:
         self._text: list[str] = []
         self._calls: dict[int, _PartialCall] = {}
@@ -392,6 +400,8 @@ class StreamedCompletion:
         # `invoke` reads `content` alone, and a preview must show what the
         # answer will say, not the model thinking about it.
         text = delta.get("content") or ""
+        for marker in self.END_MARKERS:
+            text = text.replace(marker, "")
         if text:
             self._text.append(text)
         return text

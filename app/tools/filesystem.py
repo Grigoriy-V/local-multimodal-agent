@@ -181,6 +181,13 @@ def _replace_atomically(target: Path, text: str) -> None:
                 pass
 
 
+def _same_content(target: Path, content: str) -> bool:
+    try:
+        return target.read_text(encoding="utf-8") == content
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def _write_file(root: Path, path: str, content: str) -> str:
     if _names_a_directory(path):
         raise ToolError(
@@ -192,6 +199,14 @@ def _write_file(root: Path, path: str, content: str) -> str:
     if target.is_dir():
         raise ToolError(f"path {path!r} is a directory", code=IS_DIRECTORY)
     existed = target.is_file()
+    if existed and _same_content(target, content):
+        # Seen seven times in one turn on 2026-09-03 (run `9c42241c`): the same
+        # page written again and again. A result that says "overwrote" reads as
+        # progress; this one does not.
+        return (
+            f"unchanged: {path} already had exactly this content "
+            f"({len(content)} characters), so nothing was written; {handover(path)}"
+        )
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         _replace_atomically(target, content)

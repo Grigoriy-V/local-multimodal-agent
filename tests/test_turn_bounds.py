@@ -16,7 +16,7 @@ import pytest
 from app.agent.graph import TurnBudget, build_agent
 from app.agent.stop import NO_STOPS, MemoryStopRequests
 from app.memory import LOCAL_USER_ID, SqliteStore
-from app.models import Completion, ContentPart, Message
+from app.models import Completion, ContentPart, Message, ToolCall
 from app.tools import Tool, Toolbox
 from tests.fakes import ScriptedBackend, calls, says
 
@@ -114,6 +114,52 @@ async def test_the_turn_still_answers_after_its_budget_is_spent(
     # The refused call came back as a tool result, so the model could see why.
     refused = [message for message in result["messages"] if message.role == "tool"]
     assert "answer now" in spoken(refused[-1])
+
+
+async def test_a_delivery_still_runs_when_the_budget_is_spent(
+    store: SqliteStore,
+) -> None:
+    """Run `9c42241c`, 2026-09-03: the twelfth step was the `send_file` of the
+    finished work, refused with "answer now", and the person got a sentence
+    about files they never received. A delivery costs no model time."""
+
+    ran: list[str] = []
+    handed: list[str] = []
+
+    def hand(path: str) -> str:
+        handed.append(path)
+        return f"sent {path}"
+
+    deliver = Tool(
+        name="send_file",
+        description="hand over",
+        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        run=hand,
+        delivers=True,
+    )
+    backend = ScriptedBackend(
+        calls("ping"),
+        Completion(
+            text="",
+            tool_calls=(
+                ToolCall(id="c1", name="send_file", arguments={"path": "a.html"}),
+                ToolCall(id="c2", name="ping", arguments={}),
+            ),
+            finish_reason="tool_calls",
+        ),
+        says("Here it is."),
+    )
+    agent = loop(backend, store, [ping(ran), deliver], TurnBudget(max_steps=2))
+
+    result = await agent.ainvoke(ask())
+
+    assert handed == ["a.html"]
+    assert len(ran) == 1, "the work was refused, the delivery was not"
+    assert result.get("stopping") == "budget"
+    results = {m.tool_call_id: spoken(m) for m in result["messages"] if m.role == "tool"}
+    assert results["c1"] == "sent a.html"
+    assert "answer now" in results["c2"]
+    assert backend.tools_seen[-1] is None
 
 
 async def test_the_last_request_of_a_spent_turn_is_offered_no_tools(

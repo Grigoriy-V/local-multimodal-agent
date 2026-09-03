@@ -95,6 +95,10 @@ class Tool:
     run: Callable[..., ToolReturn | Awaitable[ToolReturn]]
     requires_approval: bool = False
     timeout_seconds: float | None = None
+    # A tool that only hands something already made to the person. It costs no
+    # model time and its result is the outcome of the turn, so a turn that has
+    # spent its budget still runs it: the ceiling bounds work, not delivery.
+    delivers: bool = False
 
     def schema(self) -> dict[str, Any]:
         return {

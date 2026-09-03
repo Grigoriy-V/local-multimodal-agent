@@ -103,6 +103,21 @@ def test_list_files_on_a_file_is_refused(workspace: Path) -> None:
 # --- writing -----------------------------------------------------------------
 
 
+def test_writing_the_same_content_again_says_nothing_changed(workspace: Path) -> None:
+    """Run `9c42241c`, 2026-09-03: `index.html` written seven times, identical."""
+
+    write = tools(workspace)["write_file"]
+    write.run(path="page.html", content="<p>hi</p>")
+
+    again = write.run(path="page.html", content="<p>hi</p>")
+    changed = write.run(path="page.html", content="<p>hi!</p>")
+
+    assert again.startswith("unchanged: page.html already had exactly this content")
+    assert 'send_file(path="page.html")' in again
+    assert changed.startswith("overwrote page.html")
+    assert (workspace / "page.html").read_text(encoding="utf-8") == "<p>hi!</p>"
+
+
 def test_write_file_creates_a_file(workspace: Path) -> None:
     result = tools(workspace)["write_file"].run(path="fresh.txt", content="hello")
 

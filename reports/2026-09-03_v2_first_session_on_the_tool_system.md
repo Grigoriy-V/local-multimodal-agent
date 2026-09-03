@@ -291,6 +291,34 @@ What the plan added in this run was cost: ISS-0016 and ISS-0019 by
 construction, the closing duplicate with them. The single-file shape is the
 model's own choice this time, not the switch's doing.
 
+## Test 7: the album call came, and the ceiling refused it
+
+Run `9c42241c`, plan off, 13 model calls, 11 tool calls, 156 s, the person's
+own request. Three things, in order of what they cost.
+
+The model wrote `index.html` seven times and the other two files twice each
+(ISS-0019, now seen without the plan and worse): ten `write_file` calls,
+byte-identical in each pair, 125 s of model time before `inspect_page`. The
+tool result said `overwrote … (1070 characters)` every time, which reads
+like progress. `write_file` now answers `unchanged: … already had exactly
+this content, so nothing was written` when the bytes are the same.
+
+Then the thing that was asked for that morning happened: one `send_file`
+with four paths — three files and the screenshot — beside the answer text.
+And the ceiling refused it: step twelve of twelve, "no further tools will
+run, answer now with what you already have". The text was delivered; the
+files were not (ISS-0020). A tool now carries `delivers`, `send_file` sets
+it, and a delivery runs past the ceiling while the rest of the batch is
+halted: the ceiling bounds work, not the handover.
+
+The last request, offered no tools, answered with one token: `<eos>`, and
+the adapter sent it as a message (ISS-0021). The client now drops end-of-turn
+markers from text, and an empty completion ends the turn quietly.
+
+Not touched: the twelve-step ceiling itself. Seven wasted writes would have
+fit under any ceiling worth having; the fix is the word `unchanged`, and if
+the model does not stop on it, that is model behaviour for 4.7.
+
 ## Next gate
 
 The person's own turn in Telegram on this code; the plan's own defects wait
