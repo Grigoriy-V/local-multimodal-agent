@@ -281,7 +281,17 @@ core prompt says after a tool.
 Also settled: the second `index.html` write is byte-identical to the first,
 in a fresh folder, so it is not ISS-0018 but its own thing (ISS-0019).
 
+## The same request with the plan off
+
+`/plan off`, then "Task Board test 7", run `5ed7fc4c`: 5 model calls, 4 tool
+calls, 62 s. One file written once, one look, `index.html` and the screenshot
+sent unprompted, one answer. Against `7673ce55` with the plan on: 12 model
+calls, 11 tool calls, 90 s, the page written twice, the answer written twice.
+What the plan added in this run was cost: ISS-0016 and ISS-0019 by
+construction, the closing duplicate with them. The single-file shape is the
+model's own choice this time, not the switch's doing.
+
 ## Next gate
 
-The person's own turn in Telegram on this code; the tail and the serial
-sends go to 4.7.
+The person's own turn in Telegram on this code; the plan's own defects wait
+for 4.7 with the switch off in the meantime.
