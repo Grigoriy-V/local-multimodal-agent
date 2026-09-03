@@ -83,6 +83,39 @@ purpose; the guard's limit of two; anything about what the model says.
 real `Task Board test 4/index.html`. Deleting it is a destructive action on
 the deployed volume and needs the person's word.
 
+## The same request again, through the loop, on the fixed code
+
+Run `live-70`, the person's request verbatim, local loop against the deployed
+model, a browser on this machine, 84 s, 7 model calls, 6 tool calls, no tool
+failure. Checked, not only read:
+
+| check | result |
+| --- | --- |
+| a plan was written | yes, and updated twice: three items done after the write, the fourth after the look |
+| `index.html` under the plain name, no junk file | yes |
+| `inspect_page` ran and the model read a structure with a ref | yes |
+| something was sent | `index.html`, by `send_file` |
+| the repeat guard did not end the turn | correct |
+
+Two things the run showed that the checks did not ask about.
+
+**The look lied about the app (ISS-0014).** `inspect_page` reported
+`SecurityError: … Storage is disabled inside 'data:' URLs`. The app is fine;
+the page was opened as a `data:` URL, which has no origin. The model read the
+error, said nothing, and marked "verify" done. Fixed the same day: the
+offline session now serves the workspace at a synthetic origin and fails every
+other request, so the page has storage and its sibling files. Re-inspected on
+the fixed code: no console error, no refused request. Then driven through the
+session itself: a task typed and entered appears in "To Do" and is still there
+after a reload. The app the model made works.
+
+**The screenshot was handed over as markdown (ISS-0003).** `send_file` was
+called for `index.html` and not for the PNG; the answer ends with
+`![Screenshot](.agent/browser/index-e7fd9c44.png)`.
+
+Also seen: the written file ends with a literal markdown fence after
+`</html>` (ISS-0015), visible on the page and in the snapshot the model read.
+
 ## Next gate
 
-Deploy of this fix, and one more live turn of the same request.
+Deploy of the served-origin fix, then the person's own turn in Telegram.

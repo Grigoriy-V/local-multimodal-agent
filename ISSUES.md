@@ -312,6 +312,10 @@ Rules that keep the file honest:
   "и файл приложения" answered with the path `Task Board test 3/index.html`
   and "you can open it in any browser"; the file came only after "пришли
   файлы" (run `fb42cdb7`, `send_file`, delivered).
+- **Also seen:** 2026-09-03, loop re-run `live-70`: asked for the screenshot
+  and the files in one request, the model sent `index.html` with `send_file`
+  and handed the screenshot over as `![Screenshot](.agent/browser/….png)` —
+  a markdown image of a workspace path, which no interface renders. `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`
 
 ### ISS-0002 — a picture someone sends is never kept
