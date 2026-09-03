@@ -592,4 +592,11 @@ Rules that keep the file honest:
   `path` were each refused once with the signature and the turn went on; a
   third carried the leftovers inside the path itself and was obeyed
   (ISS-0012). The defect itself stays upstream and open. `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Also seen:** 2026-09-03, run `e54b442b`, "Task Board test 10": `content`
+  first, ending in a fence, `path` lost, the identical call three times, the
+  turn ended by the repeat guard after 142 s with the code pasted into the
+  chat instead of written. The refusal now names the fence as the cause and
+  says to send `path` first without it; whether the model acts on that is
+  the next live turn. The upstream defect stands; the corrected parser in
+  `tools/gemma4_parser.py` remains the fix the human declined.
 - **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`

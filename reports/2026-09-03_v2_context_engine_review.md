@@ -323,6 +323,23 @@ repeat, and the runner now prints it as a note rather than failing on a
 model habit 4.7 owns. Also seen: three `send_file` calls, `index.html`
 twice, where one call with `paths` was the point.
 
+## Test 10: ISS-0001 again, and nothing the engine could do
+
+Run `e54b442b`, 142 s, nothing written. The model put `content` first and
+ended it with a markdown fence; the server's parser read past the closing
+quote and `path` never arrived — the exact reproducer of ISS-0001. The
+runtime did what it is built to do: refused the call with the signature,
+twice, then refused the identical third one and ended the turn; the model
+answered by pasting the code into the chat. The context engine is not in
+this: `stubbed=0`, sizes small.
+
+What changed: the refusal now names the cause and the way out when a value
+ends with a fence — "content ends with a markdown fence, which is what lost
+path; send the call again with path first and no fence". A bare "missing"
+was read three times without effect. What did not change: the parser on the
+server, which is the actual defect and has a corrected version in the tree
+that the human declined to deploy on 2026-09-03 as a one-model fix.
+
 **Not done.** The live numbers. Both acceptances need the human's own turns:
 a repeat question in one thread to read `cached_tokens` against the previous
 request's size, and the Task Board request to compare step sizes with test

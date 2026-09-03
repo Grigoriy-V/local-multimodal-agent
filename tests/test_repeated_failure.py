@@ -285,3 +285,21 @@ async def test_a_call_that_fails_once_is_still_retried(
     assert len(backend.requests) == 3
     assert not result.get("stopping")
     assert spoken(result["messages"][-1]) == "It is not there."
+
+
+def test_a_fenced_value_that_lost_the_next_argument_is_named_as_the_cause(
+    tmp_path: Path,
+) -> None:
+    """Run `e54b442b`, 2026-09-03: three identical calls, `content` ending in
+    a fence, `path` gone each time, and the model never changed the call."""
+
+    box = Toolbox(filesystem_tools(tmp_path))
+    fenced = "<html></html>" + chr(10) + "```"
+
+    error = box.validation_error(
+        ToolCall(id="c1", name="write_file", arguments={"content": fenced})
+    )
+
+    assert error is not None
+    assert error.startswith("missing required argument(s): path; content ends with a markdown fence")
+    assert "path first and no fence" in error

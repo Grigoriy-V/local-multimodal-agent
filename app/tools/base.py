@@ -288,7 +288,23 @@ class Toolbox:
         properties = schema.get("properties", {})
         missing = [name for name in schema.get("required", []) if name not in arguments]
         if missing:
-            return f"missing required argument(s): {', '.join(missing)}"
+            # The served parser reads past a string that ends with a markdown
+            # fence and loses the argument after it (ISS-0001). Three
+            # identical calls on 2026-09-03 (run `e54b442b`) show the bare
+            # "missing" was not enough for the model to change anything; the
+            # cause and the way out are named where it can read them.
+            fenced = [
+                name
+                for name, value in arguments.items()
+                if isinstance(value, str) and value.rstrip().endswith("```")
+            ]
+            hint = (
+                f"; {fenced[0]} ends with a markdown fence, which is what lost "
+                f"{missing[0]} — send the call again with {missing[0]} first and no fence"
+                if fenced
+                else ""
+            )
+            return f"missing required argument(s): {', '.join(missing)}{hint}"
 
         if schema.get("additionalProperties") is False:
             unexpected = [name for name in arguments if name not in properties]
