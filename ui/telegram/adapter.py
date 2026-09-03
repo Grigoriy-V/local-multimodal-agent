@@ -1046,6 +1046,7 @@ class TelegramAdapter:
         activity = ToolActivity(self.client, chat_id)
         preview = AnswerPreview(self.client, chat_id)
         delivered: set[str] = set()
+        _, covered = agent.store.summary(thread_id)
         try:
             async for event in agent.events(thread_id, message, trace, sequence):
                 if isinstance(event, AssistantDelta):
@@ -1071,10 +1072,34 @@ class TelegramAdapter:
             # not half an answer that is never going to be finished.
             await activity.clear()
             await preview.discard()
+        await self._fold_notice(agent, thread_id, chat_id, covered)
         asked = await self._ask_pending_calls(agent, chat_id, thread_id)
         # A turn that stopped to ask is not a turn that failed to answer. Both
         # are successful endings, and they are told apart here.
         trace.finish("approval_requested" if asked else "answer_delivered")
+
+    async def _fold_notice(
+        self, agent: Agent, thread_id: str, chat_id: int, covered: int
+    ) -> None:
+        """Say so when a turn folded older conversation into the summary.
+
+        Asked for by the human on 2026-09-03: a fold changes what the
+        assistant carries verbatim, and a person who does not know one
+        happened cannot know why a detail now has to be asked for. The
+        summary's covered position before and after the turn is the whole
+        detection; nothing is threaded through the graph for it.
+        """
+
+        _, now = agent.store.summary(thread_id)
+        if now <= covered:
+            return
+        keep = agent.policy.keep_recent
+        await self.client.send_message(
+            chat_id,
+            f"Folded {now - covered} older messages into the summary, because this "
+            f"conversation grew past its size; the newest {keep} stay verbatim, and the "
+            "exact words stay reachable with search_history.",
+        )
 
     async def _deliver(
         self,
@@ -1233,6 +1258,7 @@ class TelegramAdapter:
             activity = ToolActivity(self.client, incoming.chat_id)
             preview = AnswerPreview(self.client, incoming.chat_id)
             trace.event("approval_resumed" if approved else "approval_declined")
+            _, covered = agent.store.summary(thread_id)
             try:
                 events = agent.resume_events(thread_id, {call_id: approved}, trace)
                 async for event in events:
@@ -1255,6 +1281,7 @@ class TelegramAdapter:
                 await preview.discard()
             if not settled:
                 await self._settle(incoming, approved=approved)
+            await self._fold_notice(agent, thread_id, incoming.chat_id, covered)
             asked = await self._ask_pending_calls(agent, incoming.chat_id, thread_id)
             trace.finish("approval_requested" if asked else "answer_delivered")
 

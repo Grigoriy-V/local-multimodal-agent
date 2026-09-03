@@ -302,3 +302,10 @@ live evidence stays scenarios H and I.
 Two things the model did wrong, both the class 4.9 owns: a Hugging Face
 page described in detail without a fetch (ISS-0004, also seen) and "I
 checked my memory" with no call (ISS-0028). Neither touches 4.6b.
+
+Asked for by the human after reading this: an automatic fold should say
+so. Built the same day in the Telegram adapter: after the answer, "Folded N
+older messages into the summary, because this conversation grew past its
+size; the newest 8 stay verbatim, and the exact words stay reachable with
+search_history." Detected from the summary's covered position before and
+after the turn, one small read each side, nothing threaded through the graph.

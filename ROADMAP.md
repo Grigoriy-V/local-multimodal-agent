@@ -272,6 +272,9 @@ What exists. How it was reached, and every number, is in the linked report.
      across a fold from the facts layer; `search_history` not needed and not
      exercised there, its live evidence is H and I. Two model-behaviour
      findings for 4.9 (ISS-0004 again, ISS-0028).
+     Asked for after that session and built the same day: a fold that
+     happens on its own is announced in Telegram after the answer, with the
+     count, what stays verbatim and the way back.
    - **4.7 Restart, resume and the scenario suite**, asserting on harness events
      and outcomes rather than model wording, and compared against item 3's
      numbers, including that a turn continues correctly across a compaction.

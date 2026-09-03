@@ -566,6 +566,12 @@ the next turn's graph is built; `normal` removes the marker.
 one summarizer call, and says how many messages it newly covers. It wakes
 the model, so it is not a model-free command.
 
+A fold that happens on its own during a turn is announced after the answer
+(since 2026-09-03, asked for by the human): how many messages were folded,
+that the newest `keep_recent` stay verbatim, and that the exact words stay
+reachable with `search_history`. The adapter detects it from the summary's
+covered position before and after the turn.
+
 ```text
 ui/telegram/adapter.py -> /context, /compact dispatch
 app/context/choice.py  -> CONTEXT_CHOICE, context_choice, set_context_choice

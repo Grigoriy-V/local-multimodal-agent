@@ -1043,6 +1043,28 @@ async def test_context_size_is_a_marker_read_by_the_budget(
     assert not (tmp_path / "workspace" / ".agent" / "context").exists()
 
 
+async def test_a_fold_during_a_turn_is_announced(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Asked for by the human, 2026-09-03: a person should hear that older
+    conversation was folded, and how much, without reading a trace."""
+
+    backend = ScriptedBackend(default=says("a summary of what was said"))
+    adapter = build(telegram, settings, tmp_path, backend)
+    for index in range(8):
+        await adapter.handle_update(text_update(f"message {index}", update_id=index + 1))
+    assert not any(text.startswith("Folded") for text in telegram.sent)
+
+    await adapter.handle_update(text_update("message 8", update_id=9))
+
+    assert telegram.sent[-1] == (
+        "Folded 10 older messages into the summary, because this conversation grew past "
+        "its size; the newest 8 stay verbatim, and the exact words stay reachable with "
+        "search_history."
+    )
+    assert telegram.sent[-2].startswith("a summary of what was sa"), "the answer comes first"
+
+
 async def test_compact_folds_the_older_part_now(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
