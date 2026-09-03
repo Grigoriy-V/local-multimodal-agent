@@ -112,8 +112,9 @@ async def test_real_browser_inspects_a_general_local_page(tmp_path: Path) -> Non
     result = await inspect_local_page(tmp_path, str(page))
 
     assert [part.kind for part in result] == ["text", "image"]
-    assert '"title": "Capability check"' in (result[0].text or "")
-    assert '"buttons": 1' in (result[0].text or "")
+    assert "title: Capability check" in (result[0].text or "")
+    assert 'button "Continue" [ref=e1]' in (result[0].text or "")
+    assert "console errors:\nnone" in (result[0].text or "")
     assert result[1].data is not None and len(result[1].data) > 1_000
     assert list((tmp_path / ".agent" / "browser").glob("page-*.png"))
 

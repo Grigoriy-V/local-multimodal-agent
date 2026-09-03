@@ -653,20 +653,22 @@ async def render_locally(
     It is why this runs where nothing is worth reaching.
     """
 
-    from app.tools.chromium import MAX_VISIBLE_TEXT, open_page
+    from app.tools.chromium import MAX_VISIBLE_TEXT, BrowserError, open_browser
 
     settings = settings or WebSettings()
     target = check_public_url(url, resolve)
     try:
-        async with open_page(allow=public_request_policy(resolve)) as (session, _browser):
-            await session.viewport(settings.viewport_width, settings.viewport_height)
-            navigation = await session.call(
-                "Page.navigate", {"url": target}, timeout=settings.render_timeout
-            )
-            if navigation.get("errorText"):
-                raise WebError(f"{target} could not be opened: {navigation['errorText']}")
-            attempts = max(1, int(settings.render_timeout / 0.1))
-            await session.wait_for_load(attempts=attempts, pause=0.1)
+        async with open_browser(
+            allow=public_request_policy(resolve),
+            viewport=(settings.viewport_width, settings.viewport_height),
+        ) as session:
+            try:
+                await session.navigate(target, timeout=settings.render_timeout)
+            except BrowserError as error:
+                # A page that never finishes loading is still a page: what it
+                # showed by the deadline is the evidence, as before.
+                if error.detail:
+                    raise WebError(f"{target} could not be opened: {error.detail}") from error
             evidence = await session.evaluate(
                 _VIEW_EVIDENCE % (MAX_VISIBLE_TEXT, settings.max_render_height)
             )
@@ -678,10 +680,10 @@ async def render_locally(
                     max(settings.viewport_height, min(height, settings.max_render_height)),
                 )
             encoded = await session.screenshot(timeout=settings.render_timeout)
-            console_errors = tuple(dict.fromkeys(session.console_errors))[:5]
+            console_errors = tuple(session.console())[:5]
             # A page that tried to reach an internal address is worth saying out
             # loud: it is evidence about the page, not a detail of the render.
-            refused = tuple(dict.fromkeys(session.refused))[:5]
+            refused = tuple(session.refused)[:5]
     except (RuntimeError, OSError) as error:
         if isinstance(error, WebError):
             raise

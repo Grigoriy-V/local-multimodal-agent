@@ -12,6 +12,8 @@ scripted answer:
     D  a stop while the work is live  the turn ends without another request
     E  a tool that fails              the typed result reaches the model, the
                                       model recovers, telemetry says why
+    F  a page the model made          it looks at it with inspect_page, and the
+                                      structure with refs is what it read
 
 Each scenario is checked, not only printed: a line starting with PASS or FAIL
 says whether what happened is what the scenario expects, and the exit code is
@@ -25,8 +27,9 @@ conversations. The run ids it prints can be read back with
     AGENT_TELEMETRY_DATABASE=<the file it names> python tools/show_run.py <id>
 
 A to D are the acceptance evidence for roadmap sub-step 4.1; E is the live
-half of 4.5 (`docs/v2_tool_system.md`, "Acceptance for 4.5"). Every run of it
-costs GPU time and needs permission at the time.
+half of 4.5 (`docs/v2_tool_system.md`, "Acceptance for 4.5"); F is the live
+half of 4.5.5 and needs a browser where this runs. Every run of it costs GPU
+time and needs permission at the time.
 """
 
 from __future__ import annotations
@@ -82,6 +85,7 @@ class Turn:
         self.text: list[str] = []
         self.tools: list[str] = []
         self.failures: list[tuple[str, ToolFailure]] = []
+        self.tool_results: list[Message] = []
         self.approvals = 0
         self.run_id = f"live-{sequence}"
         self._names: dict[str, str] = {}
@@ -116,11 +120,26 @@ class Turn:
         for call in message.tool_calls:
             self.tools.append(call.name)
             self._names[call.id] = call.name
-        if message.role == "tool" and message.failure is not None:
-            self.failures.append((self._names.get(message.tool_call_id or "", "?"), message.failure))
+        if message.role == "tool":
+            self.tool_results.append(message)
+            if message.failure is not None:
+                self.failures.append(
+                    (self._names.get(message.tool_call_id or "", "?"), message.failure)
+                )
         said = " ".join(part.text or "" for part in message.content).strip()
         if said and message.role == "assistant":
             self.text.append(said)
+
+    def read_from(self, tool: str) -> str:
+        """The text the model was given back by every call of this tool."""
+
+        calls = {call_id for call_id, called in self._names.items() if called == tool}
+        return " ".join(
+            part.text or ""
+            for message in self.tool_results
+            if message.tool_call_id in calls
+            for part in message.content
+        )
 
     @property
     def answer(self) -> str:
@@ -254,6 +273,28 @@ async def main() -> int:
                     event.get("code") == "fs.ambiguous_edit" and event.get("message")
                     for event in events
                 ),
+            },
+        )
+
+        # F — the model looks at what it made. The check is about the loop:
+        # the browser tool ran, returned no failure, and what the model read
+        # was the structure with refs rather than a count of buttons.
+        f = await Turn(agent, telemetry, 60).ask(
+            "chat-f",
+            "In my workspace, write a small self-contained page counter.html with a "
+            "heading, a button labelled Count and a script that increments a number "
+            "in the heading when the button is pressed. Then open it with inspect_page "
+            "and tell me what the page contains.",
+        )
+        failed += f.report(
+            "F a page the model made, looked at",
+            {
+                "write_file then inspect_page": "write_file" in f.tools
+                and "inspect_page" in f.tools,
+                "counter.html exists": (root / "counter.html").is_file(),
+                "no tool failed": not f.failures,
+                "the model read a structure with a ref": "[ref=e" in f.read_from("inspect_page"),
+                "an answer was given": bool(f.answer),
             },
         )
     finally:

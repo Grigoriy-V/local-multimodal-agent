@@ -290,7 +290,9 @@ guard that matters, and it keeps its code.
 ## Browser: designed whole, exposed in part
 
 Roadmap 4.5.5, not this step, but the boundary is fixed here so 4.5 does not
-have to be redone for it.
+have to be redone for it. Implemented 2026-09-03
+(`reports/2026-09-03_v2_browser_session.md`); `docs/PROJECT_MAP.md` is
+current where the two differ.
 
 The internal contract is one `BrowserSession` in `app/tools/chromium.py`,
 designed for the full set of operations even though the first version exposes

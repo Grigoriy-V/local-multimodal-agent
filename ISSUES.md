@@ -93,8 +93,10 @@ Rules that keep the file honest:
   instruction to check did not produce a look either.
 - **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`, section "Three
   live tests on a task big enough for a plan"
-- **Related:** ISS-0004; the browser capability set in `ROADMAP.md`, "Not
-  started", which is where the ability to click would come from
+- **Related:** ISS-0004; roadmap 4.5.5. Since 2026-09-03 `BrowserSession`
+  can click, type, press and select on a ref from its snapshot, and
+  `inspect_page` returns that snapshot; no action is exposed to the model
+  yet, so the defect stands as described.
 
 ### ISS-0007 — `tool_failed` carries no reason
 

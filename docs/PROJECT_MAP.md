@@ -333,9 +333,24 @@ Observation tools do not send their media automatically. `send_file` selects one
 
 This distinction applies to document previews and web screenshots as well as ordinary files.
 
-### Local browser inspection
+### Browser session and local inspection
 
-`app/tools/browser.py` inspects self-contained local HTML artifacts. It uses the shared Chromium/CDP implementation in `app/tools/chromium.py` and blocks network access for this local-artifact capability.
+`app/tools/chromium.py` owns the browser process, the CDP session and
+`BrowserSession`: one page with the whole operation set — `open`, `snapshot`,
+`screenshot`, `evaluate`, `console`, `navigate`, `click`, `type`, `press`,
+`select`. A snapshot is the page as a bounded outline in which every
+interactive element carries a `ref`; actions take refs, never selectors, and
+a ref from an older snapshot is refused as `browser.stale_ref`. The trust
+boundary is a property of the session: `open_browser(offline=True)` blocks
+every network scheme and opens documents only, `open_browser(allow=policy)`
+is asked about every request the page makes. A session has exactly one of
+the two.
+
+`app/tools/browser.py` exposes observation only. `inspect_page` opens a
+self-contained local HTML artifact in an offline session and returns the
+structure with refs, the visible text, console errors and a screenshot; no
+click, type or navigate tool exists in this version. `render_locally` in
+`app/web.py` drives the same session with the public request policy.
 
 ### Public web
 

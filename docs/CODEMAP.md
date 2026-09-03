@@ -76,8 +76,9 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change document parsing/rendering | `app/documents.py` | `read_sections`, `render_pages`, `media_type_for` |
 | Change document model tools | `app/tools/documents.py` | `read_document`, `view_pages`, `document_tools` |
 | Change explicit file delivery | `app/tools/presentation.py` | `send_file`, `presentation_tools`, `outbound=True` |
-| Change local HTML inspection | `app/tools/browser.py` | `inspect_page`, `browser_tools` |
-| Change Chromium/CDP internals | `app/tools/chromium.py` | browser launch, CDP session, request policy |
+| Change local HTML inspection or what it reports | `app/tools/browser.py` | `inspect_page`, `page_report`, `observe`, `browser_tools` |
+| Change the browser session, its snapshot or an action | `app/tools/chromium.py` | `BrowserSession`, `open_browser`, `format_snapshot`, `_SNAPSHOT`, `tests/test_browser_session.py` |
+| Change Chromium/CDP internals | `app/tools/chromium.py` | browser launch, `CdpSession`, request policy |
 | Change public web security/networking | `app/web.py` | `check_destination`, `fetch_page`, `render_page`, `render_locally` |
 | Change model-facing web tools | `app/tools/web.py` | `search_web`, `fetch_page`, `view_web_page`, tool builders |
 | Change Telegram behavior | `ui/telegram/adapter.py` | `TelegramAdapter`, `_on_message`, `_deliver`, `_on_callback` |
@@ -214,8 +215,8 @@ execution.py     pre_execute / execute / post_execute lifecycle, bounds, sanitiz
 filesystem.py    list/read/write/edit workspace files
 documents.py     read_document / view_pages
 presentation.py  send_file (explicit outbound action)
-browser.py       inspect_page for local/self-contained HTML
-chromium.py      shared Chrome/Edge + CDP engine
+browser.py       inspect_page for local/self-contained HTML (observation only)
+chromium.py      Chrome/Edge launch, CDP session, BrowserSession with snapshot/refs/actions
 web.py           search_web / fetch_page / view_web_page wrappers
 memory.py        remember_fact / search_memory
 todo.py          todo_write, and the plan folded back out of a turn
@@ -229,7 +230,7 @@ If a new tool needs an existing execution primitive, extend/reuse the primitive 
 app/tools/web.py    model-facing Tool definitions + workspace screenshot artifacts
 app/web.py          URL validation, DNS/IP policy, fetch/search/render transport
 app/tools/chromium.py
-                    browser process / CDP mechanics
+                    browser process / CDP mechanics / BrowserSession
 ```
 
 Do not add another URL validator or Chromium launcher without checking these three owners.
@@ -343,8 +344,8 @@ Common families include:
 tests/test_agent_graph.py
 tests/test_agent_session.py
 tests/test_attachments.py
+tests/test_browser_session.py
 tests/test_browser_tools.py
-tests/test_browser_verifier.py
 tests/test_capabilities.py
 ```
 

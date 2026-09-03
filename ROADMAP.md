@@ -4,8 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. 4.5 closed 2026-09-03, accepted offline, live
-and in the deployed profile the same day; 4.5.5 is next and is not approved.
+**Current approved step:** none. 4.5.5 closed 2026-09-03, accepted offline, on
+a real browser, live and in the deployed profile the same day; 4.6a is next
+and is not approved.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -192,14 +193,16 @@ What exists. How it was reached, and every number, is in the linked report.
      profile. `docs/v2_tool_system.md`,
      `reports/2026-09-03_v2_tool_system_implementation.md`,
      `DECISIONS.md` 2026-09-03.
-   - **4.5.5 Browser capability.** One `BrowserSession` designed for the full
-     set — open, snapshot with element refs, screenshot, evaluate, console,
-     navigate, click, type, press — with only observation exposed first:
-     `inspect_page` re-implemented on it and returning the snapshot. No click,
-     type or navigate tool in this version. The trust boundary is a property of
-     the session: a local artifact renders where the agent runs with the
-     network blocked, an internet page in the isolated renderer. `ISSUES.md`
-     ISS-0008; the session API is in `docs/v2_tool_system.md`.
+   - **4.5.5 Browser capability — done 2026-09-03.** One `BrowserSession` with
+     the full set — open, snapshot with element refs, screenshot, evaluate,
+     console, navigate, click, type, press, select — and only observation
+     exposed: `inspect_page` re-implemented on it and returning the structure
+     with refs. No click, type or navigate tool in this version. The trust
+     boundary is a property of the session, offline for a local artifact and a
+     request policy for the isolated renderer, which drives the same session.
+     Live: `scripts/loop_live.py` F passed 2026-09-03; `/check` 9/9 in the
+     deployed profile the same day. `reports/2026-09-03_v2_browser_session.md`,
+     `docs/v2_tool_system.md`, `ISSUES.md` ISS-0008.
    - **4.6a Context engine.** Context preparation before every model step rather
      than folding after a turn: measure the surface, shorten old tool results
      first, summarize only if that was not enough, and record what was done

@@ -148,8 +148,9 @@ def _observation_lines(tools: Toolbox) -> list[str]:
     if "inspect_page" not in tools.names:
         return []
     return [
-        "- inspect_page opens a local HTML file itself and returns its visible text, "
-        "console errors and a screenshot. Safe observation needs no permission and no "
+        "- inspect_page opens a local HTML file itself and returns its structure with a "
+        "ref on every control, its visible text, console errors and a screenshot. Safe "
+        "observation needs no permission and no "
         "second turn from the person: when you have made or changed something visual, "
         "look at it before you describe it, and never ask them to open it for you. If "
         "looking failed, say that it failed rather than describing what you did not see."
