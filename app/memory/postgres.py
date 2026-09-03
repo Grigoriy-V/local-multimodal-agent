@@ -36,8 +36,9 @@ from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 
-from app.memory.base import ConversationStore, Thread, TurnContextRecords
+from app.memory.base import Compaction, ConversationStore, Thread, TurnContextRecords
 from app.memory.records import (
+    dump_failure,
     dump_content,
     dump_tool_calls,
     now,
@@ -49,7 +50,7 @@ from app.models import Message
 # Bumped whenever the schema changes, and stored in the database rather than
 # inferred from which columns happen to exist. Postgres has no `user_version`,
 # so the row below is this project's own equivalent.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -74,9 +75,24 @@ CREATE TABLE IF NOT EXISTS messages (
     content      TEXT NOT NULL,
     tool_calls   TEXT,
     tool_call_id TEXT,
+    failure      TEXT,
     created_at   TEXT NOT NULL,
     UNIQUE (thread_id, position)
 );
+
+-- One row per fold; what 4.6b reads to recover exactly what a summary stands
+-- for. Schema 3.
+CREATE TABLE IF NOT EXISTS compactions (
+    id            BIGSERIAL PRIMARY KEY,
+    thread_id     TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    through       INTEGER NOT NULL,
+    folded        INTEGER NOT NULL,
+    trigger       TEXT NOT NULL,
+    summary_chars INTEGER NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS compactions_by_thread ON compactions (thread_id, id);
 
 CREATE TABLE IF NOT EXISTS facts (
     id         BIGSERIAL PRIMARY KEY,
@@ -126,8 +142,9 @@ def migrate(connection: psycopg.Connection, schema: str) -> int:
     Version 0 is an empty database. Version 1 is a deployed one that has no
     record of which conversation anyone is in; the step to 2 only adds a table,
     so re-running the schema is the whole migration and no conversation is
-    touched. This runs from `tools/setup_control_plane.py`, never from a worker
-    starting up.
+    touched. Version 3 adds the `failure` column to messages, empty for every
+    existing row, and the `compactions` table. This runs from
+    `tools/setup_control_plane.py`, never from a worker starting up.
     """
 
     with connection.cursor() as cursor:
@@ -136,6 +153,7 @@ def migrate(connection: psycopg.Connection, schema: str) -> int:
         # the next client that receives this server connection.
         cursor.execute(f'SET LOCAL search_path TO "{schema}"')
         cursor.execute(SCHEMA)
+        cursor.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS failure TEXT")
         cursor.execute("SELECT version FROM schema_version LIMIT 1")
         row = cursor.fetchone()
         found = 0 if row is None else int(row["version"])
@@ -335,10 +353,10 @@ class PostgresStore(ConversationStore):
             """
             WITH input AS (
                 SELECT ordinality - 1 AS offset,
-                       role, content, tool_calls, tool_call_id
-                FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[])
+                       role, content, tool_calls, tool_call_id, failure
+                FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[], %s::text[])
                      WITH ORDINALITY
-                     AS item(role, content, tool_calls, tool_call_id, ordinality)
+                     AS item(role, content, tool_calls, tool_call_id, failure, ordinality)
             ),
             owned_thread AS (
                 INSERT INTO {}.threads
@@ -356,9 +374,10 @@ class PostgresStore(ConversationStore):
             inserted AS (
                 INSERT INTO {}.messages
                     (thread_id, position, role, content, tool_calls,
-                     tool_call_id, created_at)
+                     tool_call_id, failure, created_at)
                 SELECT %s, (base.next + input.offset)::integer, input.role,
-                       input.content, input.tool_calls, input.tool_call_id, %s
+                       input.content, input.tool_calls, input.tool_call_id,
+                       input.failure, %s
                 FROM input
                 CROSS JOIN base
                 CROSS JOIN owned_thread
@@ -386,6 +405,7 @@ class PostgresStore(ConversationStore):
                             [dump_content(message.content) for message in pending],
                             [dump_tool_calls(message.tool_calls) for message in pending],
                             [message.tool_call_id for message in pending],
+                            [dump_failure(message.failure) for message in pending],
                             thread_id,
                             user_id,
                             stamp,
@@ -409,7 +429,7 @@ class PostgresStore(ConversationStore):
         self, thread_id: str, after: int = -1, limit: int | None = None
     ) -> list[Message]:
         sql = (
-            "SELECT role, content, tool_calls, tool_call_id FROM messages"
+            "SELECT role, content, tool_calls, tool_call_id, failure FROM messages"
             " WHERE thread_id = %s AND position > %s ORDER BY position"
         )
         parameters: list[Any] = [thread_id, after]
@@ -452,6 +472,32 @@ class PostgresStore(ConversationStore):
                 cursor.connection.rollback()
                 raise KeyError(f"no such thread: {thread_id!r}")
             cursor.connection.commit()
+
+    def record_compaction(
+        self, thread_id: str, *, through: int, folded: int, trigger: str, summary_chars: int
+    ) -> None:
+        with self._cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO compactions"
+                " (thread_id, through, folded, trigger, summary_chars, created_at)"
+                " SELECT %s, %s, %s, %s, %s, %s"
+                " WHERE EXISTS (SELECT 1 FROM threads WHERE id = %s)",
+                (thread_id, through, folded, trigger, summary_chars, now(), thread_id),
+            )
+            written = cursor.rowcount
+            cursor.connection.commit()
+        if written == 0:
+            raise KeyError(f"no such thread: {thread_id!r}")
+
+    def compactions(self, thread_id: str) -> list[Compaction]:
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT thread_id, through, folded, trigger, summary_chars, created_at"
+                " FROM compactions WHERE thread_id = %s ORDER BY id",
+                (thread_id,),
+            )
+            rows = cursor.fetchall()
+        return [Compaction(**row) for row in rows]
 
     # --- facts ---------------------------------------------------------------
 
@@ -511,7 +557,7 @@ class PostgresStore(ConversationStore):
                 WHERE id = %s
             ),
             history AS (
-                SELECT position, role, content, tool_calls, tool_call_id
+                SELECT position, role, content, tool_calls, tool_call_id, failure
                 FROM {}.messages
                 WHERE thread_id = %s
                   AND position > COALESCE(

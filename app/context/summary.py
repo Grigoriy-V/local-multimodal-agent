@@ -13,10 +13,16 @@ from app.context.window import ContextPolicy, first_user_turn, system, transcrip
 from app.memory import ConversationStore
 from app.models import ContentPart, Message, ModelBackend
 
+# Structured rather than prose: a summary is read by a model that has to act
+# on it, and what it acts on is the goal, what is already done, the names of
+# things, and what is still open. Prose loses the file names first.
 INSTRUCTION = (
     "You maintain a running summary of a conversation. Rewrite the summary so it "
-    "covers the earlier summary and the new exchange together. Keep names, decisions, "
-    "numbers and open questions. Write at most 150 words of plain prose, no preamble."
+    "covers the earlier summary and the new exchange together, at most 200 words, "
+    "as four short sections: Goal (what the person wants), Done (what has been done, "
+    "naming files, paths, numbers and decisions exactly as written), Open (questions "
+    "or work not finished), Preferences (how the person wants things). Leave out a "
+    "section that would be empty. Plain text, no preamble."
 )
 
 
@@ -41,6 +47,7 @@ async def fold_older_messages(
     policy: ContextPolicy,
     used_tokens: int | None = None,
     force: bool = False,
+    reason: str | None = None,
 ) -> str | None:
     """Summarize everything past the verbatim window. Returns the new summary.
 
@@ -53,6 +60,11 @@ async def fold_older_messages(
     estimate of it. That makes the trigger exact and one turn late, which is why
     the budget is a fraction of the model's limit: the turn that overshoots the
     budget still fits, and the fold happens before the next one.
+
+    Every fold leaves a record — what it covered and why — so a later reader
+    can tell which messages the summary stands for and recover them exactly.
+    `reason` names the trigger when the caller knows it better than this
+    function does (`asked`, for `/compact`).
     """
 
     previous, through = store.summary(thread_id)
@@ -73,4 +85,11 @@ async def fold_older_messages(
     if not updated:
         return None
     store.set_summary(thread_id, updated, through + cut)
+    store.record_compaction(
+        thread_id,
+        through=through + cut,
+        folded=cut,
+        trigger=reason or ("forced" if force else "size" if oversized else "count"),
+        summary_chars=len(updated),
+    )
     return updated

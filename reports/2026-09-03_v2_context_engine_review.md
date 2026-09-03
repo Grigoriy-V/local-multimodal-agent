@@ -237,3 +237,44 @@ Not defects, but things the step should settle rather than inherit.
 
 Each of 1–3 is small and independently measurable; 4 is the one with a gate;
 5 is product and last. 4.6b follows on the record 4 leaves.
+
+## Built, 2026-09-03
+
+Approved in the human's word the same afternoon and built in this order, with
+one change to it: the commands (5) went out with 1–3 because they need no
+schema, and the summary and the record (4) wait in the tree for the gate.
+
+**Deployed (`0ce9e0a`).**
+
+- `Usage.cached_tokens` from `prompt_tokens_details`; `model_finished`
+  carries it; `tools/show_run.py` prints `cached N` per call.
+- `context_prepared` before every model step: estimated tokens for schemas,
+  prelude, history, facts and turn, plus how many results were stubbed and
+  how many pictures became placeholders. The schemas are now counted in the
+  fold's estimate too, once per graph, instead of being absorbed into the
+  characters-per-token ratio.
+- `Context.surface`: facts after history; `shortened` stubs tool results
+  older than the newest `keep_results` (two) and the long string arguments
+  of the calls that produced them, failures and short results untouched;
+  one media budget across history and the current turn, newest kept.
+  Everything is projection: the store and the checkpoint keep the whole
+  messages. `AGENT_KEEP_RESULTS` is the setting.
+- `/context`: the next request by layer, the last request's count and cache
+  hits, the size against the ceiling when the worker has already read it.
+  `/context small|normal|large` writes `.agent/context`; `Agent.budget`
+  reads it. `/compact` folds now and says how many messages it covered.
+
+**In the tree, not deployed.**
+
+- The summary instruction is four sections — Goal, Done, Open,
+  Preferences — at most 200 words, names kept exactly.
+- Every fold records a `Compaction` (through, folded, trigger, summary
+  chars); `/compact` records `asked`. `messages.failure` is stored. Schema 3
+  in both stores, additive, contract-tested; the version-0 file migrates
+  through it.
+
+**Not done.** The live numbers. Both acceptances need the human's own turns:
+a repeat question in one thread to read `cached_tokens` against the previous
+request's size, and the Task Board request to compare step sizes with test
+8, where the request grew by roughly 600 tokens a step. `ROADMAP.md` 4.6a
+carries the gate and the acceptance.

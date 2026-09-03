@@ -19,8 +19,9 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from app.memory.base import LOCAL_USER_ID, ConversationStore, Thread
+from app.memory.base import Compaction, LOCAL_USER_ID, ConversationStore, Thread
 from app.memory.records import (
+    dump_failure,
     dump_content,
     dump_tool_calls,
     now,
@@ -32,7 +33,7 @@ from app.models import Message
 # Bumped whenever the schema changes. `PRAGMA user_version` is SQLite's own
 # integer on the file, so the database states its shape rather than the code
 # guessing it from which columns happen to exist.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
@@ -52,9 +53,25 @@ CREATE TABLE IF NOT EXISTS messages (
     content      TEXT NOT NULL,
     tool_calls   TEXT,
     tool_call_id TEXT,
+    failure      TEXT,
     created_at   TEXT NOT NULL,
     UNIQUE (thread_id, position)
 );
+
+-- One row per fold: which position the summary came to cover, how many
+-- messages that newly took in, and why. What 4.6b reads to recover exactly
+-- what a summary stands for. Schema 3.
+CREATE TABLE IF NOT EXISTS compactions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id     TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    through       INTEGER NOT NULL,
+    folded        INTEGER NOT NULL,
+    trigger       TEXT NOT NULL,
+    summary_chars INTEGER NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS compactions_by_thread ON compactions(thread_id, id);
 
 CREATE TABLE IF NOT EXISTS facts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,6 +141,11 @@ def migrate(db: sqlite3.Connection) -> int:
     migration: the new table appears and every conversation is still there. A
     person who was in the middle of one is given it back by the interface, which
     adopts their most recent thread the first time it finds no choice recorded.
+
+    Version 2 has no `failure` column on messages and no `compactions` table.
+    The column is added empty — every stored row predates the typed outcome
+    and reads as a message without one — and the table appears from the
+    schema. No row is rewritten.
     """
 
     found = int(db.execute("PRAGMA user_version").fetchone()[0])
@@ -140,6 +162,8 @@ def migrate(db: sqlite3.Connection) -> int:
                 f"ALTER TABLE {table} ADD COLUMN user_id TEXT NOT NULL"
                 f" DEFAULT '{LOCAL_USER_ID}'"
             )
+    if "messages" in tables and "failure" not in _columns(db, "messages"):
+        db.execute("ALTER TABLE messages ADD COLUMN failure TEXT")
     db.executescript(SCHEMA)
     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     db.commit()
@@ -271,8 +295,9 @@ class SqliteStore(ConversationStore):
         for message in messages:
             self._db.execute(
                 "INSERT INTO messages"
-                " (thread_id, position, role, content, tool_calls, tool_call_id, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " (thread_id, position, role, content, tool_calls, tool_call_id, failure,"
+                "  created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     thread_id,
                     position,
@@ -280,6 +305,7 @@ class SqliteStore(ConversationStore):
                     dump_content(message.content),
                     dump_tool_calls(message.tool_calls),
                     message.tool_call_id,
+                    dump_failure(message.failure),
                     stamp,
                 ),
             )
@@ -326,6 +352,27 @@ class SqliteStore(ConversationStore):
         if cursor.rowcount == 0:
             raise KeyError(f"no such thread: {thread_id!r}")
         self._db.commit()
+
+    def record_compaction(
+        self, thread_id: str, *, through: int, folded: int, trigger: str, summary_chars: int
+    ) -> None:
+        if self.thread_owner(thread_id) is None:
+            raise KeyError(f"no such thread: {thread_id!r}")
+        self._db.execute(
+            "INSERT INTO compactions"
+            " (thread_id, through, folded, trigger, summary_chars, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (thread_id, through, folded, trigger, summary_chars, now()),
+        )
+        self._db.commit()
+
+    def compactions(self, thread_id: str) -> list[Compaction]:
+        rows = self._db.execute(
+            "SELECT thread_id, through, folded, trigger, summary_chars, created_at"
+            " FROM compactions WHERE thread_id = ? ORDER BY id",
+            (thread_id,),
+        ).fetchall()
+        return [Compaction(**dict(row)) for row in rows]
 
     # --- facts ---------------------------------------------------------------
 

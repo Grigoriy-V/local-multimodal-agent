@@ -392,6 +392,9 @@ async def test_a_long_thread_is_folded_and_the_summary_records_its_reach(
     summary, through = store.summary("t1")
     assert summary == "they talked about files"
     assert 0 < through < 24
+    [record] = store.compactions("t1")
+    assert (record.through, record.folded, record.trigger) == (through, through, "count")
+    assert record.summary_chars == len("they talked about files")
 
 
 async def test_folding_leaves_the_recent_window_verbatim(store: SqliteStore) -> None:

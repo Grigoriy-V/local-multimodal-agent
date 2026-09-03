@@ -161,11 +161,15 @@ turn has no other way to hear about it.
 
 The normal runtime intentionally does not run these migrations on each request.
 
-Store schema version is **2** in both implementations (`PRAGMA user_version` for
+Store schema version is **3** in both implementations (`PRAGMA user_version` for
 SQLite, the `schema_version` row for PostgreSQL). Version 2 adds the `user_state`
-table, which records which conversation each person is in. The step from 1 to 2
-is additive: re-running the schema is the whole migration and no conversation is
-touched, so no reset is needed to adopt it.
+table, which records which conversation each person is in. Version 3 adds the
+`failure` column on messages (the tool system's typed outcome, empty for every
+row written before it) and the `compactions` table (one row per fold: the
+position the summary came to cover, how many messages it took in, and why).
+Every step is additive: re-running the schema is the whole migration and no
+conversation is touched, so no reset is needed to adopt one. Running it on the
+populated deployed database is still the human gate for migrating one.
 
 Resetting a store is a separate destructive operation and stays behind the human
 gate for deleting or migrating a populated database. There is no application

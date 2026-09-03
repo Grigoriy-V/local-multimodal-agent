@@ -132,6 +132,20 @@ def test_reopening_a_migrated_database_changes_nothing(tmp_path: Path) -> None:
         assert len(store.facts(LOCAL_USER_ID)) == 2
 
 
+def test_the_failure_column_and_the_compaction_table_arrive_with_schema_3(tmp_path: Path) -> None:
+    """A version-0 file has neither; after opening it has both, and its rows
+    read as messages without a failure."""
+
+    path = tmp_path / "memory.sqlite3"
+    write_v0(path)
+
+    with SqliteStore(path) as store:
+        [message] = store.messages("old-chat")
+        assert message.failure is None
+        store.record_compaction("old-chat", through=1, folded=1, trigger="count", summary_chars=5)
+        assert [c.through for c in store.compactions("old-chat")] == [1]
+
+
 def test_a_fresh_database_starts_at_the_current_version(tmp_path: Path) -> None:
     path = tmp_path / "fresh.sqlite3"
 

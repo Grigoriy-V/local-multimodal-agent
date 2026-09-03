@@ -48,6 +48,24 @@ class Thread:
 
 
 @dataclass(frozen=True)
+class Compaction:
+    """One fold: which messages the summary came to stand for, and why.
+
+    The record 4.6b reads to recover what a summary lost. `through` is the
+    position the summary covers after this fold, `folded` how many messages
+    this fold newly covered, `trigger` the reason — `count`, `size`, `forced`
+    or `asked`.
+    """
+
+    thread_id: str
+    through: int
+    folded: int
+    trigger: str
+    summary_chars: int
+    created_at: str
+
+
+@dataclass(frozen=True)
 class TurnContextRecords:
     """Durable records needed to construct one model turn."""
 
@@ -142,6 +160,16 @@ class ConversationStore(ABC):
         Raises `KeyError` for an unknown thread: a summary of a conversation
         that was never stored would have no owner and no messages to cover.
         """
+
+    @abstractmethod
+    def record_compaction(
+        self, thread_id: str, *, through: int, folded: int, trigger: str, summary_chars: int
+    ) -> None:
+        """Record one fold of an existing thread. Raises `KeyError` for an unknown one."""
+
+    @abstractmethod
+    def compactions(self, thread_id: str) -> list[Compaction]:
+        """Every fold of a thread, oldest first."""
 
     # --- facts ---------------------------------------------------------------
 

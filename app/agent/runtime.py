@@ -521,7 +521,7 @@ class Agent:
         _, before = self.store.summary(thread_id)
         policy = replace(self.policy, max_input_tokens=await self.budget())
         folded = await fold_older_messages(
-            self.backend, self.store, thread_id, policy, force=True
+            self.backend, self.store, thread_id, policy, force=True, reason="asked"
         )
         if folded is None:
             return 0

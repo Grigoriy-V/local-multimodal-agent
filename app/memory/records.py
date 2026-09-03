@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from app.models import ContentPart, Message, ToolCall
+from app.models import ContentPart, Message, ToolCall, ToolFailure
 
 
 def now() -> str:
@@ -70,12 +70,31 @@ def load_tool_calls(raw: str | None) -> tuple[ToolCall, ...]:
     )
 
 
+def dump_failure(failure: ToolFailure | None) -> str | None:
+    if failure is None:
+        return None
+    return json.dumps(
+        {"code": failure.code, "message": failure.message, "detail": failure.detail}
+    )
+
+
+def load_failure(raw: str | None) -> ToolFailure | None:
+    if not raw:
+        return None
+    item = json.loads(raw)
+    return ToolFailure(code=item["code"], message=item["message"], detail=item.get("detail"))
+
+
 def row_to_message(row: Mapping[str, Any]) -> Message:
+    # `failure` arrived with schema 3; a row read through an older SELECT has
+    # no such key and is a message without one.
+    keys = row.keys()
     return Message(
         role=row["role"],
         content=load_content(row["content"]),
         tool_calls=load_tool_calls(row["tool_calls"]),
         tool_call_id=row["tool_call_id"],
+        failure=load_failure(row["failure"]) if "failure" in keys else None,
     )
 
 

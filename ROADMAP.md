@@ -220,6 +220,20 @@ What exists. How it was reached, and every number, is in the linked report.
      presented as a trade and derived from the engine's real ceiling. It shares
      the schema-3 migration with the compaction records: one human gate on the
      populated database instead of two.
+
+     **State, 2026-09-03:** built in the order of
+     `reports/2026-09-03_v2_context_engine_review.md`. Deployed the same day
+     (`0ce9e0a`): `cached_tokens` and `context_prepared` in the trace, facts
+     after history, tool results older than the newest two and their long
+     call arguments stubbed on the surface, one media budget across history
+     and turn, `/context` with `small|normal|large` and `/compact`. In the
+     tree and **not deployed**: the structured summary, the `compactions`
+     record and schema 3 (`messages.failure`, `compactions`), because the
+     deployed worker would write a column the Neon database does not have.
+     **Gate:** run `tools/setup_control_plane.py` against Neon, then deploy.
+     Live acceptance still owed: a warm repeat turn showing `cached_tokens`
+     near the previous request, and the Task Board request showing step sizes
+     flat against test 8's growth.
    - **4.6b Exact recovery from archived history.** A search over what was
      actually said, returning real messages and tool results rather than another
      summary, so a detail a summary lost is recoverable. Full-text in both

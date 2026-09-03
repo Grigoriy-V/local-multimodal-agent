@@ -215,6 +215,43 @@ def test_an_unknown_thread_has_no_summary(store: ConversationStore) -> None:
     assert store.summary("never-seen") == (None, 0)
 
 
+def test_a_fold_leaves_a_record_of_what_it_covered(store: ConversationStore) -> None:
+    """Schema 3: what 4.6b reads to recover exactly what a summary stands for."""
+
+    store.append("t1", [user("one"), user("two"), user("three")], ALICE)
+    store.set_summary("t1", "they counted", 2)
+
+    store.record_compaction("t1", through=2, folded=2, trigger="count", summary_chars=12)
+    store.record_compaction("t1", through=3, folded=1, trigger="asked", summary_chars=20)
+
+    [first, second] = store.compactions("t1")
+    assert (first.through, first.folded, first.trigger, first.summary_chars) == (2, 2, "count", 12)
+    assert (second.through, second.trigger) == (3, "asked")
+    assert first.thread_id == "t1" and first.created_at
+    assert store.compactions("never-seen") == []
+    with pytest.raises(KeyError):
+        store.record_compaction("never-seen", through=1, folded=1, trigger="count", summary_chars=1)
+
+
+def test_a_typed_failure_survives_storage(store: ConversationStore) -> None:
+    """Schema 3: the tool system's outcome joins history instead of a text projection."""
+
+    from app.models import ToolFailure
+
+    failed = Message(
+        role="tool",
+        tool_call_id="c1",
+        content=[ContentPart(kind="text", text="error: no such file")],
+        failure=ToolFailure(code="fs.not_found", message="no such file", detail="notes.txt"),
+    )
+    store.append("t1", [user("read it"), failed], ALICE)
+
+    [_, back] = store.messages("t1")
+    assert back.failure == ToolFailure(code="fs.not_found", message="no such file", detail="notes.txt")
+    [_, again] = store.turn_context("t1", ALICE, "", 5).messages
+    assert again.failure == back.failure
+
+
 # --- the chosen conversation -------------------------------------------------
 
 
