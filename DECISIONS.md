@@ -831,6 +831,28 @@ Supersedes / Superseded by
 Fills the seam left deliberately empty by 2026-08-30, "Whether a turn may end is
 a seam, not a policy". Does not change what that seam does or its default.
 
+## 2026-09-03 — An open plan item no longer refuses the ending
+
+Decision
+
+The `todo` extension of the stopping seam objects to no ending by default.
+The seam, the extension and its `limit` stay, so an objection can be wired
+where it is worth what it costs.
+
+Why
+
+Four live turns on 2026-09-03 (`reports/2026-09-03_v2_first_session_on_the_tool_system.md`):
+every objection produced a `todo_write` that ticked the open item and the
+same answer written a second time, 117 + ~164 output tokens and 7 s, and
+never more work. The plan is the state of one turn and is gone at the next
+user message, so an item left open costs the person nothing they can see
+beyond a status line that vanishes. The human accepted that in words.
+
+Consequences
+
+Supersedes the objection in 2026-08-31 "The agent's plan is the state of one
+turn"; the plan's lifetime, storage and display are unchanged.
+
 ## 2026-09-03 — What the model says beside a tool call is said once, and a local page may load its CDN
 
 Decision

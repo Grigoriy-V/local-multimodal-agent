@@ -210,7 +210,7 @@ Rules that keep the file honest:
 
 ### ISS-0009 — the person reads an answer for a minute and then it is deleted
 
-- **Status:** fixed in the tree, 2026-09-03, twice — text that comes with a tool call is delivered and kept, and a draft the plan seam refuses as an ending is held on the screen and becomes the answer when the model adds nothing; a verbatim repeat is not sent again; the core prompt and the steering both say the text is kept. Not yet deployed
+- **Status:** fixed in the tree, 2026-09-03 — text that comes with a tool call is delivered and kept; a draft a steering refuses is held on the screen; and the plan seam, the only live source of steerings, no longer objects by the human's decision, so the second generation it caused is gone with it. Deployed the same day; to be seen live
 - **Seen:** 2026-08-31, live, four turns in a row
 - **Costs:** text appears and grows while the work happens, the person reads
   it, and then it vanishes and a file arrives instead. What is said afterwards

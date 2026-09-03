@@ -231,7 +231,11 @@ seam should keep objecting is the human's decision; the option is to set its
 limit to zero and let an open plan item end the turn, which is what the
 person's own eyes already accept.
 
+The human decided the same day: an open plan item may end the turn; the plan
+is gone at the next message anyway. `FinishesItsOwnList` defaults to no
+objection; the seam and the class stay for an extension whose objection is
+worth a second generation. `DECISIONS.md` 2026-09-03.
+
 ## Next gate
 
-The person's own turn in Telegram on this code, and a decision on the plan
-seam's objection.
+The person's own turn in Telegram on this code.

@@ -200,6 +200,18 @@ async def candidate(*messages: Message) -> Candidate:
     return Candidate(message=messages[-1], messages=tuple(messages))
 
 
+async def test_by_default_an_open_plan_does_not_refuse_the_ending() -> None:
+    """Decided 2026-09-03: the objection cost a second generation every time."""
+
+    ending = await candidate(
+        wrote(item("write the page", "completed"), item("look at the page")),
+        acknowledged(),
+        Message(role="assistant", content=[ContentPart(kind="text", text="Done.")]),
+    )
+
+    assert await FinishesItsOwnList().stopping(ending) is None
+
+
 async def test_an_agent_that_wrote_no_plan_is_never_interrupted() -> None:
     """Which is most turns. The extension costs them nothing at all."""
 
@@ -225,7 +237,7 @@ async def test_an_open_item_refuses_the_ending_and_names_itself() -> None:
         Message(role="assistant", content=[ContentPart(kind="text", text="Done.")]),
     )
 
-    steering = await FinishesItsOwnList().stopping(ending)
+    steering = await FinishesItsOwnList(limit=1).stopping(ending)
 
     assert steering is not None
     assert steering.source == "todo"
@@ -247,8 +259,8 @@ async def test_the_objection_is_made_once_and_then_the_turn_may_end() -> None:
         Message(role="assistant", content=[ContentPart(kind="text", text="Still done.")]),
     )
 
-    assert await FinishesItsOwnList().stopping(ending) is not None
-    assert await FinishesItsOwnList().stopping(replace(ending, steerings=1)) is None
+    assert await FinishesItsOwnList(limit=1).stopping(ending) is not None
+    assert await FinishesItsOwnList(limit=1).stopping(replace(ending, steerings=1)) is None
 
 
 # --- the whole loop -----------------------------------------------------------
@@ -260,7 +272,7 @@ def loop(backend: ScriptedBackend, store: SqliteStore, workspace: Path, **kwargs
         Toolbox([*filesystem_tools(workspace), *todo_tools()]),
         store,
         OWNER,
-        stopping=FinishesItsOwnList(),
+        stopping=FinishesItsOwnList(limit=1),
         **kwargs,
     )
 

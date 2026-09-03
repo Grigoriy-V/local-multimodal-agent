@@ -99,8 +99,9 @@ of conversation persistence and finished-message delivery; an interface that
 already showed its streamed text receives `AnswerWithdrawn` and removes the
 preview.
 
-The product wires one extension into that seam: `app/agent/todo.py` refuses one
-ending while the agent's own `todo_write` plan still has open items. The plan is
+The product wires one extension into that seam: `app/agent/todo.py`, which can
+refuse an ending while the agent's own `todo_write` plan still has open items
+and by default refuses none (`DECISIONS.md` 2026-09-03). The plan is
 not stored anywhere of its own — it is the arguments of the model's own last
 accepted call, inside the turn's messages, so it is checkpointed with the turn
 and cleared by the `extend` reducer when the next user message begins one. That

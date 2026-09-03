@@ -48,9 +48,16 @@ def _named(items: Sequence[dict[str, str]]) -> str:
 
 
 class FinishesItsOwnList:
-    """Refuse one ending while the agent's own todo list has open items."""
+    """Refuse up to `limit` endings while the agent's own todo list has open items.
 
-    def __init__(self, limit: int = 1) -> None:
+    The default is no objection at all, decided 2026-09-03. In every live turn
+    the objection produced a bookkeeping tick and the same answer written a
+    second time, and never more work; the plan is gone at the next user
+    message anyway. The seam and the class stay, so a limit can be set where
+    an objection is worth its second generation.
+    """
+
+    def __init__(self, limit: int = 0) -> None:
         self.limit = limit
 
     async def stopping(self, candidate: Candidate) -> Steering | None:

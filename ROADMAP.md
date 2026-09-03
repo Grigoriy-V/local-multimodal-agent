@@ -175,9 +175,10 @@ What exists. How it was reached, and every number, is in the linked report.
      problems rather than accepted.** The plan is the arguments of the model's
      own last `todo_write`, living in the turn's checkpointed messages: it
      survives an interrupt and a restarted worker, and is gone at the next user
-     message, so there is no store table and no schema 3. An open item can
-     refuse one ending, once per turn, and the plan is shown inside the
-     transient Telegram status message. **Never observed: a live turn where a
+     message, so there is no store table and no schema 3. An open item no
+     longer refuses an ending (2026-09-03: every live objection bought a tick
+     and a duplicate answer); the plan is shown inside the transient Telegram
+     status message. **Never observed: a live turn where a
      plan and the finished work arrive together.** The open problems are in
      `ISSUES.md`; the follow-up is in Not started.
      `reports/2026-08-31_v2_todo_live_failure.md`.
