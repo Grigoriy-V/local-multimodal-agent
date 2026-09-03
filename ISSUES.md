@@ -56,7 +56,7 @@ Rules that keep the file honest:
 - **Status:** fixed in the tree, 2026-09-03 — the streamed-completion reader
   drops `<eos>`, `<end_of_turn>`, `<|im_end|>` and `<|eot_id|>` from the
   text, so a completion made of one such token is empty and ends the turn
-  without a message. Not yet deployed
+  without a message. Deployed and held on run `af0370cb`: the turn ended on its answer, nothing after it.
 - **Seen:** 2026-09-03, deployed, run `9c42241c`: the last model request of
   a spent turn answered with the single token `<eos>`, which was delivered
   to the person as its own message.
@@ -73,7 +73,7 @@ Rules that keep the file honest:
 - **Status:** fixed in the tree, 2026-09-03 — a tool marked `delivers`
   (`send_file`) still runs when the step, call or time ceiling is reached;
   every other call in that batch is halted as before, and the turn still
-  ends. `tests/test_turn_bounds.py`. Not yet deployed
+  ends. `tests/test_turn_bounds.py`. Deployed; run `af0370cb` never reached the ceiling, so the live check of the exemption is still to come.
 - **Seen:** 2026-09-03, deployed, run `9c42241c`: after eleven tool calls
   the model wrote its answer together with one `send_file` of all four
   items — three files and the screenshot, one call, as asked for that
@@ -111,6 +111,9 @@ Rules that keep the file honest:
   answers `unchanged: … already had exactly this content … nothing was
   written` instead of `overwrote`, so a rewrite no longer reads as progress.
   Whether the model stops on that word is for the next live turn.
+- **Held:** run `af0370cb`, "Task Board test 8": one identical rewrite of
+  `index.html`, answered `unchanged`, and the model went straight to
+  `inspect_page`. One wasted call of 8 s instead of seven.
 - **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
 - **Related:** ISS-0016
 

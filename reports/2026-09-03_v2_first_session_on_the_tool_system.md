@@ -319,6 +319,20 @@ Not touched: the twelve-step ceiling itself. Seven wasted writes would have
 fit under any ceiling worth having; the fix is the word `unchanged`, and if
 the model does not stop on it, that is model behaviour for 4.7.
 
+## Test 8: the best turn of the day
+
+Run `af0370cb`, plan off, 7 model calls, 6 tool calls, 62 s, $0.02 derived.
+Three writes, one identical rewrite of `index.html` answered `unchanged`,
+then `inspect_page` at once, then the answer's first line beside one
+`send_file` with all four paths, delivered as an album, then a closing
+message that says what was built and that the files are in the chat. No
+`<eos>`, no steering, no ceiling, no markdown image, no path handed over as
+prose. Against test 7: 13 calls and 156 s down to 7 and 62; the one wasted
+call is ISS-0019 at its floor.
+
+What the person saw: one short message, the screenshot, the three files, the
+summary. That is the product as `docs/PRODUCT.md` describes it.
+
 ## Next gate
 
 The person's own turn in Telegram on this code; the plan's own defects wait
