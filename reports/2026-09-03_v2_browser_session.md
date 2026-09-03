@@ -84,7 +84,7 @@ here decides it, since nothing here exposes an action.
 | `ruff check` on every changed file | clean; the tree's pre-existing findings are in files not touched |
 | real browser used here | Edge 152 on Windows, the desktop profile; the container flags path is unchanged |
 | `scripts/loop_live.py` A–F, live on `assistant-llm-v2` | all six passed on the first run; see below |
-| deployed `/check` | 9/9 reported by the human, but on the container deployed before this step — the stored history of that session (ISS-0011) shows the old report shape. Not evidence. Deployed 2026-09-03 ~04:20Z; `/check` on this code not yet run |
+| deployed `/check` | 9/9 reported by the human, but on the container deployed before this step — the stored history of that session (ISS-0011) shows the old report shape. Not evidence. Deployed 2026-09-03 ~04:20Z; `/check` on this code 9/9, reported by the human |
 
 ## Live run, 2026-09-03
 
@@ -106,11 +106,11 @@ named (`loop-live-59a421we`); nothing was written to the deployed database.
 
 ## Next gate
 
-`/check` in the deployed profile on this code, run by the human in Telegram.
-The 9/9 reported earlier ran on the previous container: nobody had deployed,
-which the stored history of that session shows (ISS-0011). `assistant-control`
-was deployed with 4.5 and 4.5.5 on 2026-09-03 at about 04:20Z, 23 s, no
-migration needed. Next in the queue is 4.6a, which needs its own approval.
+None: the step is closed. The 9/9 reported earlier ran on the previous
+container, since nobody had deployed (the stored history shows the old shape,
+ISS-0011); `assistant-control` was deployed with 4.5 and 4.5.5 on 2026-09-03
+at about 04:20Z, 23 s, no migration, and `/check` on it passed 9/9 per the
+human. Next in the queue is 4.6a, which needs its own approval.
 
 ## Cost and external actions
 

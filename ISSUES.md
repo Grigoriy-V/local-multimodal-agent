@@ -53,7 +53,7 @@ Rules that keep the file honest:
 
 ### ISS-0011 — every look at a page carried the whole page back as its address
 
-- **Status:** fixed in the tree, 2026-09-03 — not yet seen in the deployed profile
+- **Status:** fixed, 2026-09-03 — deployed the same day, `/check` 9/9 on that container
 - **Seen:** 2026-09-03, deployed, thread `afb9d76a`, runs `8ffab1aa` and
   `240f09ea`
 - **Costs:** `inspect_page` reported `url: location.href`, and for a local

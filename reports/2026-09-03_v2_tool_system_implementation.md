@@ -72,7 +72,7 @@ renamed no tool.
 | new `tests/test_tool_outcomes.py` | 39 tests: ISS-0001 shape through the graph, unknown/resolved/near-miss names, coercion, internal with traceback in the log, async and sync timeouts, `BaseException` propagating, declined/halted codes, bounds, sanitizing, checkpoint round-trip, one test per family, `tool_failed` reason, `show_run` output |
 | `ruff check` on the changed files | clean; the tree's 20 pre-existing findings are unchanged |
 | `scripts/loop_live.py` A–E, live on `assistant-llm-v2` | all scenarios passed on the second run; see below |
-| deployed `/check` | 9/9 reported by the human, but on the container deployed before this step: nobody had deployed. Not evidence. Deployed together with 4.5.5 on 2026-09-03 ~04:20Z; `/check` on this code not yet run |
+| deployed `/check` | 9/9 reported by the human, but on the container deployed before this step: nobody had deployed. Not evidence. Deployed together with 4.5.5 on 2026-09-03 ~04:20Z; `/check` on that code 9/9, per the human |
 
 Tests changed with the contract, each for a stated reason: an unreadable
 argument is delivered rather than raised (`test_openai_compatible`); an
