@@ -308,6 +308,18 @@ class AnswerPreview:
         self._shown = ""
         self._edited_at = 0.0
         self._stood_aside = False
+        self._held = False
+
+    def hold(self) -> None:
+        """Keep the bubble and its text; start collecting a possible replacement.
+
+        A draft the turn did not accept as its ending is still on the screen
+        and is still what the person will get unless the model writes something
+        new. Nothing is deleted; the next answer edits this same message.
+        """
+
+        self.text = ""
+        self._held = True
 
     async def add(self, delta: str) -> bool:
         """Take one delta. True when this is the moment the preview appeared."""
@@ -319,6 +331,9 @@ class AnswerPreview:
             if len(self.text.strip()) < PREVIEW_START_CHARS:
                 return False
             return await self._send()
+        if self._held and len(self.text.strip()) < PREVIEW_START_CHARS:
+            # A replacement is not shown over the draft until it is one.
+            return False
         if self._now() - self._edited_at >= self.interval:
             await self._edit()
         return False
@@ -383,6 +398,7 @@ class AnswerPreview:
         self.message_id = None
         self._edited_at = 0.0
         self._stood_aside = False
+        self._held = False
 
 
 def _split_argument(argument: str) -> tuple[str, str]:
@@ -904,10 +920,11 @@ class TelegramAdapter:
                         trace.visible("preview_started")
                     continue
                 if isinstance(event, AnswerWithdrawn):
-                    # The turn kept working instead of ending here, so what the
-                    # person watched being written is not an answer. Same
-                    # correction as a narrated tool call, for the same reason.
-                    await preview.discard()
+                    # The turn kept working instead of ending here. What the
+                    # person watched being written stays where it is: the loop
+                    # will hand it back as the answer if the model adds
+                    # nothing, and replace it in place if the model does.
+                    preview.hold()
                     continue
                 await self._deliver(
                     chat_id, event.message, activity, preview, trace, delivered

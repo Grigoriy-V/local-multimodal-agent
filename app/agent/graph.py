@@ -460,14 +460,20 @@ def build_agent(
         # able to do is try that call once more.
         offered = None if state.stopping in ENDING else schemas
 
-        def produced(completion: Completion) -> Message:
+        def produced(completion: Completion) -> Message | None:
             """What the model wrote, and only that, once the turn is ending.
+
+            `None` is a completion with nothing in it: no text and no call. The
+            core prompt asks for exactly that when there is nothing new to say
+            after a tool, so it is an ending, not an error.
 
             A model offered no tools can still ask for one, and a stored
             assistant message whose tool calls have no results is a history the
             next request cannot be built from.
             """
 
+            if not completion.text and not completion.tool_calls:
+                return None
             message = assistant_message(completion)
             if offered is None and message.tool_calls:
                 if not message.content:
@@ -537,7 +543,7 @@ def build_agent(
         state: AgentState,
         context: Context,
         turn: list[Message],
-        message: Message,
+        message: Message | None,
         completion: Completion,
         trace: TurnTrace,
         started: float,
@@ -563,6 +569,18 @@ def build_agent(
         # The whole node, including a recovery attempt, is what this call cost.
         spent = state.spent_seconds + (time.monotonic() - started)
         keep = {"context": context, "usage": completion.usage, "spent_seconds": spent}
+        if message is None:
+            if state.steered is not None:
+                # The model did what the steering asked and had nothing new
+                # to say. The answer it already wrote is the answer: the draft
+                # was refused as an ending, never as text, and asking for it
+                # again was a second generation of the same words (ISS-0009).
+                trace.event("steered_candidate_kept", step=state.steps + 1)
+                return {**keep, "messages": [state.steered.candidate]}
+            # Nothing new after what was already said beside the last call.
+            # The turn ends here with no further message.
+            trace.event("nothing_to_add", step=state.steps + 1)
+            return {**keep, "messages": []}
         # `state.steps` has not been incremented yet, so the question asked of
         # the budget is whether the turn could afford the step *after* this one.
         priced = replace(state, steps=state.steps + 1, spent_seconds=spent)

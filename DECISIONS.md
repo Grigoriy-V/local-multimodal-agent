@@ -866,8 +866,13 @@ rejected a mechanical delivery backstop in the adapter the same day.
 Consequences
 
 `Delivery.place` and the delivery sentence say where the person is. The
-Telegram adapter keeps the preview as the answer when a call rides with it.
-`open_browser` takes `serve` and `allow` together. `tests/test_telegram_adapter.py`,
+Telegram adapter keeps the preview as the answer when a call rides with it,
+and holds a draft the stopping seam refused instead of deleting it. A draft
+refused as an ending is refused as an ending only: when the model, having
+done what the steering asked, answers with nothing, the draft is the answer;
+the steering says so. An empty completion with nothing steered ends the turn
+without a message. `open_browser` takes `serve` and `allow` together.
+`tests/test_telegram_adapter.py`, `tests/test_turn_stopping.py`,
 `tests/test_browser_session.py`.
 
 ## 2026-09-03 — A tool result is a typed outcome, and the runtime survives any model

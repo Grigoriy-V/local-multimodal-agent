@@ -29,9 +29,11 @@ from app.tools.todo import current, unfinished
 SOURCE = "todo"
 
 INSTRUCTION = (
-    "Your own task list still has open items: {items}. Do the remaining work "
-    "now, or call todo_write to record what actually happened — mark what is "
-    "done, drop what you are not going to do — and then give your answer."
+    "Your own task list still has open items: {items}. Your answer above is "
+    "kept and will be delivered as it is. Do the remaining work now, or call "
+    "todo_write to record what actually happened — mark what is done, drop what "
+    "you are not going to do. Then add only what is new; if nothing is new, "
+    "answer with nothing."
 )
 
 # How many open items are named back to the model. The list is bounded already;

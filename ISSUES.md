@@ -210,7 +210,7 @@ Rules that keep the file honest:
 
 ### ISS-0009 — the person reads an answer for a minute and then it is deleted
 
-- **Status:** fixed in the tree, 2026-09-03 — text that comes with a tool call is delivered and kept; a verbatim repeat later in the turn is not sent again; the core prompt tells the model not to write it. Not yet deployed
+- **Status:** fixed in the tree, 2026-09-03, twice — text that comes with a tool call is delivered and kept, and a draft the plan seam refuses as an ending is held on the screen and becomes the answer when the model adds nothing; a verbatim repeat is not sent again; the core prompt and the steering both say the text is kept. Not yet deployed
 - **Seen:** 2026-08-31, live, four turns in a row
 - **Costs:** text appears and grows while the work happens, the person reads
   it, and then it vanishes and a file arrives instead. What is said afterwards
@@ -226,6 +226,12 @@ Rules that keep the file honest:
   have been shown, and by the time we know it should not have been, the person
   has been reading it for up to 58 s. Nothing in a stream says in advance
   whether it will end in a tool call.
+- **Also seen:** 2026-09-03, thread `052869f2`, run `f41278c9`, the other
+  way in: the answer (166 tokens) was refused as an ending by the plan seam
+  because "verify" was still in progress, withdrawn from the chat, the model
+  ticked the item and wrote the same answer again (164 tokens). The seam was
+  right to object and wrong to cost a second generation: the draft is now
+  held and handed back as the answer when the model adds nothing.
 - **Also seen:** 2026-09-03, thread `46c6a9c3`, run `253ede5d`, with the
   cost now measured. The model wrote the whole answer (410 characters, 169
   output tokens) and attached a `send_file` to it; the preview was withdrawn;
@@ -371,7 +377,9 @@ Rules that keep the file honest:
   adapter declares `Delivery.place`), that they cannot see the workspace, and
   that a path, link or markdown image delivers nothing. First live turn on it
   (thread `46c6a9c3`): the screenshot was sent with `send_file` unprompted;
-  the one file was still listed as a path and not sent. Half.
+  the one file was still listed as a path and not sent. Second (thread
+  `052869f2`): three files as paths and the markdown image again, no send at
+  all. The brief does not hold; the status stays open.
 - **Decided:** 2026-09-03, the human rejected a mechanical backstop in the
   adapter (delivering a markdown image the model wrote) as a crutch.
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`

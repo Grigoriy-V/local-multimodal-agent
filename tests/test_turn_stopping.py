@@ -269,6 +269,37 @@ async def test_a_steered_candidate_is_never_settled_as_the_turn_result(
     assert result.get("steered") is None
 
 
+async def test_a_steered_turn_that_adds_nothing_keeps_its_answer(
+    store: SqliteStore,
+) -> None:
+    """Live 2026-09-03: the draft was refused for an open plan item, the model
+    closed the item and wrote the same answer again. The draft is the answer
+    when the model, having done what it was told, has nothing to add."""
+
+    backend = ScriptedBackend(says("Done."), says(""))
+    agent = loop(backend, store, stopping=Once())
+
+    result = await agent.ainvoke(ask("do it"))
+
+    assert len(backend.requests) == 2
+    assert spoken(result["messages"][-1]) == "Done."
+    assert [spoken(m) for m in store.messages("default")] == ["do it", "Done."]
+
+
+async def test_an_empty_answer_after_delivered_text_ends_the_turn_quietly(
+    store: SqliteStore,
+) -> None:
+    """The core prompt asks for nothing when nothing is new; that is not an error."""
+
+    backend = ScriptedBackend(says(""))
+    agent = loop(backend, store)
+
+    result = await agent.ainvoke(ask("hi"))
+
+    assert [message.role for message in result["messages"]] == ["user"]
+    assert [spoken(m) for m in store.messages("default")] == ["hi"]
+
+
 async def test_the_draft_and_the_instruction_reach_the_next_request(
     store: SqliteStore,
 ) -> None:

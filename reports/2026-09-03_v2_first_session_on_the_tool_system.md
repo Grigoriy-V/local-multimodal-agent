@@ -183,6 +183,32 @@ The human allowed the CDN and called the double generation unacceptable
 The repeat guard on delivery is a display rule, not the fix: the fix is the
 model not writing the text twice, which only a live turn shows.
 
+## The next turn: the plan seam produced the same double generation
+
+Thread `052869f2`, run `f41278c9`, 10 model calls, 8 tool calls. The person
+saw the answer appear, then a planning step, then the answer again — and the
+markdown image once more, with no `send_file` this time at all. The trace
+says `turn_steered step=8 source=todo`: the model's answer was refused as an
+ending because "Verify and take screenshot" was still in progress; the draft
+was withdrawn from the chat; the model closed the item with `todo_write` and
+wrote the same answer again. 117 + 164 output tokens and 7 s for a plan tick.
+
+The seam was right to object and wrong about what it cost. Fixed the same
+day, in the tree: the steering tells the model its answer is kept; an empty
+completion after a steering hands the draft back as the answer; the Telegram
+preview holds the draft on the screen instead of deleting it and edits it in
+place if the model writes something new; an empty completion with nothing
+steered ends the turn quietly, which the core prompt now asks for after a
+tool when nothing is new. `tests/test_turn_stopping.py`,
+`tests/test_telegram_adapter.py`.
+
+The markdown image is ISS-0003 and stays open: two turns on the placed brief
+and it held in neither. Nothing in the runtime changes that without the
+backstop the human rejected; the lever left is 4.7.
+
+Also seen again: `index.html` rewritten with the same content right after the
+plan update, the third turn in a row.
+
 ## Next gate
 
 The person's own turn in Telegram on this code.
