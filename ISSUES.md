@@ -598,5 +598,6 @@ Rules that keep the file honest:
   chat instead of written. The refusal now names the fence as the cause and
   says to send `path` first without it; whether the model acts on that is
   the next live turn. The upstream defect stands; the corrected parser in
-  `tools/gemma4_parser.py` remains the fix the human declined.
+  `tools/gemma4_parser.py` is now to go out with the next model-app redeploy,
+  once it has been checked first (the human, 2026-09-03, after test 10).
 - **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`

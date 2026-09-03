@@ -236,7 +236,11 @@ What exists. How it was reached, and every number, is in the linked report.
      needs `--enable-prompt-tokens-details` on the model server, in the
      tree; the model-app deploy is **deferred by the human** (ISS-0024). Rule
      since the same day: after every deploy of the agent, `/check` and
-     `scripts/loop_live.py --after-deploy`. Live acceptance still owed: a
+     `scripts/loop_live.py --after-deploy`; passed on `a15bc34` and `5736b02`.
+     **Decided 2026-09-03:** the next model-app redeploy, whenever another
+     reason for one accumulates, carries both the cache flag (ISS-0024) and
+     the corrected tool parser `tools/gemma4_parser.py` (ISS-0001), the
+     parser only after it has been checked first. Live acceptance still owed: a
      warm repeat turn showing `cached_tokens`
      near the previous request, and the Task Board request showing step sizes
      flat against test 8's growth.
