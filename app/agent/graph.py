@@ -202,13 +202,19 @@ def declined(call: ToolCall) -> Message:
 
 
 def failed_before(messages: Sequence[Message], call: ToolCall) -> int:
-    """How often this exact call has already failed in this turn.
+    """How often this exact call has failed since anything last succeeded.
 
     Identity is the tool's name and its arguments, because that is what decides
     the result: a call differing in one character is a different attempt and
     gets its own retries. Only failures count — a tool that succeeded and is
     called again with the same arguments is ordinary work, like writing the
     same file twice.
+
+    A success of any tool in between starts the count over. The guard exists
+    for a call that cannot come out differently, and a call whose world has
+    changed can: live on 2026-09-03 a look at a file failed twice because the
+    file did not exist, the model then wrote the file, and the third look — the
+    one that would have worked — was the one refused (ISSUES.md ISS-0013).
     """
 
     failures = {
@@ -218,6 +224,9 @@ def failed_before(messages: Sequence[Message], call: ToolCall) -> int:
     }
     seen = 0
     for message in messages:
+        if message.role == "tool" and not tool_failed(message):
+            seen = 0
+            continue
         for earlier in message.tool_calls:
             if (
                 earlier.id in failures

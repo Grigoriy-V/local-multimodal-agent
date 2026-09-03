@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.models import ToolCall, ToolFailure
-from app.tools import Tool, Toolbox, ToolError, filesystem_tools, tool_failed
+from app.tools import BAD_ARGUMENTS, Tool, Toolbox, ToolError, filesystem_tools, tool_failed
 
 
 @pytest.fixture
@@ -387,3 +387,18 @@ def test_every_way_a_call_can_fail_is_recognisable_as_a_failure() -> None:
 
     assert all(tool_failed(box.run(call)) for call in failures)
     assert not tool_failed(box.run(ToolCall(id="c5", name="fine", arguments={})))
+
+
+def test_a_path_wrapped_in_quotes_or_carrying_a_delimiter_is_refused(tmp_path: Path) -> None:
+    """Live 2026-09-03: the served parser left `"…index.html"<|"|>` as the path
+    and a file of that name was created; every later call by the real name
+    failed. A corrupted call is refused, not obeyed."""
+
+    box = Toolbox(filesystem_tools(tmp_path))
+    for bad in ('"Task Board test 4/index.html"<|"|>', "'a.txt'", "a<|b.txt"):
+        result = box.run(ToolCall("w", "write_file", {"path": bad, "content": "x"}))
+        assert result.failure is not None and result.failure.code == BAD_ARGUMENTS, bad
+        assert "send it again" in (result.content[0].text or "")
+    assert list(tmp_path.iterdir()) == []
+    ok = box.run(ToolCall("w", "write_file", {"path": "it's fine.txt", "content": "x"}))
+    assert ok.failure is None

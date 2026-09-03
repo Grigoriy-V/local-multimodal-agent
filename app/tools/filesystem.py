@@ -44,13 +44,37 @@ def _detail(error: BaseException) -> str:
     return getattr(error, "strerror", None) or str(error) or type(error).__name__
 
 
+# What a corrupted emission looks like inside a path: the served string
+# delimiter, or the quotes the delimiter was meant to replace. Live on
+# 2026-09-03 a model wrote `"Task Board test 4/index.html"<|"|>` and the tool
+# created a file of that name, which every later call by the real name could
+# not find (ISSUES.md ISS-0012). No path a person means contains these.
+_NOT_IN_A_PATH = ("<|", "|>")
+
+
+def corrupted_path(path: str) -> bool:
+    text = path.strip()
+    return any(mark in text for mark in _NOT_IN_A_PATH) or (
+        len(text) > 1 and text[0] == text[-1] and text[0] in "\'\""
+    )
+
+
 def resolve_in_root(root: Path, path: str) -> Path:
     """Resolve a model-supplied path inside the root, or refuse it.
 
     Resolution happens before the check, so `..` segments, absolute paths and
-    symlinks that leave the root are all refused by the same comparison.
+    symlinks that leave the root are all refused by the same comparison. A path
+    that carries a served delimiter or wrapping quotes is refused before that:
+    it is a corrupted call, and the honest answer is to ask for it again rather
+    than to make a file nobody named.
     """
 
+    if corrupted_path(path or ""):
+        raise ToolError(
+            f"path {path!r} contains quotes or a delimiter no path has; the call "
+            "arrived corrupted, send it again with the plain path",
+            code=BAD_ARGUMENTS,
+        )
     try:
         supplied = Path(path or ".")
         candidate = supplied.resolve() if supplied.is_absolute() else (root / supplied).resolve()

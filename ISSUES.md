@@ -51,6 +51,44 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0013 — the repeat guard refused the call that would have worked
+
+- **Status:** fixed in the tree, 2026-09-03 — not yet deployed
+- **Seen:** 2026-09-03, deployed, thread `3261ae8f`, run `30fe463c`
+- **Costs:** a look at a file failed twice because the file was not there,
+  the model then wrote the file, and the third look — identical arguments, a
+  file that now exists — was counted as the third identical failure. Every
+  tool was halted for the turn, so the person got neither the screenshot nor
+  the files they had asked for, after 261 s.
+- **Reproduce:** make a call fail twice on a missing precondition, satisfy the
+  precondition with another tool, repeat the call.
+- **Cause:** `failed_before` counted identical failures across the whole turn,
+  as if nothing could change between them.
+- **Fixed by:** the count starts over when any tool has succeeded since the
+  last identical failure (`app/agent/graph.py`,
+  `tests/test_repeated_failure.py`).
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0012, which is what made the first two looks fail
+
+### ISS-0012 — a corrupted path was obeyed, and a file nobody named was made
+
+- **Status:** fixed in the tree, 2026-09-03 — not yet deployed
+- **Seen:** 2026-09-03, deployed, thread `3261ae8f`, run `30fe463c`, twice
+- **Costs:** `write_file` received the path `"Task Board test 4/index.html"<|"|>`
+  — the served parser's leftovers around the real name — and created a file
+  called exactly that on the person's volume. Every later call by the real
+  name found nothing; the page was written four times; the junk file is still
+  there beside the real one.
+- **Reproduce:** call any path-taking tool with a path wrapped in quotes or
+  carrying `<|`/`|>`.
+- **Cause:** the fragment removal of 2026-08-31 recognises a fragment in a
+  parameter name or as a `,name:` tail, not inside a string value; the
+  filesystem accepted any characters the OS accepts.
+- **Fixed by:** `resolve_in_root` refuses such a path as `bad_arguments` and
+  asks for it again plainly (`app/tools/filesystem.py`, `tests/test_tools.py`).
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0001, the upstream cause; ISS-0013
+
 ### ISS-0011 — every look at a page carried the whole page back as its address
 
 - **Status:** fixed, 2026-09-03 — deployed the same day, `/check` 9/9 on that container
@@ -84,9 +122,12 @@ Rules that keep the file honest:
 - **Cause:** unknown. The 2026-08-29 note in `app/capabilities.py` records the
   same belief ("output supports only text") before the brief was written to
   contradict it, so the brief has not displaced it.
+- **Also seen:** 2026-09-03, thread `3261ae8f`: "не могу напрямую отправить
+  скриншот из системы", this time with every tool halted by ISS-0013 so no
+  send was possible — the honest sentence was that the look had been refused.
 - **Evidence:** runs `8ffab1aa` (inspect, "вот скриншот", nothing outbound),
   `240f09ea` (same), `eda12665` ("не могу прикрепить"), `29c2bd17`
-  (`send_file` of the PNG, delivered), 2026-09-03T04:06–04:09Z
+  (`send_file` of the PNG, delivered), 2026-09-03T04:06–04:09Z; `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
 - **Related:** ISS-0003 is the same shape for a file; 4.7 scenario suite is
   where a prompt change would be accepted
 
@@ -272,6 +313,8 @@ Rules that keep the file honest:
   emission (`DECISIONS.md` 2026-09-03): since 2026-09-03 a call whose arguments
   are not a JSON object is delivered and refused as one `bad_arguments` result
   with the tool's signature, where until then the adapter raised and the whole
-  request failed. Offline only, not yet seen live. The defect itself stays
-  upstream and open.
+  request failed. Seen live 2026-09-03, thread `3261ae8f`: two calls missing
+  `path` were each refused once with the signature and the turn went on; a
+  third carried the leftovers inside the path itself and was obeyed
+  (ISS-0012). The defect itself stays upstream and open. `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
 - **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`

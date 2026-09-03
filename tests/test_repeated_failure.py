@@ -194,6 +194,55 @@ def test_a_call_that_succeeded_is_not_a_failure_to_count(workspace: Path) -> Non
     assert failed_before(history, call) == 0
 
 
+def test_a_success_in_between_starts_the_count_over(workspace: Path) -> None:
+    """Live 2026-09-03: two looks at a missing file, then the file is written.
+
+    The third look is not a third identical attempt; the world it runs in is
+    different, and refusing it cost the person the screenshot they asked for.
+    """
+
+    look = {"path": "Task Board test 4/index.html"}
+    call = ToolCall(id="5", name="inspect_page", arguments=look)
+    history = [
+        Message(role="assistant", content=[], tool_calls=[ToolCall(id="1", name="inspect_page", arguments=look)]),
+        failed("1"),
+        Message(role="assistant", content=[], tool_calls=[ToolCall(id="2", name="inspect_page", arguments=look)]),
+        failed("2"),
+        Message(role="assistant", content=[], tool_calls=[
+            ToolCall(id="3", name="write_file", arguments={"path": look["path"], "content": "<p>"})
+        ]),
+        Message(role="tool", content=[ContentPart(kind="text", text="created")], tool_call_id="3"),
+    ]
+
+    assert failed_before(history, call) == 0
+    history += [
+        Message(role="assistant", content=[], tool_calls=[ToolCall(id="4", name="inspect_page", arguments=look)]),
+        failed("4"),
+    ]
+    assert failed_before(history, call) == 1
+
+
+async def test_a_call_that_works_once_its_file_exists_is_run(
+    store: SqliteStore, workspace: Path
+) -> None:
+    backend = ScriptedBackend(
+        calls("read_file", path="late.txt"),
+        calls("read_file", path="late.txt"),
+        calls("write_file", path="late.txt", content="here now"),
+        calls("read_file", path="late.txt"),
+        says("It says: here now."),
+    )
+    agent = build_agent(
+        backend, Toolbox(filesystem_tools(workspace)), store, OWNER, budget=TurnBudget(max_steps=12)
+    )
+
+    result = await agent.ainvoke(ask("read late.txt"))
+
+    assert result.get("stopping") != REPEATED_FAILURE
+    reads = [m for m in result["messages"] if m.role == "tool" and "here now" in spoken(m)]
+    assert reads, "the third read ran and returned the file"
+
+
 async def test_a_call_that_keeps_failing_ends_the_turn_instead_of_the_person(
     store: SqliteStore, workspace: Path
 ) -> None:
