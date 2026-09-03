@@ -4,11 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.6a, the context engine, approved 2026-09-03 on
-the review `reports/2026-09-03_v2_context_engine_review.md` and built in its
-order: measure, facts last, stub old tool results, the person's own size and
-`/context` and `/compact`, then the structured summary and the schema-3
-migration. The Neon migration is a separate human gate.
+**Current approved step:** none. 4.6a, the context engine, closed 2026-09-03
+on the human's own live turn (below). Next in order is 4.6b; selecting it is
+the human's word.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -208,7 +206,7 @@ What exists. How it was reached, and every number, is in the linked report.
      Live: `scripts/loop_live.py` F passed 2026-09-03; deployed the same
      day and `/check` 9/9 on that container. `reports/2026-09-03_v2_browser_session.md`,
      `docs/v2_tool_system.md`, `ISSUES.md` ISS-0008.
-   - **4.6a Context engine.** Context preparation before every model step rather
+   - **4.6a Context engine — done 2026-09-03.** Context preparation before every model step rather
      than folding after a turn: measure the surface, shorten old tool results
      first, summarize only if that was not enough, and record what was done
      durably. Cache-friendly assembly lands here, since it is the same
@@ -240,10 +238,15 @@ What exists. How it was reached, and every number, is in the linked report.
      **Decided 2026-09-03:** the next model-app redeploy, whenever another
      reason for one accumulates, carries both the cache flag (ISS-0024) and
      the corrected tool parser `tools/gemma4_parser.py` (ISS-0001), the
-     parser only after it has been checked first. Live acceptance still owed: a
-     warm repeat turn showing `cached_tokens`
-     near the previous request, and the Task Board request showing step sizes
-     flat against test 8's growth.
+     parser only after it has been checked first. **Live acceptance
+     2026-09-03**, the human's own Task Board turn on `5736b02`, run
+     `9ec787bc`: 6 model calls, 5 tool calls, 83 s, one file, the screenshot,
+     the answer, nothing at the ceiling; the largest request 6.2k tokens, the
+     turn layer falling at the last step as the first result was stubbed.
+     Growth between the early steps is the model's own file content, kept
+     whole by design. One measurement is carried, not owed: `cached_tokens`
+     is read on the first warm turn after the model-app redeploy that brings
+     the flag. `reports/2026-09-03_v2_context_engine_review.md`.
    - **4.6b Exact recovery from archived history.** A search over what was
      actually said, returning real messages and tool results rather than another
      summary, so a detail a summary lost is recoverable. Full-text in both

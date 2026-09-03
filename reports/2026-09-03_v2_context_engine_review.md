@@ -340,8 +340,35 @@ was read three times without effect. What did not change: the parser on the
 server, which is the actual defect and has a corrected version in the tree
 that the human declined to deploy on 2026-09-03 as a one-model fix.
 
-**Not done.** The live numbers. Both acceptances need the human's own turns:
-a repeat question in one thread to read `cached_tokens` against the previous
-request's size, and the Task Board request to compare step sizes with test
-8, where the request grew by roughly 600 tokens a step. `ROADMAP.md` 4.6a
-carries the gate and the acceptance.
+## Live acceptance: the person's own Task Board turn on `5736b02`
+
+Run `9ec787bc`, 10:41Z, a fresh thread after `/new`: 6 model calls, 5 tool
+calls, 83 s, $0.03 derived. What the person saw: the answer, `index.html`,
+the screenshot, one closing line. The turn layer per step, in tokens, with
+the request the model received:
+
+| step | turn | request | what happened |
+|---|---|---|---|
+| 1 | 139 | 2979 | `write_file`, `content` first, ending in a fence, `path` lost (ISS-0001) |
+| 2 | 1882 | 4225 | the refusal named the fence; the model sent the call again with `path` first — written |
+| 3 | 3691 | 5481 | `inspect_page` |
+| 4 | 4288 | 6010 | text beside `send_file` for the file |
+| 5 | 4470 | 6175 | `send_file` for the screenshot |
+| 6 | 3955 | 5783 | one result stubbed, the closing line |
+
+Three things this shows. The refusal that names the fence works: test 10's
+model sent the identical call three times on "missing"; this one corrected
+itself on the first reply, at the cost of one 28 s call. The growth between
+steps 1 and 3 is the model's own file content in its call arguments, ~1.8k a
+step, which the engine keeps whole on purpose (ISS-0022); the growth after
+that is ~600, ~180, and then the surface shrinks when the first result is
+old enough to stub. The request stays bounded: largest 6.2k, where test 8
+on the old assembly grew by ~600 a step with nothing ever shortened. Not
+seen: the album; the two deliveries went out as two `send_file` calls, which
+is a model habit for 4.7, and the closing line did not repeat the text
+beside the call this time.
+
+Not measured: `cached_tokens`, `None` on every call until the model server
+runs with `--enable-prompt-tokens-details`. It is read on the first warm turn
+after that redeploy, which also carries the checked parser. 4.6a is closed
+on this turn; that one number is carried forward, not owed.

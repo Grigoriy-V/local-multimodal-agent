@@ -596,8 +596,11 @@ Rules that keep the file honest:
   first, ending in a fence, `path` lost, the identical call three times, the
   turn ended by the repeat guard after 142 s with the code pasted into the
   chat instead of written. The refusal now names the fence as the cause and
-  says to send `path` first without it; whether the model acts on that is
-  the next live turn. The upstream defect stands; the corrected parser in
-  `tools/gemma4_parser.py` is now to go out with the next model-app redeploy,
-  once it has been checked first (the human, 2026-09-03, after test 10).
+  says to send `path` first without it. Next live turn, run `9ec787bc` the
+  same day: the same emission, refused once with that message, and the model
+  sent the call again with `path` first and wrote the file — one 28 s call
+  lost instead of the turn. The upstream defect stands; the corrected parser
+  in `tools/gemma4_parser.py` is now to go out with the next model-app
+  redeploy, once it has been checked first (the human, 2026-09-03, after
+  test 10).
 - **Evidence:** `reports/2026-08-31_v2_todo_live_failure.md`
