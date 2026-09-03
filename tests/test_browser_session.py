@@ -15,6 +15,7 @@ import pytest
 from app.models import ToolCall
 from app.tools import Toolbox, browser_tools
 from app.tools.chromium import (
+    ARTIFACT_ORIGIN,
     REFUSED,
     STALE_REF,
     UNAVAILABLE,
@@ -24,6 +25,7 @@ from app.tools.chromium import (
     find_chromium_browser,
     format_snapshot,
     open_browser,
+    serve_directory,
 )
 from tests.test_chromium_requests import FakeSocket
 
@@ -124,6 +126,34 @@ async def test_a_session_has_exactly_one_boundary() -> None:
             pass
 
 
+def test_the_directory_server_answers_only_files_inside_its_root(tmp_path: Path) -> None:
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "styles.css").write_text("body{}", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("no", encoding="utf-8")
+    serve = serve_directory(tmp_path / "app")
+
+    assert serve(f"{ARTIFACT_ORIGIN}/styles.css?v=1") == ("text/css; charset=utf-8", b"body{}")
+    assert serve(f"{ARTIFACT_ORIGIN}/../secret.txt") is None
+    assert serve(f"{ARTIFACT_ORIGIN}/missing.css") is None
+    assert serve("https://example.com/styles.css") is None
+
+
+async def test_a_served_file_is_fulfilled_and_anything_else_fails(tmp_path: Path) -> None:
+    (tmp_path / "a.js").write_text("1", encoding="utf-8")
+    socket = FakeSocket(
+        {"method": "Fetch.requestPaused", "params": {"requestId": "1", "request": {"url": f"{ARTIFACT_ORIGIN}/a.js"}}},
+        {"method": "Fetch.requestPaused", "params": {"requestId": "2", "request": {"url": "https://example.com/x"}}},
+        {"id": 1, "result": {}},
+    )
+    session = CdpSession(socket, serve=serve_directory(tmp_path))
+
+    await session.call("Runtime.enable")
+
+    sent = [(m["method"], m["params"].get("requestId")) for m in socket.sent if m["method"].startswith("Fetch.")]
+    assert sent == [("Fetch.fulfillRequest", "1"), ("Fetch.failRequest", "2")]
+    assert session.refused == ["https://example.com/x"]
+
+
 async def test_no_browser_is_a_typed_failure_the_model_reads(tmp_path: Path) -> None:
     page = tmp_path / "page.html"
     page.write_text("<p>hi</p>", encoding="utf-8")
@@ -195,6 +225,36 @@ async def test_select_fires_change_and_type_replaces_what_was_there() -> None:
 
     assert 'text: work' in after.text.lower()
     assert 'value="second"' in after.text and '"first"' not in after.text
+
+
+@needs_browser
+async def test_a_served_page_has_storage_and_its_sibling_files(tmp_path: Path) -> None:
+    """Live 2026-09-03: under a data: URL localStorage threw and styles.css never
+    loaded, so the model was told an error the app does not have."""
+
+    app = tmp_path / "Task Board"
+    app.mkdir()
+    (app / "styles.css").write_text("#late { display: none }", encoding="utf-8")
+    (app / "app.js").write_text(
+        "localStorage.setItem('k', 'kept'); document.getElementById('out').textContent = localStorage.getItem('k');",
+        encoding="utf-8",
+    )
+    (app / "index.html").write_text(
+        '<link rel="stylesheet" href="styles.css"><p id="out">unset</p><p id="late">styled away</p>'
+        '<script src="app.js"></script><script>fetch("https://example.com/").catch(() => {})</script>',
+        encoding="utf-8",
+    )
+    async with open_browser(offline=True, serve=serve_directory(tmp_path)) as session:
+        await session.open(file=app / "index.html", root=tmp_path)
+        await session.evaluate("0")
+        snapshot = await session.snapshot()
+        errors = session.console()
+        refused = session.refused
+
+    assert 'paragraph "kept"' in snapshot.text
+    assert "styled away" not in snapshot.text
+    assert errors == []
+    assert "https://example.com/" in refused
 
 
 @needs_browser

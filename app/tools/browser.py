@@ -7,10 +7,11 @@ the model to judge.
 
 The page is driven through `BrowserSession` in `chromium.py`, the one API every
 browser capability uses. What is decided here is what this page is allowed to
-be: a local file, opened as a document in an offline session, with every network
-scheme blocked. Only observation is exposed in this version; the session
-already carries the actions, and a tool that exposes one later changes nothing
-here.
+be: a file in the workspace, served to the page at a synthetic origin together
+with its sibling files and nothing else, so it has the storage and the styles
+the person's own browser gives it. Only observation is exposed in this
+version; the session already carries the actions, and a tool that exposes one
+later changes nothing here.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from app.tools.chromium import (
     container_flags,
     find_chromium_browser,
     open_browser,
+    serve_directory,
 )
 from app.tools.documents import UNSUPPORTED
 from app.tools.filesystem import NOT_A_FILE, NOT_FOUND, TOO_LARGE, resolve_in_root
@@ -101,6 +103,7 @@ def page_report(
     truncated: bool,
     text: str,
     console_errors: list[str],
+    refused: list[str],
     screenshot: str,
 ) -> str:
     """What the model reads about a page, as text it can quote from.
@@ -110,13 +113,15 @@ def page_report(
     """
 
     errors = "\n".join(f"- {line}" for line in console_errors) if console_errors else "none"
+    blocked = "\n".join(f"- {line}" for line in refused) if refused else "none"
     cut = " (cut; the page has more)" if truncated else ""
     return (
         f"title: {title or '(none)'}\n"
         f"browser: {browser}\n"
-        f"network: external network and file URLs blocked\n"
+        f"network: the workspace's own files are served to the page; nothing else is reachable\n"
         f"screenshot: {screenshot}\n"
         f"\nconsole errors:\n{errors}\n"
+        f"\nrequests refused (the page asked for these; nothing outside the workspace answers):\n{blocked}\n"
         f"\nstructure{cut}; an interactive element carries a ref:\n{structure or '(empty page)'}\n"
         f"\nvisible text:\n{text or '(none)'}\n"
     )
@@ -144,6 +149,7 @@ async def observe(session: BrowserSession, artifact: Path) -> tuple[str, bytes]:
             truncated=snapshot.truncated,
             text=text,
             console_errors=session.console(),
+            refused=[url for url in session.refused if not url.endswith("/favicon.ico")],
             screenshot=artifact.as_posix(),
         ),
         image,
@@ -158,8 +164,8 @@ async def inspect_local_page(
     target = _local_document(root, path)
     artifact = root / ".agent" / "browser" / f"{target.stem}-{secrets.token_hex(4)}.png"
     try:
-        async with open_browser(browser, offline=True) as session:
-            await session.open(document=target.read_text(encoding="utf-8", errors="replace"))
+        async with open_browser(browser, offline=True, serve=serve_directory(root)) as session:
+            await session.open(file=target, root=root)
             report, image = await observe(session, artifact)
     except BrowserError as error:
         raise ToolError(str(error), code=error.code, detail=error.detail) from error

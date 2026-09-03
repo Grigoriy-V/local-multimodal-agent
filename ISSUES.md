@@ -51,6 +51,43 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0015 — a written page ends with a markdown fence
+
+- **Status:** open
+- **Seen:** 2026-09-03, live, `Task Board test 4/index.html` made through the
+  loop against the deployed model
+- **Costs:** the file ends with a literal ```` ``` ```` line after `</html>`,
+  which the browser shows as text at the bottom of the page. The model read
+  its own snapshot with `text: ```` ``` ```` in it and did not mention it.
+- **Reproduce:** ask for a self-contained page; look at the last line.
+- **Cause:** unknown. The same shape — a page that ends in a fence — is what
+  the 2026-08-31 parser corruption was first measured on, so it may be the
+  model closing a fence it never opened in the served format.
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0001, ISS-0008
+
+### ISS-0014 — the page was looked at without storage or its own files
+
+- **Status:** fixed in the tree, 2026-09-03 — not yet deployed
+- **Seen:** 2026-09-03, live, twice: thread `afb9d76a` (an app with
+  `styles.css` and `app.js`), and the loop re-run of "Task Board test 4"
+- **Costs:** `inspect_page` opened the file as a `data:` URL. A `data:` page
+  has no origin, so `localStorage` throws a SecurityError the app does not
+  have in the person's browser, and a relative `styles.css` or `app.js`
+  resolves to nothing, so a multi-file app is looked at unstyled and without
+  its logic. The model was handed a false error and an unfair picture, and
+  either ignored it or described what it saw.
+- **Reproduce:** a page with `<link href="styles.css">` or a script using
+  `localStorage`; inspect it on code before this fix.
+- **Cause:** the document was passed as a URL instead of being served.
+- **Fixed by:** the offline session serves the workspace at
+  `http://artifact.local/` through request interception and fails everything
+  else; the page has an origin, storage and its siblings, and a request the
+  page makes elsewhere is reported as refused rather than as an error
+  (`app/tools/chromium.py` `serve_directory`, `tests/test_browser_session.py`).
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0008; 4.5.5
+
 ### ISS-0013 — the repeat guard refused the call that would have worked
 
 - **Status:** fixed in the tree, 2026-09-03 — not yet deployed

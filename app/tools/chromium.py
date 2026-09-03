@@ -20,6 +20,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import mimetypes
 import os
 import shutil
 import socket
@@ -102,12 +103,14 @@ class CdpSession:
         self,
         websocket: Any,
         allow: Callable[[str], Awaitable[bool]] | None = None,
+        serve: "Server | None" = None,
     ) -> None:
         self.websocket = websocket
         self.next_id = 1
         self.console_errors: list[str] = []
         self.refused: list[str] = []
         self._allow = allow
+        self._serve = serve
 
     def _take_id(self) -> int:
         """Every message takes its id here.
@@ -149,12 +152,26 @@ class CdpSession:
 
         identifier = params.get("requestId")
         url = str(params.get("request", {}).get("url", ""))
-        if identifier is None or self._allow is None:
+        if identifier is None or (self._allow is None and self._serve is None):
             # No policy means interception was never enabled, so this event is
             # not ours to answer. Answering it anyway would be this session
             # letting a request through on a page whose rule is "no network".
             return
-        if await self._allow(url):
+        if self._serve is not None:
+            served = self._serve(url)
+            if served is not None:
+                media_type, body = served
+                await self._notify(
+                    "Fetch.fulfillRequest",
+                    {
+                        "requestId": identifier,
+                        "responseCode": 200,
+                        "responseHeaders": [{"name": "Content-Type", "value": media_type}],
+                        "body": base64.b64encode(body).decode("ascii"),
+                    },
+                )
+                return
+        elif await self._allow(url):
             await self._notify("Fetch.continueRequest", {"requestId": identifier})
             return
         self.refused.append(url)
@@ -181,7 +198,9 @@ class CdpSession:
             self.console_errors.append(" ".join(str(value) for value in values).strip())
         elif method == "Log.entryAdded":
             entry = params.get("entry", {})
-            if entry.get("level") == "error":
+            # A request this session refused is reported as refused, not as an
+            # error of the page: the page did nothing wrong by asking.
+            if entry.get("level") == "error" and str(entry.get("url", "")) not in self.refused:
                 self.console_errors.append(str(entry.get("text", "browser log error")))
 
     async def call(
@@ -251,6 +270,7 @@ async def open_page(
     extra_flags: Sequence[str] = (),
     max_message_bytes: int = 8 * 1024 * 1024,
     allow: Callable[[str], Awaitable[bool]] | None = None,
+    serve: "Server | None" = None,
 ) -> AsyncIterator[tuple[CdpSession, str]]:
     """Start a private browser, open one blank page, and always close both.
 
@@ -306,10 +326,10 @@ async def open_page(
                 open_timeout=5,
                 max_size=max_message_bytes,
             ) as websocket:
-                session = CdpSession(websocket, allow)
+                session = CdpSession(websocket, allow, serve)
                 for domain in ("Runtime.enable", "Page.enable", "Log.enable", "Network.enable"):
                     await session.call(domain)
-                if allow is not None:
+                if allow is not None or serve is not None:
                     # Every request, not only documents: a subresource is a
                     # request to an address just as much as a navigation is.
                     await session.call("Fetch.enable", {"patterns": [{"urlPattern": "*"}]})
@@ -334,6 +354,50 @@ REFUSED = "browser.refused"  # an address this session's policy does not allow
 
 MAX_SNAPSHOT_CHARS = 12_000
 MAX_LINE_CHARS = 120
+
+# Where a local artifact lives while the browser looks at it. A `data:` URL has
+# no origin, so `localStorage` throws and a relative `styles.css` resolves to
+# nothing; seen live 2026-09-03, the model was told a SecurityError the app
+# does not have (ISSUES.md ISS-0014). A synthetic http origin, answered from
+# the directory and from nowhere else, is what the person's browser gives the
+# same files.
+ARTIFACT_ORIGIN = "http://artifact.local"
+
+# What answers a request: the media type and the bytes, or None for "not here".
+Server = Callable[[str], "tuple[str, bytes] | None"]
+
+
+def serve_directory(root: Path, max_bytes: int = 8 * 1024 * 1024) -> Server:
+    """Answer requests under `ARTIFACT_ORIGIN` with files from one directory.
+
+    The URL path is resolved inside the root the way every path-taking tool
+    resolves one; anything that leaves it, is not a file, or is too large is
+    simply not served, and the request fails as any other refused one does.
+    """
+
+    base = Path(root).resolve()
+
+    def serve(url: str) -> tuple[str, bytes] | None:
+        if not url.startswith(ARTIFACT_ORIGIN + "/"):
+            return None
+        path = url[len(ARTIFACT_ORIGIN) + 1 :].split("?", 1)[0].split("#", 1)[0]
+        try:
+            target = (base / urllib.request.url2pathname(path)).resolve()
+        except (OSError, RuntimeError):
+            return None
+        if base not in target.parents or not target.is_file() or target.stat().st_size > max_bytes:
+            return None
+        media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        if media_type.startswith("text/") or media_type in ("application/javascript", "application/json"):
+            media_type += "; charset=utf-8"
+        return media_type, target.read_bytes()
+
+    return serve
+
+
+def artifact_url(root: Path, file: Path) -> str:
+    relative = Path(file).resolve().relative_to(Path(root).resolve()).as_posix()
+    return f"{ARTIFACT_ORIGIN}/{urllib.request.pathname2url(relative)}"
 
 # What the page's DOM is turned into: one line per element that means
 # something to a person — a role, a name, a state — and a ref on everything
@@ -553,13 +617,28 @@ class BrowserSession:
     # -- observation ---------------------------------------------------------
 
     async def open(
-        self, *, document: str | None = None, url: str | None = None, timeout: float = 10.0
+        self,
+        *,
+        document: str | None = None,
+        url: str | None = None,
+        file: Path | None = None,
+        root: Path | None = None,
+        timeout: float = 10.0,
     ) -> None:
-        """Show a document given as text, or the page at an address."""
+        """Show a document given as text, a file the session serves, or an address.
 
-        if (document is None) == (url is None):
-            raise ValueError("open takes exactly one of document and url")
-        if document is not None:
+        `file` needs a session opened with `serve=serve_directory(root)` and the
+        same `root`: the page then has an origin, storage and its sibling files.
+        """
+
+        given = [value for value in (document, url, file) if value is not None]
+        if len(given) != 1:
+            raise ValueError("open takes exactly one of document, url and file")
+        if file is not None:
+            if root is None:
+                raise ValueError("open(file=) needs the root the session serves")
+            url = artifact_url(root, file)
+        elif document is not None:
             encoded = base64.b64encode(document.encode("utf-8")).decode("ascii")
             url = f"data:text/html;charset=utf-8;base64,{encoded}"
         assert url is not None
@@ -568,7 +647,7 @@ class BrowserSession:
     async def navigate(self, url: str, timeout: float = 10.0) -> None:
         """Go to an address and wait for the page to finish loading."""
 
-        if self.offline and not url.startswith(("data:", "about:")):
+        if self.offline and not url.startswith(("data:", "about:", ARTIFACT_ORIGIN + "/")):
             raise BrowserError(
                 "this session shows local documents only and reaches no address",
                 code=REFUSED,
@@ -781,13 +860,16 @@ async def open_browser(
     *,
     offline: bool = False,
     allow: Callable[[str], Awaitable[bool]] | None = None,
+    serve: Server | None = None,
     viewport: tuple[int, int] = (900, 700),
     max_message_bytes: int = 8 * 1024 * 1024,
 ) -> AsyncIterator[BrowserSession]:
     """A `BrowserSession` on a fresh private browser, closed on the way out.
 
     `offline` blocks every network scheme before anything is opened, so a local
-    document cannot fetch, redirect or embed its way anywhere. `allow` is the
+    document cannot fetch, redirect or embed its way anywhere; with `serve`, an
+    offline session answers requests under `ARTIFACT_ORIGIN` from a directory
+    and fails everything else, which is still nothing leaving. `allow` is the
     other boundary: a policy asked about every request. A session must have one
     of the two; a browser with no rule is not something any capability here
     wants.
@@ -795,12 +877,13 @@ async def open_browser(
 
     if offline == (allow is not None):
         raise ValueError("a session is either offline or has a request policy, never both or neither")
+    if serve is not None and not offline:
+        raise ValueError("a served directory belongs to an offline session")
     try:
-        async with open_page(browser, allow=allow, max_message_bytes=max_message_bytes) as (
-            cdp,
-            name,
-        ):
-            if offline:
+        async with open_page(
+            browser, allow=allow, serve=serve, max_message_bytes=max_message_bytes
+        ) as (cdp, name):
+            if offline and serve is None:
                 await cdp.call(
                     "Network.setBlockedURLs",
                     {"urls": ["http://*", "https://*", "file://*", "ftp://*", "ws://*", "wss://*"]},
