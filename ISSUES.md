@@ -51,6 +51,22 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0028 — the model says it checked its memory without calling anything
+
+- **Status:** open — model behaviour, for 4.9 with ISS-0004
+- **Seen:** 2026-09-03, deployed, run `80a5e47e`, thread `4fd35f80`: asked
+  "Что ты помнишь", the model summarised the conversation and offered to
+  check its saved facts; the person said "да"; the model answered "Я
+  проверил свою память. На данный момент в ней нет сохраненных фактов" with
+  no tool call (1 model call, 0 tools). `search_memory` was in the toolbox.
+- **Costs:** a claim of an action that did not happen, and a wrong answer
+  about what is saved.
+- **Reproduce:** the two messages above in a thread with facts.
+- **Cause:** the model's own choice; the same class as ISS-0004 — describing
+  a check or a source it did not open.
+- **Evidence:** `reports/2026-09-03_v2_history_recovery_review.md`
+- **Related:** ISS-0004
+
 ### ISS-0027 — a shortened result's stub invited the model to run the tool again
 
 - **Status:** fixed in the tree, 2026-09-03 — the stub says only where the
@@ -545,6 +561,12 @@ Rules that keep the file honest:
   failing revealed it.
 - **Cause:** unknown. Three rounds of prompt wording made it better and worse in
   turn, which is evidence that wording is not the lever.
+- **Also seen:** 2026-09-03, deployed, run `45f78d7e`, thread `4fd35f80`:
+  a Hugging Face model page pasted as a URL was described in detail —
+  parameters, tuning, what "uncensored" means, the author — with no
+  `fetch_page` call at all (1 model call, 0 tools). Everything said was
+  read off the address itself. The previous message in the same thread
+  had fetched its page and used `offset` to read the rest unprompted.
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`,
   `reports/2026-08-31_v2_todo_live_failure.md`
 - **Related:** ISS-0008; roadmap step 4.5.5

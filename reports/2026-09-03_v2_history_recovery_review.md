@@ -271,3 +271,34 @@ a store change. Redeployed after both fixes; the after-deploy check passed
 again on that redeploy (G: 6 model calls, 5 tool calls, 60 s, the three
 files and the screenshot in one `send_file`). Offline suite after the fixes:
 1007 passed, 27 skipped.
+
+## The human's own session on the deployed agent, 12:41–12:45Z
+
+Thread `4fd35f80`, 48 messages, 16 turns, four folds (`count` at 12, `asked`
+at 15 through `/compact`, `count` at 24 and 36). Requests stayed between
+4k and 9.8k tokens with history never above 6.4k; the summary after the
+fourth fold is four clean sections and names the file, the model page, the
+secret word and the site.
+
+What the engine did right, unasked:
+
+- **Paging was used by the model on its own.** A support article came back
+  cut at 12k; the person said "давай"; the model called `fetch_page` with
+  `offset=12000` and summarised the rest (run `9842c54e`). The one product
+  gap paging was built for, closed on its first day.
+- **Recall across a fold.** The secret word was saved with `remember_fact`
+  at #28, folded into the summary at 36, and asked for at #46; the answer
+  came from the facts layer (22 tokens retrieved) and the summary, without
+  `search_history`, which is the cheaper path and the right one.
+- **`/compact` right after a `count` fold** said nothing was left to fold:
+  the newest 8 stay verbatim and that was all past the summary. Correct,
+  and the wording says why.
+
+Not exercised: `search_history` and `read_history`. No question in the
+session asked for a detail the summary had lost — the one thing folded and
+asked for was a fact, which the facts layer answered first. The tools'
+live evidence stays scenarios H and I.
+
+Two things the model did wrong, both the class 4.9 owns: a Hugging Face
+page described in detail without a fetch (ISS-0004, also seen) and "I
+checked my memory" with no call (ISS-0028). Neither touches 4.6b.

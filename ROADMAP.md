@@ -267,7 +267,11 @@ What exists. How it was reached, and every number, is in the linked report.
      a call read without its result, ISS-0027 a stub inviting a re-run),
      both fixed, both scenarios passed, redeployed, after-deploy check
      passed on the redeploy (G: 60 s, three files and the screenshot in one
-     delivery). **Owed:** the human's own turn.
+     delivery). The human's own session the same day (thread `4fd35f80`,
+     16 turns, four folds): paging used by the model unprompted, recall
+     across a fold from the facts layer; `search_history` not needed and not
+     exercised there, its live evidence is H and I. Two model-behaviour
+     findings for 4.9 (ISS-0004 again, ISS-0028).
    - **4.7 Restart, resume and the scenario suite**, asserting on harness events
      and outcomes rather than model wording, and compared against item 3's
      numbers, including that a turn continues correctly across a compaction.
