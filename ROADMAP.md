@@ -29,7 +29,7 @@ documents.
 
 ## Current state
 
-- Both databases at schema version 2; conversations, memory and files scoped by
+- Both databases at schema version 3 (2026-09-03); conversations, memory and files scoped by
   user, and the conversation each person is in stored as their own choice.
   Deployed database is **Neon**, reached through its pooled endpoint.
 - `assistant-llm-v2` at
@@ -227,11 +227,10 @@ What exists. How it was reached, and every number, is in the linked report.
      after history, tool results older than the newest two and their long
      call arguments stubbed on the surface, one media budget across history
      and turn, `/context` with `small|normal|large` and `/compact`. In the
-     tree and **not deployed**: the structured summary, the `compactions`
-     record and schema 3 (`messages.failure`, `compactions`), because the
-     deployed worker would write a column the Neon database does not have.
-     **Gate:** run `tools/setup_control_plane.py` against Neon, then deploy.
-     Live acceptance still owed: a warm repeat turn showing `cached_tokens`
+     same day, after the human's word: schema 3 migrated on Neon
+     (`tools/setup_control_plane.py`, version 3, 854 messages untouched) and
+     the structured summary, the `compactions` record and `messages.failure`
+     deployed (`75245bc`). Live acceptance still owed: a warm repeat turn showing `cached_tokens`
      near the previous request, and the Task Board request showing step sizes
      flat against test 8's growth.
    - **4.6b Exact recovery from archived history.** A search over what was

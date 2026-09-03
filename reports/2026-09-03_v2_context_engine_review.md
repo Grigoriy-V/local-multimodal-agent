@@ -264,7 +264,10 @@ schema, and the summary and the record (4) wait in the tree for the gate.
   `/context small|normal|large` writes `.agent/context`; `Agent.budget`
   reads it. `/compact` folds now and says how many messages it covered.
 
-**In the tree, not deployed.**
+**Deployed after the gate, the same day.** The human said the word; the
+migration ran against Neon in one call (version 2 → 3, `failure` column and
+`compactions` table added, 854 messages untouched, verified by reading the
+schema back), and `75245bc` was deployed.
 
 - The summary instruction is four sections — Goal, Done, Open,
   Preferences — at most 200 words, names kept exactly.
