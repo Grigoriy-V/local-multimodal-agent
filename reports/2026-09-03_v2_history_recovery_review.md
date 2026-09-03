@@ -270,4 +270,4 @@ offered; a call is useful only with its result. Neither needed a schema or
 a store change. Redeployed after both fixes; the after-deploy check passed
 again on that redeploy (G: 6 model calls, 5 tool calls, 60 s, the three
 files and the screenshot in one `send_file`). Offline suite after the fixes:
-1008 passed, 27 skipped.
+1007 passed, 27 skipped.
