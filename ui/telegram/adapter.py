@@ -310,6 +310,10 @@ class AnswerPreview:
         self._stood_aside = False
         self._held = False
 
+    @property
+    def held(self) -> bool:
+        return self._held and self.message_id is not None
+
     def hold(self) -> None:
         """Keep the bubble and its text; start collecting a possible replacement.
 
@@ -983,9 +987,11 @@ class TelegramAdapter:
             trace.visible("final_sent")
             if delivered is not None:
                 delivered.add(body)
-        elif preview is not None:
+        elif preview is not None and not preview.held:
             # A completion with no spoken text, or one repeating what was
-            # delivered, cannot finalize a text preview.
+            # delivered, cannot finalize a text preview. A held draft is not
+            # this completion's preview: it waits for the answer that ends the
+            # turn, which may be the draft itself.
             await preview.discard()
         await self._send_media(chat_id, produced)
         if produced.tool_calls:

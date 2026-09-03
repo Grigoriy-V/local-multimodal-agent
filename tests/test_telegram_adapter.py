@@ -2016,6 +2016,34 @@ async def test_a_steered_draft_is_edited_into_the_real_answer(
     assert [p["message_id"] for name, p in telegram.calls if name == "editMessageText"][-1] == 101
 
 
+async def test_a_held_draft_survives_the_tool_call_the_steering_asked_for(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Live 2026-09-03, run `af276ed7`: the draft was held, then the model's
+    bare todo_write arrived, and the bare-call path deleted the held bubble;
+    the same answer then came as a new one. The held draft waits."""
+
+    class SteersOnce:
+        def __init__(self) -> None:
+            self.asked = 0
+
+        async def stopping(self, candidate: Candidate) -> Steering | None:
+            self.asked += 1
+            return Steering("check it first", source="test") if self.asked == 1 else None
+
+    backend = ScriptedBackend(
+        says(LONG_ANSWER), calls("list_files", path="."), says(LONG_ANSWER), default=says("summary")
+    )
+    adapter = build(telegram, settings, tmp_path, backend, stopping=SteersOnce())
+
+    await adapter.handle_update(text_update("do it properly"))
+
+    deleted = [p["message_id"] for name, p in telegram.calls if name == "deleteMessage"]
+    assert 101 not in deleted
+    assert [p["message_id"] for name, p in telegram.calls if name == "editMessageText"][-1] == 101
+    assert texts(telegram, "editMessageText")[-1] == LONG_ANSWER
+
+
 async def test_a_steered_draft_the_model_does_not_change_is_the_answer(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:

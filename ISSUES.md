@@ -226,6 +226,12 @@ Rules that keep the file honest:
   have been shown, and by the time we know it should not have been, the person
   has been reading it for up to 58 s. Nothing in a stream says in advance
   whether it will end in a tool call.
+- **Also seen:** 2026-09-03, thread `d88734a2`, run `af276ed7`, after the
+  hold: the bare `todo_write` that followed the steering deleted the held
+  draft through the adapter's no-text path (fixed the same day), and the
+  model, told its answer was kept and to add nothing, wrote it again anyway
+  (162 tokens). The vanish is fixed; the second generation needs a decision
+  on the plan seam's objection.
 - **Also seen:** 2026-09-03, thread `052869f2`, run `f41278c9`, the other
   way in: the answer (166 tokens) was refused as an ending by the plan seam
   because "verify" was still in progress, withdrawn from the chat, the model

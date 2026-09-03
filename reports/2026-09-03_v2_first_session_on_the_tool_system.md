@@ -209,6 +209,29 @@ backstop the human rejected; the lever left is 4.7.
 Also seen again: `index.html` rewritten with the same content right after the
 plan update, the third turn in a row.
 
+## The turn after that: the hold was defeated, and the model ignored "nothing"
+
+Thread `d88734a2`, run `af276ed7`, the same shape: `turn_steered step=8
+source=todo`, then `todo_write`, then the answer again — 162 output tokens,
+word for word. Two findings.
+
+The held draft was deleted anyway. The bare `todo_write` completion that
+followed the steering went through the adapter's "no spoken text" path, which
+discards the preview; the hold did not survive it. Fixed: a held draft is not
+that completion's preview and waits for the answer that ends the turn.
+`tests/test_telegram_adapter.py`.
+
+The model did not answer with nothing. Told "your answer above is kept … if
+nothing is new, answer with nothing", it ticked the item and wrote the answer
+again. With the hold fixed the person sees one bubble edited into the same
+words, so the vanish is gone; the second generation is not. In every live
+turn the plan seam has objected — four now — its objection produced a
+bookkeeping tick and a duplicate answer, and never more work. Whether the
+seam should keep objecting is the human's decision; the option is to set its
+limit to zero and let an open plan item end the turn, which is what the
+person's own eyes already accept.
+
 ## Next gate
 
-The person's own turn in Telegram on this code.
+The person's own turn in Telegram on this code, and a decision on the plan
+seam's objection.
