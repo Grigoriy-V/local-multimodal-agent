@@ -171,10 +171,18 @@ stub count and cached tokens, every step. A `compactions` row in the store
 when a fold happens: thread, covered-through, summary length, the trigger.
 That row is what 4.6b reads; without it there is nothing to recover from.
 
-**The person's context size.** A user-state value read by `Agent.budget`,
-set from Telegram, shown as a trade in the engine's real numbers: "small keeps
-about 4 turns verbatim and costs less per message". Not a setting file, not a
-deploy. Belongs here because before the engine the number changed nothing.
+**The person's context size, and two commands** (asked for on 2026-09-03).
+`/context` answers without the model: the last request by layer — core and
+schemas, instructions, summary, facts, history, the current turn — how much
+of it came from the cache, and the chosen size against the ceiling. It is
+the `context_prepared` event shown to a person. `/compact` forces a fold
+now, one summarizer call, and answers with what was folded into how many
+words; it wakes the model, which by a direct command is fine.
+`/context small|normal|large` sets the size: a user-state value read by
+`Agent.budget`, shown as a trade in the engine's real numbers ("small keeps
+about 4 turns verbatim and costs less per message"). Not a setting file,
+not a deploy. Belongs here because before the engine the number changed
+nothing.
 
 ## 5. Schema 3, once
 
@@ -223,7 +231,7 @@ Not defects, but things the step should settle rather than inherit.
    against test 8.
 4. Structured summary instruction; `compactions` record; schema 3 migration
    prepared and run on the local profile. **Gate:** the Neon migration.
-5. `/context` in Telegram, budget from user state.
+5. `/context` and `/compact` in Telegram, budget from user state.
 6. Live: a long conversation that folds, and a turn that stubs, both read back
    through `tools/show_run.py`.
 
