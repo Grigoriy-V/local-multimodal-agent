@@ -51,6 +51,28 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0018 — an existing folder is replaced without a word
+
+- **Status:** open
+- **Seen:** 2026-09-03, deployed, three turns in a row asking for "Task Board
+  test 5" in the folder `Task Board test 5` (runs `f41278c9`, `af276ed7`,
+  `752486c1`)
+- **Costs:** the folder already held the previous attempt. The assistant
+  wrote over all three files, read `overwrote Task Board test 5/index.html`
+  four times per turn in its own tool results, and answered "Приложение
+  готово" as if the place had been empty. The person is told nothing about
+  what was there, what was kept or what was replaced. Work of theirs in a
+  folder of the same name would go the same way.
+- **Reproduce:** ask for an app in a folder that already has one.
+- **Cause:** unknown. `list_files` was available and never called; the
+  result word "overwrote" was read and ignored. The brief says workspace
+  writes are autonomous and says nothing about what to do when the place is
+  taken.
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0004; roadmap 4.7 is where the wording "if the place
+  already holds files, say so and decide — keep, replace or a new name —
+  never replace silently" would be accepted
+
 ### ISS-0017 — the screenshot the person receives is of the page without its CDN styles
 
 - **Status:** fixed in the tree, 2026-09-03 — the human allowed the local artifact the public internet under the renderer's policy; not yet deployed

@@ -253,6 +253,14 @@ a tool result names the action its output enables. The human's condition for
 the adapter fallback, if this does not hold: one delivery path never blocks
 another.
 
+## The "needless rewrite" was a silent replacement
+
+The three turns asking for "Task Board test 5" all named the same folder,
+which held the previous attempt each time. The tool results said `overwrote`
+four times per turn; the answer said "готово" and nothing about what had
+been there. Recorded as ISS-0018. The person's expectation: notice the place
+is taken, say so, and decide or ask — never replace in silence.
+
 ## Next gate
 
 The person's own turn in Telegram on this code.
