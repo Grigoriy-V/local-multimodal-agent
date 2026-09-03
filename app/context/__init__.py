@@ -1,6 +1,8 @@
 from app.context.persistence import load_turn_context
 from app.context.summary import fold_older_messages, summarize
 from app.context.window import (
+    Surface,
+    facts_layer,
     DEFAULT_SYSTEM_PROMPT,
     Context,
     ContextPolicy,

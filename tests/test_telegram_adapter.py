@@ -1004,6 +1004,66 @@ async def test_several_sent_files_arrive_as_one_album(
     assert telegram.calls.count(("sendDocument", {})) == 0
 
 
+async def test_context_reports_from_the_store_without_the_model(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Asked for on 2026-09-03: `/context` says what the next request is made of."""
+
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend(says("ok")))
+    await adapter.handle_update(text_update("hello there"))
+
+    await adapter.handle_update(text_update("/context", update_id=2))
+
+    report = telegram.sent[-1]
+    assert report.startswith("What my next request in this chat is made of")
+    assert "2 messages verbatim" in report
+    assert "tool schemas" in report
+    assert "read when it next answers" in report, "no ceiling was ever read here"
+    assert needs_model(Incoming(CHAT, ALLOWED, "/context")) is False
+    assert needs_model(Incoming(CHAT, ALLOWED, "/context small")) is False
+    assert needs_model(Incoming(CHAT, ALLOWED, "/compact")) is True
+
+
+async def test_context_size_is_a_marker_read_by_the_budget(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    backend = ScriptedBackend(says("ok"), limit=40_000)
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("/context small"))
+    await adapter.handle_update(text_update("hello", update_id=2))
+    await adapter.handle_update(text_update("/context", update_id=3))
+
+    assert "Context size is small" in telegram.sent[0]
+    assert (tmp_path / "workspace" / ".agent" / "context").read_text(encoding="utf-8").strip() == "small"
+    assert "Size small: up to 10,000 tokens of the model's 40,000" in telegram.sent[-1]
+
+    await adapter.handle_update(text_update("/context normal", update_id=4))
+
+    assert not (tmp_path / "workspace" / ".agent" / "context").exists()
+
+
+async def test_compact_folds_the_older_part_now(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    backend = ScriptedBackend(default=says("a summary of what was said"))
+    adapter = build(telegram, settings, tmp_path, backend)
+    for index in range(6):
+        await adapter.handle_update(text_update(f"message {index}", update_id=index + 1))
+
+    await adapter.handle_update(text_update("/compact", update_id=20))
+
+    assert telegram.sent[-1].startswith("Folded 4 older messages")
+    store = SqliteStore(str(tmp_path / "memory.sqlite3"))
+    summary, through = store.summary(current_thread(store, canonical_user_id(ALLOWED)))
+    assert summary == "a summary of what was said"
+    assert through == 4
+
+    await adapter.handle_update(text_update("/compact", update_id=21))
+
+    assert telegram.sent[-1].startswith("Nothing to fold")
+
+
 async def test_plan_alone_says_which_way_it_is(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
@@ -1267,7 +1327,7 @@ def test_the_native_menu_is_the_product_and_not_the_diagnostics() -> None:
 
     offered = [entry.command for entry in PRODUCT_COMMANDS]
 
-    assert offered == ["new", "chats", "can", "agents", "plan", "stop", "help"]
+    assert offered == ["new", "chats", "can", "agents", "plan", "context", "compact", "stop", "help"]
     assert "check" not in offered
     assert all(entry.description and entry.description[0].isupper() for entry in PRODUCT_COMMANDS)
     assert len(BOT_DESCRIPTION) <= 512
@@ -1310,6 +1370,8 @@ async def test_publishing_the_profile_sends_exactly_the_product_menu(
         "can",
         "agents",
         "plan",
+        "context",
+        "compact",
         "stop",
         "help",
     ]

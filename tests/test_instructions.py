@@ -117,7 +117,6 @@ def test_the_overlay_sits_between_the_system_message_and_the_volatile_layers() -
 
     prelude = build_prelude(
         "earlier they discussed cats",
-        ["The human has two cats"],
         instructions="Отвечай по-русски.",
     )
 
@@ -125,14 +124,13 @@ def test_the_overlay_sits_between_the_system_message_and_the_volatile_layers() -
     assert bodies[0] == DEFAULT_SYSTEM_PROMPT
     assert "Отвечай по-русски." in bodies[1]
     assert "earlier they discussed cats" in bodies[2]
-    assert "- The human has two cats" in bodies[3]
 
 
 def test_a_prelude_without_instructions_is_unchanged() -> None:
     """Wiring the overlay costs nothing to a person who never wrote one."""
 
-    assert len(build_prelude(None, [])) == 1
-    assert len(build_prelude(None, [], instructions="   ")) == 1
+    assert len(build_prelude(None)) == 1
+    assert len(build_prelude(None, instructions="   ")) == 1
 
 
 # --- and it reaches the model, without a restart ------------------------------

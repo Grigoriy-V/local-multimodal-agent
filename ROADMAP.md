@@ -4,9 +4,11 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. 4.5 and 4.5.5 closed 2026-09-03, accepted
-offline, live and, after the deploy the same day, by `/check` 9/9 in the
-deployed profile. 4.6a is next and is not approved.
+**Current approved step:** 4.6a, the context engine, approved 2026-09-03 on
+the review `reports/2026-09-03_v2_context_engine_review.md` and built in its
+order: measure, facts last, stub old tool results, the person's own size and
+`/context` and `/compact`, then the structured summary and the schema-3
+migration. The Neon migration is a separate human gate.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section

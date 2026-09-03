@@ -170,6 +170,10 @@ class AgentSettings(BaseSettings):
     keep_recent: int = 8
     summarize_after: int = 16
     retrieved_facts: int = 5
+    # How many of the newest tool results a request carries in full; older
+    # ones are stubs on the surface and whole in history. Two is the result the
+    # model is reading and the one before it.
+    keep_results: int = 2
     # What one turn may spend before it has to stop and say so. These are the
     # only ceiling on an autonomous turn: the loop ends when the model stops
     # asking for tools, and nothing else limits how long it may keep asking.

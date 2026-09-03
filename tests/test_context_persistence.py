@@ -36,7 +36,8 @@ def test_full_turn_read_assembles_summary_history_and_retrieved_facts() -> None:
 
     assert [item.content[0].text for item in context.history] == ["old", "answer"]
     assert "earlier summary" in (context.prelude[1].content[0].text or "")
-    assert "latency target" in (context.prelude[2].content[0].text or "")
+    assert len(context.prelude) == 2, "facts are not in the prelude"
+    assert "latency target" in (context.facts[0].content[0].text or "")
 
 
 def test_full_turn_read_uses_the_store_s_single_context_boundary() -> None:

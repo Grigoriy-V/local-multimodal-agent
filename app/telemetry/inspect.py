@@ -80,6 +80,7 @@ def model_calls(events: Sequence[TraceEvent]) -> list[dict[str, object]]:
                 "ttft_ms": None,
                 "duration_ms": None,
                 "input": None,
+                "cached": None,
                 "output": None,
                 "finish": None,
                 "error": None,
@@ -90,6 +91,7 @@ def model_calls(events: Sequence[TraceEvent]) -> list[dict[str, object]]:
         elif event.type == "model_finished":
             call["duration_ms"] = event.duration_ms
             call["input"] = event.data.get("input_tokens")
+            call["cached"] = event.data.get("cached_tokens")
             call["output"] = event.data.get("output_tokens")
             call["finish"] = event.data.get("finish_reason")
         elif event.type == "model_failed":
@@ -223,6 +225,8 @@ def model_section(events: Sequence[TraceEvent]) -> list[str]:
     lines = ["", "Model calls"]
     for call in calls:
         tokens = f"{call['input'] or 0:>6} -> {call['output'] or 0:<5}"
+        if call["cached"] is not None:
+            tokens += f" cached {call['cached']:>5}"
         ttft = (
             f" first token {seconds(call['ttft_ms'])}"
             if call["ttft_ms"] is not None

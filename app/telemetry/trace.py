@@ -250,6 +250,7 @@ class TurnTrace:
             call_index=call.index,
             input_tokens=call.input_tokens,
             output_tokens=call.output_tokens,
+            cached_tokens=call.cached_tokens,
             finish_reason=call.finish_reason,
         )
 
@@ -301,6 +302,7 @@ class ModelCall:
         self.index = index
         self.input_tokens: int | None = None
         self.output_tokens: int | None = None
+        self.cached_tokens: int | None = None
         self.finish_reason: str | None = None
         self._started = time.monotonic()
 
@@ -330,6 +332,7 @@ class ModelCall:
         usage = completion.usage
         self.input_tokens = usage.input_tokens
         self.output_tokens = usage.output_tokens
+        self.cached_tokens = usage.cached_tokens
         self.finish_reason = completion.finish_reason
         self.trace.run.input_tokens += usage.input_tokens or 0
         self.trace.run.output_tokens += usage.output_tokens or 0

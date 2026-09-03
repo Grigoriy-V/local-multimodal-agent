@@ -31,6 +31,7 @@ from typing import Any
 
 from app.agent.runtime import Agent, AnswerWithdrawn, AssistantDelta, create_agent
 from app.agent.todo import PLAN_SWITCH, planning_enabled, set_planning
+from app.context.choice import CONTEXT_CHOICE, SIZES, set_context_choice
 from app.agent.stop import MemoryStopRequests, PostgresStopRequests, StopRequests
 from app.attachments import AttachmentBytes, AttachmentError, admit_uploads
 from app.instructions import (
@@ -59,6 +60,7 @@ from ui.telegram.api import (
 from ui.telegram.wire import (
     CHATS_CALLBACK_PREFIX,
     CHATS_CLOSE,
+    CONTEXT_COMMANDS,
     INSTRUCTION_COMMANDS,
     PLAN_COMMANDS,
     SETTLED_CALLBACK_PREFIX,
@@ -733,6 +735,14 @@ class TelegramAdapter:
         if head.lower() in PLAN_COMMANDS:
             await self._on_plan(agent, incoming.chat_id, argument.strip().lower())
             return
+        if head.lower() in CONTEXT_COMMANDS:
+            await self._on_context(
+                agent, current_thread(store, user_id), incoming.chat_id, argument.strip().lower()
+            )
+            return
+        if command == "/compact":
+            await self._on_compact(agent, current_thread(store, user_id), incoming.chat_id)
+            return
         if command == "/can":
             # Answered from the wiring, not by the model. When the assistant
             # claims it cannot send a picture, this is what that is checked
@@ -879,6 +889,81 @@ class TelegramAdapter:
             chat_id,
             f"Planning is {state}. /plan on gives me a task list and the planning "
             "tool from the next message on; /plan off takes them away.",
+        )
+
+    async def _on_context(
+        self, agent: Agent, thread_id: str, chat_id: int, argument: str
+    ) -> None:
+        """Say what the next request is made of, or set how large it may be.
+
+        Read from the store and estimated, never sent: the one number this
+        cannot always give is the model's ceiling, which is read when the model
+        next answers rather than by waking it for a report.
+        """
+
+        if argument in SIZES:
+            set_context_choice(agent.workspace, argument)
+            agent.rewire()
+            await self.client.send_message(
+                chat_id,
+                f"Context size is {argument} from your next message"
+                + (
+                    f", kept as {CONTEXT_CHOICE.as_posix()} in your workspace."
+                    if argument != "normal"
+                    else " (the default)."
+                ),
+            )
+            return
+        if argument:
+            await self.client.send_message(
+                chat_id, "Sizes are small, normal and large: /context small."
+            )
+            return
+        report = agent.context_report(thread_id)
+        layers = report.layers
+        lines = [
+            "What my next request in this chat is made of, estimated:",
+            f"  core and capabilities  ~{layers['prelude']:,}",
+            f"  tool schemas           ~{layers['schemas']:,}",
+            f"  conversation           ~{layers['history']:,} "
+            f"({report.messages} messages verbatim"
+            + (f", {report.stubbed} older tool results shortened" if report.stubbed else "")
+            + (f", {report.placeholders} pictures as placeholders" if report.placeholders else "")
+            + ")",
+        ]
+        if report.summarized_through:
+            lines.append(f"  summary covers the {report.summarized_through} messages before that")
+        if layers["facts"]:
+            lines.append(f"  facts for this turn    ~{layers['facts']:,}")
+        if report.last_used is not None:
+            cached = (
+                f", {report.last_cached:,} of them from the cache"
+                if report.last_cached is not None
+                else ""
+            )
+            lines.append(f"Last request: {report.last_used:,} tokens{cached}.")
+        if report.budget:
+            lines.append(
+                f"Size {report.size}: up to {report.budget:,} tokens of the model's "
+                f"{report.ceiling:,}; older conversation folds into the summary past that."
+            )
+        else:
+            lines.append(
+                f"Size {report.size}: {int(report.fraction * 100)}% of the model's window, "
+                "read when it next answers."
+            )
+        lines.append("/context small|normal|large sets the size; /compact folds the older part now.")
+        await self.client.send_message(chat_id, "\n".join(lines))
+
+    async def _on_compact(self, agent: Agent, thread_id: str, chat_id: int) -> None:
+        """Fold the older part of this conversation now. One summarizer call."""
+
+        folded = await agent.compact(thread_id)
+        await self.client.send_message(
+            chat_id,
+            f"Folded {folded} older messages into the summary; the newest stay verbatim."
+            if folded
+            else "Nothing to fold: this conversation is short enough to carry whole.",
         )
 
     async def _show_conversations(

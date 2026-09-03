@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.context.window import Context, build_prelude
+from app.context.window import Context, build_prelude, facts_layer
 from app.memory import ConversationStore
 
 
@@ -14,6 +14,7 @@ def load_turn_context(
     retrieved_facts: int,
     system_prompt: str,
     instructions: str = "",
+    keep_results: int = 2,
 ) -> Context:
     """Perform the complete durable read needed to prepare one model turn.
 
@@ -24,8 +25,8 @@ def load_turn_context(
 
     records = store.turn_context(thread_id, user_id, query, retrieved_facts)
     return Context(
-        prelude=build_prelude(
-            records.summary, records.facts, system_prompt, instructions
-        ),
+        prelude=build_prelude(records.summary, system_prompt, instructions),
         history=records.messages,
+        facts=facts_layer(records.facts),
+        keep_results=keep_results,
     )

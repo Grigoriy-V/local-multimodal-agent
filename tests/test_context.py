@@ -8,7 +8,13 @@ from typing import Any
 import pytest
 
 from app.context import Context, ContextPolicy, build_prelude, fold_older_messages, transcript
-from app.context.window import DEFAULT_SYSTEM_PROMPT, first_user_turn, system
+from app.context.window import (
+    DEFAULT_SYSTEM_PROMPT,
+    facts_layer,
+    first_user_turn,
+    shortened,
+    system,
+)
 from app.memory import LOCAL_USER_ID, SqliteStore
 from app.models import (
     Completion,
@@ -74,7 +80,7 @@ def store() -> SqliteStore:
 
 
 def test_a_prelude_without_summary_or_facts_is_just_the_system_prompt() -> None:
-    [message] = build_prelude(None, [])
+    [message] = build_prelude(None)
 
     assert message.role == "system"
     assert message.content[0].text == DEFAULT_SYSTEM_PROMPT
@@ -93,20 +99,133 @@ def test_the_core_prompt_points_at_the_layers_below_it() -> None:
 
 
 def test_the_summary_and_the_facts_become_readable_layers() -> None:
-    prelude = build_prelude("earlier they discussed cats", ["The human has two cats"])
+    prelude = build_prelude("earlier they discussed cats")
+    [facts] = facts_layer(["The human has two cats"])
 
     bodies = [message.content[0].text for message in prelude]
     assert all(message.role == "system" for message in prelude)
     assert "earlier they discussed cats" in bodies[1]
-    assert "- The human has two cats" in bodies[2]
+    assert facts.role == "system"
+    assert "- The human has two cats" in facts.content[0].text
+    assert facts_layer([]) == []
 
 
-def test_the_prompt_is_prelude_then_history_then_the_new_turn() -> None:
-    context = Context(prelude=[system("rules")], history=[user("old"), assistant("older answer")])
+def test_the_prompt_is_prelude_history_facts_then_the_new_turn() -> None:
+    """Facts change every turn, so they go behind everything that does not:
+    a served prefix cache survives up to the first layer that changed."""
+
+    context = Context(
+        prelude=[system("rules")],
+        history=[user("old"), assistant("older answer")],
+        facts=[system("facts")],
+    )
 
     prompt = context.prompt([user("new")])
 
-    assert [m.content[0].text for m in prompt] == ["rules", "old", "older answer", "new"]
+    assert [m.content[0].text for m in prompt] == ["rules", "old", "older answer", "facts", "new"]
+
+
+# --- shortening on the surface ------------------------------------------------
+
+
+def call(identifier: str, name: str = "read_file", **arguments: Any) -> Message:
+    return Message(
+        role="assistant",
+        tool_calls=(ToolCall(id=identifier, name=name, arguments=arguments),),
+    )
+
+
+def result(identifier: str, text: str) -> Message:
+    return Message(
+        role="tool", tool_call_id=identifier, content=[ContentPart(kind="text", text=text)]
+    )
+
+
+def test_old_tool_results_become_stubs_and_the_newest_stay_whole() -> None:
+    """Run `9c42241c`, 2026-09-03: twelve steps, every earlier result and
+    every earlier file argument re-sent each time."""
+
+    messages = [
+        user("build it"),
+        call("c1", "write_file", path="a.html", content="x" * 1000),
+        result("c1", "created a.html (1000 characters); " + "y" * 300),
+        call("c2", path="b.html"),
+        result("c2", "z" * 500),
+        call("c3", path="c.html"),
+        result("c3", "w" * 500),
+    ]
+
+    surface, count = shortened(messages, keep=2)
+
+    assert count == 2, "one result and one call's arguments"
+    assert surface[1].tool_calls[0].arguments == {
+        "path": "a.html",
+        "content": "<1000 characters, shortened>",
+    }
+    first = surface[2].content[0].text
+    assert first.startswith("[write_file a.html: 334 characters; shortened")
+    assert "call the tool again" in first
+    assert surface[4].content[0].text == "z" * 500
+    assert surface[6].content[0].text == "w" * 500
+    assert messages[2].content[0].text.endswith("y" * 300), "history itself is untouched"
+
+
+def test_short_results_and_failures_are_never_stubbed() -> None:
+    from app.tools.base import ToolFailure
+
+    messages = [
+        call("c1"),
+        result("c1", "pong"),
+        call("c2"),
+        Message(
+            role="tool",
+            tool_call_id="c2",
+            content=[ContentPart(kind="text", text="e" * 400)],
+            failure=ToolFailure(code="io", message="e" * 400),
+        ),
+        call("c3"),
+        result("c3", "k" * 400),
+    ]
+
+    surface, count = shortened(messages, keep=1)
+
+    assert count == 0
+    assert [m.content[0].text for m in surface if m.role == "tool"] == ["pong", "e" * 400, "k" * 400]
+
+
+def test_an_old_screenshot_in_a_result_becomes_a_placeholder() -> None:
+    shot = Message(
+        role="tool",
+        tool_call_id="c1",
+        content=[
+            ContentPart(kind="text", text="screenshot: a.png"),
+            ContentPart(kind="image", data=b"png", media_type="image/png"),
+        ],
+    )
+    messages = [call("c1", "inspect_page", path="a.html"), shot, call("c2"), result("c2", "fine")]
+
+    surface, count = shortened(messages, keep=1)
+
+    assert count == 1
+    assert [part.kind for part in surface[1].content] == ["text"]
+    assert surface[1].content[0].text.startswith("[inspect_page a.html: 17 characters, image; shortened")
+
+
+def test_the_surface_counts_what_it_did_and_keeps_the_layers_apart() -> None:
+    context = Context(
+        prelude=[system("rules")],
+        history=[user("old"), call("c1"), result("c1", "o" * 300)],
+        facts=[system("facts")],
+        keep_results=1,
+    )
+
+    new = [user("new"), call("c2"), result("c2", "n" * 300)]
+    surface = context.surface(new)
+
+    assert surface.stubbed == 1
+    assert [m for m in surface.history if m.role == "tool"][-1].content[0].text.startswith("[read_file")
+    assert surface.turn[-1].content[0].text == "n" * 300
+    assert surface.messages == context.prompt(new)
 
 
 def voice(data: bytes = b"OggS") -> Message:
@@ -125,6 +244,22 @@ def test_a_second_voice_message_does_not_replay_the_first() -> None:
     assert [part.kind for part in prompt[0].content] == ["text"]
     assert prompt[0].content[0].text == "[audio audio/ogg]"
     assert prompt[1].content[0].data == b"second"
+
+
+def test_the_turn_s_own_pictures_share_the_budget_newest_first() -> None:
+    """Test 8, 2026-09-03: two screenshots of one turn re-sent on every step.
+    The budget is one prompt's, whichever turn a picture arrived in."""
+
+    def picture(tag: bytes) -> Message:
+        return Message(role="user", content=[ContentPart(kind="image", data=tag, media_type="image/png")])
+
+    context = Context(history=[picture(b"h1"), picture(b"h2")])
+
+    prompt = context.prompt([picture(b"t1"), picture(b"t2"), picture(b"t3")])
+
+    kept = [m.content[0].data for m in prompt if m.content[0].kind == "image"]
+    assert kept == [b"h2", b"t1", b"t2", b"t3"]
+    assert prompt[0].content[0].text == "[image image/png]"
 
 
 def test_a_stored_voice_message_is_replayed_when_the_new_turn_is_text() -> None:

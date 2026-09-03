@@ -160,6 +160,10 @@ def measure_request(messages: Sequence[Message]) -> tuple[int, int]:
 class Usage:
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # How many of the input tokens the server served from its prefix cache.
+    # `None` when the server does not say; a server that says is the one
+    # measurement of context assembly that costs nothing.
+    cached_tokens: int | None = None
 
 
 @dataclass(frozen=True)

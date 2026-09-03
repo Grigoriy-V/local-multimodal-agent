@@ -525,6 +525,31 @@ ui/telegram/adapter.py -> /plan dispatch
 app/agent/todo.py      -> PLAN_SWITCH, planning_enabled, set_planning
 ```
 
+### `/context` and `/compact`
+
+`/context` says what the next request in this chat is made of, estimated by
+layer — core and capabilities, tool schemas, the conversation with how many
+tool results are shortened, the summary's reach, the facts — plus the last
+request's own token count and how many of them the server served from its
+prefix cache, and the chosen size against the model's ceiling. Answered
+without the model; the ceiling is reported only when this worker has already
+read it, because asking the server would wake it.
+
+`/context small|normal|large` chooses the size: 25%, the configured fraction
+(`AGENT_CONTEXT_FRACTION`), or 95% of the ceiling. The choice is the marker
+file `.agent/context` in the person's workspace, read by `Agent.budget` when
+the next turn's graph is built; `normal` removes the marker.
+
+`/compact` folds the older part of the conversation into the summary now,
+one summarizer call, and says how many messages it newly covers. It wakes
+the model, so it is not a model-free command.
+
+```text
+ui/telegram/adapter.py -> /context, /compact dispatch
+app/context/choice.py  -> CONTEXT_CHOICE, context_choice, set_context_choice
+app/agent/runtime.py   -> Agent.context_report, Agent.compact, Agent.budget
+```
+
 ### `/agents`
 
 The person's own standing instructions for how the assistant should work. It

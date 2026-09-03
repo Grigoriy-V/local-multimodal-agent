@@ -831,6 +831,56 @@ Supersedes / Superseded by
 Fills the seam left deliberately empty by 2026-08-30, "Whether a turn may end is
 a seam, not a policy". Does not change what that seam does or its default.
 
+## 2026-09-03 — The model-visible surface is shortened by age, and the volatile layer goes last
+
+Decision
+
+Before every model step the request is assembled from canonical history as a
+projection with three rules, and only these. The facts retrieved for the turn
+are sent after history, immediately before the turn, so everything ahead of
+them is stable between turns and a served prefix cache survives it. A tool
+result older than the newest `keep_results` (two) is shown as a stub naming
+the tool, its subject, the size and the way back, and the long arguments of
+the call that produced it are shortened the same way; failures and short
+results stay whole. Pictures share one prompt's media budget whichever turn
+they arrived in, newest kept. History is never rewritten; the summary is the
+only step that spends a model call, and only when the shortened surface is
+still above budget. Every step records what the surface was made of
+(`context_prepared`) and what the server served from its cache
+(`cached_tokens`).
+
+A person chooses the size of their own context — `small`, `normal`, `large`
+as shares of the model's real ceiling — and may fold now with `/compact`.
+Both are per person, kept in their workspace, and neither needs a deploy.
+
+Why
+
+Prefill is dominant and superlinear, and the prefix cache is real: 98% reuse,
+prefill 1,370 ms → 82 ms on a repeated prefix
+(`reports/2026-08-29_v2_gpu_baseline_measured.md`). Within a turn the prefix
+was already stable; between turns the facts changed first and everything
+after them was re-prefilled. A twelve-step turn on 2026-09-03 carried every
+earlier file argument and both screenshots on every step, 3k → 9.4k tokens,
+for results the model had already read and described. The reference
+harnesses all clear old tool results before they summarize and keep the
+full text retrievable; here the full text is history itself, which is why
+there is no spill store. The rule is age and size only, so it can be stated
+in one sentence and measured in one number.
+
+Consequences
+
+`app/context/window.py` owns `Context.surface`, `shortened`, `facts_layer`;
+`app/context/choice.py` the size; `Agent.context_report` and `Agent.compact`
+the commands. The schema-3 migration (`messages.failure`, `compactions`) is
+the one gate of 4.6a and lands after these, so nothing above needs it. 4.6b
+reads the compaction record this leaves. `ROADMAP.md` 4.6a,
+`reports/2026-09-03_v2_context_engine_review.md`.
+
+Supersedes / Superseded by
+
+Builds on 2026-08-30 "Stored history is canonical; what the model sees is a
+projection" and "The engine's context ceiling is set once". None superseded.
+
 ## 2026-09-03 — The plan is off unless the person turns it on
 
 Decision

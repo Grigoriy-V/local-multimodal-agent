@@ -1,13 +1,20 @@
-"""What the model is actually sent, assembled from four layers.
+"""What the model is actually sent: the surface of a canonical history.
 
-1. Recent conversation messages, verbatim.
-2. A rolling summary of everything older.
-3. Long-term facts from SQLite.
-4. Retrieval: only the facts that match the current turn.
+Layers, in the order sent and by how rarely each one changes:
 
-Layers 2, 3 and 4 arrive as system messages the model can read. Nothing is
-dropped without being summarized first — a message leaves the verbatim window
-only once the summary covers it, which is why this module never truncates.
+1. The core prompt and the capability brief, stable per grant.
+2. The person's standing instructions, changed when they decide to.
+3. A rolling summary of everything folded, changed at every fold.
+4. Stored history, verbatim except where this module shortens it.
+5. The facts retrieved for this turn, changed every turn — last among the
+   stable layers so a served prefix cache survives everything above them.
+6. The current turn.
+
+Everything here is a projection (`DECISIONS.md` 2026-08-30): the store keeps
+the whole conversation and nothing in this module writes back to it. A
+message leaves the verbatim window only once the summary covers it, and a
+tool result older than the newest few is shown as a stub that says how to
+get the full text again — shortened on the surface, whole in history.
 """
 
 from __future__ import annotations
@@ -57,26 +64,72 @@ class ContextPolicy:
     keep_recent: int = 8
     summarize_after: int = 16
     retrieved_facts: int = 5
+    # How many of the newest tool results a request carries verbatim. Older
+    # ones are shown as stubs; the model has already said what it made of
+    # them, and can call the tool again.
+    keep_results: int = 2
     max_input_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class Surface:
+    """One request as the model will see it, by layer, with what was done to it.
+
+    The layers are kept apart so a trace can say how large each one is and a
+    person can be shown the same numbers. `messages` is what is sent.
+    """
+
+    prelude: list[Message]
+    history: list[Message]
+    facts: list[Message]
+    turn: list[Message]
+    stubbed: int = 0
+    placeholders: int = 0
+
+    @property
+    def messages(self) -> list[Message]:
+        return [*self.prelude, *self.history, *self.facts, *self.turn]
 
 
 @dataclass(frozen=True)
 class Context:
     """One turn's assembled context, kept apart from the turn itself.
 
-    `prelude` is synthetic and must never be written back to the store;
-    `history` is already stored. Only the new messages of the turn are new.
+    `prelude` and `facts` are synthetic and must never be written back to the
+    store; `history` is already stored. Only the new messages of the turn are
+    new. `facts` sit behind history rather than in the prelude because they
+    change every turn and everything sent after them is re-prefilled.
     """
 
     prelude: list[Message] = field(default_factory=list)
     history: list[Message] = field(default_factory=list)
+    facts: list[Message] = field(default_factory=list)
+    keep_results: int = 2
+
+    def surface(self, new: Sequence[Message]) -> Surface:
+        """The request, shortened on the surface only.
+
+        History and the turn are shortened together, newest first: the media
+        budget is one prompt's, whichever turn a picture arrived in, and the
+        tool results kept verbatim are the newest ones wherever they are. The
+        person's own words are never touched.
+        """
+
+        combined = [*self.history, *new]
+        combined, stubbed = shortened(combined, self.keep_results)
+        combined, placeholders = within_media_budget(combined, dict(MEDIA_BUDGET))
+        split = len(self.history)
+        return Surface(
+            prelude=list(self.prelude),
+            history=combined[:split],
+            facts=list(self.facts),
+            turn=combined[split:],
+            stubbed=stubbed,
+            placeholders=placeholders,
+        )
 
     def prompt(self, new: Sequence[Message]) -> list[Message]:
-        # The new turn is never trimmed: it is what the person just asked. What
-        # it spends of the budget is what history may no longer replay.
-        used = count_media(new)
-        budget = {kind: limit - used.get(kind, 0) for kind, limit in MEDIA_BUDGET.items()}
-        return [*self.prelude, *within_media_budget(self.history, budget), *new]
+        return self.surface(new).messages
 
 
 def system(text: str) -> Message:
@@ -98,9 +151,84 @@ def count_media(messages: Sequence[Message]) -> dict[str, int]:
     return counts
 
 
+# A tool result shorter than this is left alone wherever it is: the stub
+# would not be much shorter, and a one-line result is usually the point.
+STUB_MIN_CHARS = 200
+
+
+def shortened(messages: Sequence[Message], keep: int) -> tuple[list[Message], int]:
+    """Tool results older than the newest `keep` become stubs; so do the long
+    arguments of the calls that produced them.
+
+    A stub names the tool, what it was asked about, the size of what it said
+    and the way back — the call can be made again, and history still holds
+    the whole result. Failures are kept: they are short, and they are why the
+    model did what it did next. The count is what a trace reports.
+    """
+
+    results = [index for index, message in enumerate(messages) if message.role == "tool"]
+    old = set(results[: max(0, len(results) - keep)])
+    if not old:
+        return list(messages), 0
+    calls = {
+        call.id: call
+        for message in messages
+        for call in message.tool_calls
+    }
+    old_calls = {messages[index].tool_call_id for index in old}
+    out: list[Message] = []
+    count = 0
+    for index, message in enumerate(messages):
+        if index in old and message.failure is None:
+            text = "".join(part.text or "" for part in message.content if part.kind == "text")
+            media = [part for part in message.content if part.kind != "text"]
+            if len(text) > STUB_MIN_CHARS or media:
+                call = calls.get(message.tool_call_id or "")
+                out.append(replace(message, content=[ContentPart(kind="text", text=stub(call, text, media))]))
+                count += 1
+                continue
+        if message.tool_calls and any(call.id in old_calls for call in message.tool_calls):
+            trimmed = tuple(
+                replace(call, arguments=shortened_arguments(call.arguments))
+                if call.id in old_calls
+                else call
+                for call in message.tool_calls
+            )
+            if trimmed != message.tool_calls:
+                count += 1
+            out.append(replace(message, tool_calls=trimmed))
+            continue
+        out.append(message)
+    return out, count
+
+
+def stub(call, text: str, media: Sequence[ContentPart]) -> str:
+    what = call.name if call is not None else "tool"
+    about = ""
+    if call is not None:
+        for value in call.arguments.values():
+            if isinstance(value, str) and value and len(value) <= 80:
+                about = f" {value}"
+                break
+    size = f"{len(text)} characters" if text else ""
+    if media:
+        kinds = ", ".join(f"{part.kind}" for part in media)
+        size = f"{size}, {kinds}" if size else kinds
+    return f"[{what}{about}: {size}; shortened, call the tool again for the full result]"
+
+
+def shortened_arguments(arguments: dict) -> dict:
+    return {
+        name: f"<{len(value)} characters, shortened>"
+        if isinstance(value, str) and len(value) > STUB_MIN_CHARS
+        else value
+        for name, value in arguments.items()
+    }
+
+
 def within_media_budget(
     history: Sequence[Message], budget: dict[str, int]
-) -> list[Message]:
+) -> tuple[list[Message], int]:
     """Replay recent media, but only as much of it as one prompt may carry.
 
     A server caps how many items of each kind a single prompt may contain, and
@@ -115,6 +243,7 @@ def within_media_budget(
 
     kept: list[Message] = []
     remaining = dict(budget)
+    placeholders = 0
     for message in reversed(history):
         if all(part.kind == "text" for part in message.content):
             kept.append(message)
@@ -130,9 +259,10 @@ def within_media_budget(
                 content.append(part)
             else:
                 content.append(ContentPart(kind="text", text=describe(part)))
+                placeholders += 1
         kept.append(replace(message, content=content))
     kept.reverse()
-    return kept
+    return kept, placeholders
 
 
 def transcript(messages: Sequence[Message]) -> str:
@@ -169,17 +299,17 @@ def first_user_turn(messages: Sequence[Message], start: int) -> int:
 
 def build_prelude(
     summary: str | None,
-    facts: Sequence[str],
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     instructions: str = "",
 ) -> list[Message]:
-    """The synthetic layers, ordered by how rarely each one changes.
+    """The stable synthetic layers, ordered by how rarely each one changes.
 
     The system message is the same for weeks, a person's standing instructions
     change when they decide to, the summary changes when a conversation is
-    folded and the retrieved facts change every single turn. Ordering them that
-    way is what lets a served prefix cache survive: a layer that changes
-    invalidates everything after it, so the volatile ones go last.
+    folded. A layer that changes invalidates the served prefix cache for
+    everything after it, so the ones that change least go first — and the
+    retrieved facts, which change every turn, are not here at all: see
+    `facts_layer`, sent after history.
     """
 
     prelude = [system(system_prompt)]
@@ -188,7 +318,18 @@ def build_prelude(
         prelude.append(overlay)
     if summary:
         prelude.append(system(f"Summary of the earlier conversation:\n{summary}"))
-    if facts:
-        listed = "\n".join(f"- {fact}" for fact in facts)
-        prelude.append(system(f"Facts you saved in earlier conversations:\n{listed}"))
     return prelude
+
+
+def facts_layer(facts: Sequence[str]) -> list[Message]:
+    """The facts retrieved for this turn, as one system message or none.
+
+    Sent after history and before the turn: they were retrieved for the
+    question that follows, and they are the one layer that changes on every
+    message, so nothing that could be cached is sent behind them.
+    """
+
+    if not facts:
+        return []
+    listed = "\n".join(f"- {fact}" for fact in facts)
+    return [system(f"Facts you saved in earlier conversations:\n{listed}")]

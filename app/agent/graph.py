@@ -11,6 +11,8 @@ conversation is stored; all three are arguments.
 
 from __future__ import annotations
 
+import json
+
 import time
 from dataclasses import dataclass, field, replace
 from collections.abc import Callable, Sequence
@@ -31,7 +33,7 @@ from app.agent.stopping import (
     steering_message,
 )
 from app.context import Context, ContextPolicy, fold_older_messages, load_turn_context
-from app.context.window import DEFAULT_SYSTEM_PROMPT
+from app.context.window import system, DEFAULT_SYSTEM_PROMPT
 from app.memory import ConversationStore
 from app.models import (
     BackendError,
@@ -355,6 +357,14 @@ def build_agent(
     policy = policy or ContextPolicy()
     limits = budget or TurnBudget()
     schemas = toolbox.schemas() or None
+    # The schemas are rendered into the request by the server's chat template
+    # and are part of what it counts; estimated once, since a toolbox does not
+    # change between the steps of a compiled graph.
+    schema_tokens = (
+        backend.estimate_tokens([system(json.dumps(schemas, ensure_ascii=False))])
+        if schemas
+        else 0
+    )
 
     def trace_of(config: RunnableConfig | None) -> TurnTrace:
         """The recorder for the turn this invocation belongs to, if any.
@@ -377,6 +387,7 @@ def build_agent(
             policy.retrieved_facts,
             system_prompt,
             instructions() if instructions is not None else "",
+            policy.keep_results,
         )
 
     def load(state: AgentState) -> dict[str, Context]:
@@ -493,8 +504,20 @@ def build_agent(
 
         turn = carried(state)
         prepared = await fitted(state, turn, trace)
+        surface = prepared.surface(turn)
+        trace.event(
+            "context_prepared",
+            step=state.steps + 1,
+            schemas=schema_tokens if offered else 0,
+            prelude=backend.estimate_tokens(surface.prelude),
+            history=backend.estimate_tokens(surface.history),
+            facts=backend.estimate_tokens(surface.facts),
+            turn=backend.estimate_tokens(surface.turn),
+            stubbed=surface.stubbed,
+            placeholders=surface.placeholders,
+        )
         try:
-            completion = await complete(prepared.prompt(turn), writer, trace, offered)
+            completion = await complete(surface.messages, writer, trace, offered)
         except ContextOverflowError:
             try:
                 folded = await fold_older_messages(
@@ -641,7 +664,7 @@ def build_agent(
 
         if policy.max_input_tokens is None:
             return state.context
-        estimated = backend.estimate_tokens(state.context.prompt(turn))
+        estimated = backend.estimate_tokens(state.context.prompt(turn)) + schema_tokens
         if estimated <= policy.max_input_tokens:
             return state.context
         folded = await fold_older_messages(
@@ -656,7 +679,7 @@ def build_agent(
             "context_folded",
             estimated=estimated,
             budget=policy.max_input_tokens,
-            now=backend.estimate_tokens(context.prompt(turn)),
+            now=backend.estimate_tokens(context.prompt(turn)) + schema_tokens,
         )
         return context
 

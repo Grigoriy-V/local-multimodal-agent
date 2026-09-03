@@ -7,6 +7,8 @@ own and does not know it is talking to a graph.
 
 from __future__ import annotations
 
+import json
+
 import hashlib
 import re
 from collections.abc import AsyncIterator, Sequence
@@ -36,8 +38,9 @@ from app.capabilities import (
 )
 from app.instructions import read_instructions
 from app.config import AgentSettings, ModelSettings
-from app.context import ContextPolicy, load_turn_context
-from app.context.window import DEFAULT_SYSTEM_PROMPT
+from app.context import ContextPolicy, fold_older_messages, load_turn_context
+from app.context.choice import context_choice, share
+from app.context.window import DEFAULT_SYSTEM_PROMPT, system
 from app.memory import LOCAL_USER_ID, ConversationStore, Thread, open_store
 from app.models import ContentPart, Message, ModelBackend, Usage
 from app.telemetry import NO_TRACE, Telemetry, TurnTrace
@@ -114,6 +117,30 @@ class Fill:
     @property
     def fraction(self) -> float | None:
         return self.used / self.budget if self.budget else None
+
+
+@dataclass(frozen=True)
+class ContextReport:
+    """What one conversation's next request would be made of, without sending it.
+
+    Estimates by layer, in the same units the fold decides in; the last
+    request's own count and cache hits when this process made one; and the
+    budget when the ceiling is already known here. Nothing in it wakes the
+    model: the ceiling is read the next time the model answers, not for a
+    report.
+    """
+
+    size: str
+    fraction: float
+    ceiling: int | None
+    budget: int | None
+    messages: int
+    summarized_through: int
+    stubbed: int
+    placeholders: int
+    layers: dict[str, int]
+    last_used: int | None
+    last_cached: int | None
 
 
 class Agent:
@@ -227,7 +254,7 @@ class Agent:
             return None
         if self.context_tokens:
             return min(self.context_tokens, self._limit)
-        return int(self._limit * self.context_fraction)
+        return int(self._limit * share(context_choice(self.workspace), self.context_fraction))
 
     async def fill(self) -> Fill | None:
         """How full the last request was, or `None` before there was one."""
@@ -440,6 +467,67 @@ class Agent:
             if isinstance(event, MessageProduced):
                 yield event.message
 
+    def context_report(self, thread_id: str) -> ContextReport:
+        """The next request of this conversation, by layer, without the model.
+
+        The same assembly a turn uses, on an empty turn, so the numbers are the
+        ones the fold and the trace see. The ceiling is only reported when it
+        is already known in this process; asking the server would wake it.
+        """
+
+        context = load_turn_context(
+            self.store,
+            thread_id,
+            self.user_id,
+            "",
+            self.policy.retrieved_facts,
+            self.system_prompt,
+            self.instructions(),
+            keep_results=self.policy.keep_results,
+        )
+        surface = context.surface([])
+        schemas = self.toolbox(thread_id).schemas()
+        estimate = self.backend.estimate_tokens
+        _, through = self.store.summary(thread_id)
+        size = context_choice(self.workspace)
+        fraction = share(size, self.context_fraction)
+        ceiling = self._limit if self._asked_the_limit else None
+        return ContextReport(
+            size=size,
+            fraction=fraction,
+            ceiling=ceiling,
+            budget=int(ceiling * fraction) if ceiling else None,
+            messages=len(context.history),
+            summarized_through=through,
+            stubbed=surface.stubbed,
+            placeholders=surface.placeholders,
+            layers={
+                "schemas": estimate([system(json.dumps(schemas, ensure_ascii=False))]) if schemas else 0,
+                "prelude": estimate(surface.prelude),
+                "history": estimate(surface.history),
+                "facts": estimate(surface.facts),
+            },
+            last_used=self._usage.input_tokens,
+            last_cached=self._usage.cached_tokens,
+        )
+
+    async def compact(self, thread_id: str) -> int:
+        """Fold the older part of this conversation now. Returns how many
+        messages the summary newly covers; zero when there was nothing to fold.
+
+        One summarizer call, so it wakes the model; a person asked for it.
+        """
+
+        _, before = self.store.summary(thread_id)
+        policy = replace(self.policy, max_input_tokens=await self.budget())
+        folded = await fold_older_messages(
+            self.backend, self.store, thread_id, policy, force=True
+        )
+        if folded is None:
+            return 0
+        _, after = self.store.summary(thread_id)
+        return after - before
+
     def context_prompt(
         self,
         thread_id: str,
@@ -456,6 +544,7 @@ class Agent:
             query,
             self.policy.retrieved_facts,
             system_prompt or self.system_prompt,
+            keep_results=self.policy.keep_results,
         )
         return context.prompt(messages)
 
@@ -576,6 +665,7 @@ def create_agent(
         keep_recent=agent_settings.keep_recent,
         summarize_after=agent_settings.summarize_after,
         retrieved_facts=agent_settings.retrieved_facts,
+        keep_results=agent_settings.keep_results,
     )
     # Each person gets their own root inside the configured workspace. The
     # directory the agent may touch has to exist before it is resolved, or the

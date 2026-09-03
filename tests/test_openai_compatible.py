@@ -356,7 +356,14 @@ def test_streamed_text_assembles_into_the_same_answer() -> None:
             delta({"content": "One"}),
             delta({"content": ", two"}),
             delta({}, finish="stop"),
-            {"choices": [], "usage": {"prompt_tokens": 21, "completion_tokens": 4}},
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 21,
+                    "completion_tokens": 4,
+                    "prompt_tokens_details": {"cached_tokens": 16},
+                },
+            },
         ]
     )
 
@@ -365,6 +372,9 @@ def test_streamed_text_assembles_into_the_same_answer() -> None:
     assert result.finish_reason == "stop"
     assert result.usage.input_tokens == 21
     assert result.usage.output_tokens == 4
+    # What the server served from its prefix cache: the one free measurement
+    # of how well the request was assembled.
+    assert result.usage.cached_tokens == 16
 
 
 def test_a_leaked_end_of_turn_marker_is_not_text() -> None:
