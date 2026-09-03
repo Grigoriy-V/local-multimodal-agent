@@ -53,7 +53,7 @@ Rules that keep the file honest:
 
 ### ISS-0017 — the screenshot the person receives is of the page without its CDN styles
 
-- **Status:** open
+- **Status:** fixed in the tree, 2026-09-03 — the human allowed the local artifact the public internet under the renderer's policy; not yet deployed
 - **Seen:** 2026-09-03, deployed, thread `46c6a9c3`, run `253ede5d`
 - **Costs:** the page loads Tailwind from `https://cdn.tailwindcss.com/`. The
   offline session refuses it, as it should, and says so in the report; the
@@ -210,7 +210,7 @@ Rules that keep the file honest:
 
 ### ISS-0009 — the person reads an answer for a minute and then it is deleted
 
-- **Status:** open
+- **Status:** fixed in the tree, 2026-09-03 — text that comes with a tool call is delivered and kept; a verbatim repeat later in the turn is not sent again; the core prompt tells the model not to write it. Not yet deployed
 - **Seen:** 2026-08-31, live, four turns in a row
 - **Costs:** text appears and grows while the work happens, the person reads
   it, and then it vanishes and a file arrives instead. What is said afterwards

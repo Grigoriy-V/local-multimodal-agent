@@ -38,6 +38,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "trust that list about yourself. After it may come standing instructions from "
     "the person you are talking to, saying how they want you to work; follow them "
     "wherever they do not contradict what is above them. "
+    "Text you write together with a tool call reaches the person at once. After "
+    "the tool's result, add only what is new; if nothing is new, say nothing. "
     "Answer briefly."
 )
 

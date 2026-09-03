@@ -893,6 +893,7 @@ class TelegramAdapter:
     ) -> None:
         activity = ToolActivity(self.client, chat_id)
         preview = AnswerPreview(self.client, chat_id)
+        delivered: set[str] = set()
         try:
             async for event in agent.events(thread_id, message, trace, sequence):
                 if isinstance(event, AssistantDelta):
@@ -908,7 +909,9 @@ class TelegramAdapter:
                     # correction as a narrated tool call, for the same reason.
                     await preview.discard()
                     continue
-                await self._deliver(chat_id, event.message, activity, preview, trace)
+                await self._deliver(
+                    chat_id, event.message, activity, preview, trace, delivered
+                )
         finally:
             # Including when the turn failed: the last thing a person should be
             # left looking at is not "Reading page…" on a turn that stopped, and
@@ -927,6 +930,7 @@ class TelegramAdapter:
         activity: ToolActivity | None = None,
         preview: AnswerPreview | None = None,
         trace: TurnTrace = NO_TRACE,
+        delivered: set[str] | None = None,
     ) -> None:
         body = spoken(produced)
         if produced.role == "tool":
@@ -939,16 +943,16 @@ class TelegramAdapter:
                 await activity.clear()
             await self._send_media(chat_id, produced, outbound_only=True)
             return
-        if produced.tool_calls:
-            # A model may narrate its next action before emitting the tool call.
-            # Deltas arrive before the completion reveals that this was not the
-            # answer, so remove any preview instead of finalizing it as a first
-            # response. The ordinary tool activity is the visible status until
-            # a later model step actually answers.
-            if preview is not None:
-                await preview.discard()
-        elif body:
-            # The status has done its job the moment there is something to read.
+        # The model said this already in this turn — measured live on
+        # 2026-09-03, the whole answer written with a send attached and then
+        # written again after it. The person has it; the second copy is not
+        # sent, and the core prompt asks the model not to write it.
+        repeat = bool(body) and delivered is not None and body in delivered
+        if body and not repeat:
+            # Text is delivered whether or not a tool call rides with it. What
+            # the model writes beside a call is what it is telling the person
+            # while it acts — the same thing every chat interface shows — and
+            # withdrawing it made the model write it all again (ISS-0009).
             if activity is not None:
                 await activity.clear()
             # The canonical answer is the model's ordinary Markdown, which is
@@ -960,8 +964,11 @@ class TelegramAdapter:
             # A short answer arrives whole and never previewed, and it did
             # become visible: `visible` keeps the first of the two.
             trace.visible("final_sent")
+            if delivered is not None:
+                delivered.add(body)
         elif preview is not None:
-            # A completion with no spoken text cannot finalize a text preview.
+            # A completion with no spoken text, or one repeating what was
+            # delivered, cannot finalize a text preview.
             await preview.discard()
         await self._send_media(chat_id, produced)
         if produced.tool_calls:

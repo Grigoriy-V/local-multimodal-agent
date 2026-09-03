@@ -8,8 +8,9 @@ the model to judge.
 The page is driven through `BrowserSession` in `chromium.py`, the one API every
 browser capability uses. What is decided here is what this page is allowed to
 be: a file in the workspace, served to the page at a synthetic origin together
-with its sibling files and nothing else, so it has the storage and the styles
-the person's own browser gives it. Only observation is exposed in this
+with its sibling files, with the public internet reachable under the public
+renderer's policy and nothing private, so it has the storage, the styles and
+the CDN resources the person's own browser gives it. Only observation is exposed in this
 version; the session already carries the actions, and a tool that exposes one
 later changes nothing here.
 """
@@ -42,6 +43,7 @@ from app.tools.chromium import (
 )
 from app.tools.documents import UNSUPPORTED
 from app.tools.filesystem import NOT_A_FILE, NOT_FOUND, TOO_LARGE, resolve_in_root
+from app.web import public_request_policy
 
 MAX_HTML_BYTES = 2 * 1024 * 1024
 
@@ -118,10 +120,11 @@ def page_report(
     return (
         f"title: {title or '(none)'}\n"
         f"browser: {browser}\n"
-        f"network: the workspace's own files are served to the page; nothing else is reachable\n"
+        f"network: the workspace's own files are served to the page; public addresses are "
+        f"reachable under the same policy as view_web_page; private ones are refused\n"
         f"screenshot: {screenshot}\n"
         f"\nconsole errors:\n{errors}\n"
-        f"\nrequests refused (the page asked for these; nothing outside the workspace answers):\n{blocked}\n"
+        f"\nrequests refused (the page asked for these and the policy said no):\n{blocked}\n"
         f"\nstructure{cut}; an interactive element carries a ref:\n{structure or '(empty page)'}\n"
         f"\nvisible text:\n{text or '(none)'}\n"
     )
@@ -164,7 +167,12 @@ async def inspect_local_page(
     target = _local_document(root, path)
     artifact = root / ".agent" / "browser" / f"{target.stem}-{secrets.token_hex(4)}.png"
     try:
-        async with open_browser(browser, offline=True, serve=serve_directory(root)) as session:
+        # The page gets its own files from the workspace and the public
+        # internet under the same rule as `view_web_page` — a CDN stylesheet is
+        # what the person's browser would load too — and nothing private.
+        async with open_browser(
+            browser, offline=True, serve=serve_directory(root), allow=public_request_policy()
+        ) as session:
             await session.open(file=target, root=root)
             report, image = await observe(session, artifact)
     except BrowserError as error:

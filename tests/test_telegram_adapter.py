@@ -1946,36 +1946,47 @@ async def test_a_tool_step_previews_only_the_answer(
     assert texts(telegram, "editMessageText")[-1] == LONG_ANSWER
 
 
-async def test_text_that_ends_in_a_tool_call_is_discarded_before_the_answer(
+async def test_text_that_comes_with_a_tool_call_is_delivered_and_not_repeated(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
-    """Observed live: narrated tool use must not become a first answer."""
+    """Live 2026-09-03: the answer was written with a send attached, withdrawn,
+    and written again after it — paid for twice, watched vanishing once. What
+    the model says beside a call is delivered; a verbatim repeat is not."""
 
-    narrated_call = Completion(
+    answer_with_send = Completion(
+        text=LONG_ANSWER,
+        tool_calls=calls("list_files", path=".").tool_calls,
+        finish_reason="tool_calls",
+    )
+    backend = ScriptedBackend(answer_with_send, says(LONG_ANSWER), default=says("summary"))
+    adapter = build(telegram, settings, tmp_path, backend)
+
+    await adapter.handle_update(text_update("look and then answer"))
+
+    finals = texts(telegram, "editMessageText")
+    assert finals.count(LONG_ANSWER) == 1
+    sent = texts(telegram, "sendMessage")
+    assert LONG_ANSWER not in sent
+    deleted = [p["message_id"] for name, p in telegram.calls if name == "deleteMessage"]
+    assert 101 not in deleted  # the preview became the answer, not a deletion
+
+
+async def test_new_text_after_the_tool_is_delivered_as_its_own_message(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    narrated = Completion(
         text=LONG_ANSWER,
         tool_calls=calls("list_files", path=".").tool_calls,
         finish_reason="tool_calls",
     )
     final = "The actual final answer is complete and long enough to stream once."
-    backend = ScriptedBackend(narrated_call, says(final), default=says("summary"))
+    backend = ScriptedBackend(narrated, says(final), default=says("summary"))
     adapter = build(telegram, settings, tmp_path, backend)
 
     await adapter.handle_update(text_update("look and then answer"))
 
-    deleted = [
-        payload["message_id"]
-        for name, payload in telegram.calls
-        if name == "deleteMessage"
-    ]
-    # 101 is the narrated preview; 102 is the transient tool activity cleared
-    # when the real answer appears. Neither remains as another answer.
-    assert deleted[:2] == [101, 102]
-    assert texts(telegram, "editMessageText")[-1] == final
-    assert [
-        payload["message_id"]
-        for name, payload in telegram.calls
-        if name == "editMessageText"
-    ] == [103]
+    finals = texts(telegram, "editMessageText")
+    assert LONG_ANSWER in finals and final in finals
 
 
 async def test_a_steered_candidate_is_discarded_before_the_real_answer(

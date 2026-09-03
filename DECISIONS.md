@@ -831,6 +831,45 @@ Supersedes / Superseded by
 Fills the seam left deliberately empty by 2026-08-30, "Whether a turn may end is
 a seam, not a policy". Does not change what that seam does or its default.
 
+## 2026-09-03 — What the model says beside a tool call is said once, and a local page may load its CDN
+
+Decision
+
+Text the model writes in the same completion as a tool call is delivered to
+the person as it is written and stays delivered; an interface does not
+withdraw it when the call follows. A later assistant message in the same turn
+that repeats delivered text verbatim is not sent again. The core prompt tells
+the model that such text reaches the person at once and that after the tool's
+result it adds only what is new.
+
+A local artifact inspected by the agent is served to the browser from the
+workspace and may reach public addresses under the same request policy as the
+public renderer; private and link-local addresses are refused, and the refusals
+are reported to the model. This replaces "every network scheme blocked" in the
+decision below.
+
+Why
+
+Measured 2026-09-03: the model wrote the whole answer with a send attached, the
+adapter withdrew it, and the next model call wrote the same 409 characters
+again — 134 output tokens and 3.8 s for text the person had already watched
+vanish (ISS-0009). The 2026-08-30 correction was aimed at a narrated tool call
+becoming a first answer; delivering the text and refusing the repeat keeps
+that outcome without the second generation. Chainlit already delivered it.
+
+On the network: the screenshot the person received was of a page without its
+Tailwind stylesheet, refused by a boundary the person's own browser does not
+have (ISS-0017). The public policy exists for exactly this: what a page may
+reach when its scripts run. The human allowed it in words on 2026-09-03 and
+rejected a mechanical delivery backstop in the adapter the same day.
+
+Consequences
+
+`Delivery.place` and the delivery sentence say where the person is. The
+Telegram adapter keeps the preview as the answer when a call rides with it.
+`open_browser` takes `serve` and `allow` together. `tests/test_telegram_adapter.py`,
+`tests/test_browser_session.py`.
+
 ## 2026-09-03 — A tool result is a typed outcome, and the runtime survives any model
 
 Decision

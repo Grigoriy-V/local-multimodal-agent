@@ -166,8 +166,23 @@ Two things measured here that were only described before:
   The CDN was refused by design; the picture is of the unstyled page; the
   model called it "Tailwind CSS" anyway.
 
+## Both decided and fixed the same day
+
+The human allowed the CDN and called the double generation unacceptable
+(`DECISIONS.md` 2026-09-03, second entry). In the tree and deployed:
+
+- the core prompt says text written beside a tool call reaches the person at
+  once, and that after the tool's result the model adds only what is new;
+- the Telegram adapter keeps the preview as the answer when a call rides
+  with it, as Chainlit already did, and does not send a verbatim repeat later
+  in the same turn;
+- the offline session serves the workspace and lets the page reach public
+  addresses under the `view_web_page` policy; private ones are refused and
+  reported.
+
+The repeat guard on delivery is a display rule, not the fix: the fix is the
+model not writing the text twice, which only a live turn shows.
+
 ## Next gate
 
-None open on the tool system. What the person decides on: whether a local
-artifact may reach a public CDN under the public renderer's policy
-(ISS-0017); when a change to what the model says goes through 4.7.
+The person's own turn in Telegram on this code.

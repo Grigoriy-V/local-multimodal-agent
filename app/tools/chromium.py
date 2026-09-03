@@ -171,7 +171,7 @@ class CdpSession:
                     },
                 )
                 return
-        elif await self._allow(url):
+        if self._allow is not None and await self._allow(url):
             await self._notify("Fetch.continueRequest", {"requestId": identifier})
             return
         self.refused.append(url)
@@ -866,24 +866,24 @@ async def open_browser(
 ) -> AsyncIterator[BrowserSession]:
     """A `BrowserSession` on a fresh private browser, closed on the way out.
 
-    `offline` blocks every network scheme before anything is opened, so a local
-    document cannot fetch, redirect or embed its way anywhere; with `serve`, an
-    offline session answers requests under `ARTIFACT_ORIGIN` from a directory
-    and fails everything else, which is still nothing leaving. `allow` is the
-    other boundary: a policy asked about every request. A session must have one
-    of the two; a browser with no rule is not something any capability here
-    wants.
+    `offline` confines navigation to documents, `about:` and the artifact
+    origin; without `serve` or `allow` it also blocks every network scheme, so
+    a document cannot fetch, redirect or embed its way anywhere. `serve`
+    answers requests under `ARTIFACT_ORIGIN` from a directory. `allow` is the
+    request policy asked about everything not served; a session with neither
+    fails every other request. A session must be offline or have a policy; a
+    browser with no rule is not something any capability here wants.
     """
 
-    if offline == (allow is not None):
-        raise ValueError("a session is either offline or has a request policy, never both or neither")
+    if not offline and allow is None:
+        raise ValueError("a session that navigates anywhere needs a request policy")
     if serve is not None and not offline:
         raise ValueError("a served directory belongs to an offline session")
     try:
         async with open_page(
             browser, allow=allow, serve=serve, max_message_bytes=max_message_bytes
         ) as (cdp, name):
-            if offline and serve is None:
+            if offline and serve is None and allow is None:
                 await cdp.call(
                     "Network.setBlockedURLs",
                     {"urls": ["http://*", "https://*", "file://*", "ftp://*", "ws://*", "wss://*"]},

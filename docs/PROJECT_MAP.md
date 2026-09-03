@@ -341,17 +341,19 @@ This distinction applies to document previews and web screenshots as well as ord
 `select`. A snapshot is the page as a bounded outline in which every
 interactive element carries a `ref`; actions take refs, never selectors, and
 a ref from an older snapshot is refused as `browser.stale_ref`. The trust
-boundary is a property of the session: `open_browser(offline=True)` blocks
-every network scheme and, with `serve=serve_directory(root)`, answers
-requests for the root's own files and no other; `open_browser(allow=policy)`
-is asked about every request the page makes. A session has exactly one of
+boundary is a property of the session: `open_browser(offline=True)` confines
+navigation to the document; `serve=serve_directory(root)` answers requests
+for the root's own files; `allow=policy` is asked about every other request,
+and without it every other request fails. A session has exactly one of
 the two.
 
 `app/tools/browser.py` exposes observation only. `inspect_page` opens a
 local HTML artifact in an offline session that serves the workspace's own
-files at `http://artifact.local/` and answers nothing else, so the page has an
-origin, storage and its sibling files; it returns the structure with refs, the
-visible text, console errors, the requests that were refused and a screenshot.
+files at `http://artifact.local/`, lets the page reach public addresses under
+the same policy as `view_web_page` and refuses private ones, so the page has
+an origin, storage, its sibling files and its CDN resources; it returns the
+structure with refs, the visible text, console errors, the requests that were
+refused and a screenshot.
 No click, type or navigate tool exists in this version. `render_locally` in
 `app/web.py` drives the same session with the public request policy.
 

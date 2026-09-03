@@ -119,10 +119,10 @@ async def test_a_session_has_exactly_one_boundary() -> None:
         return True
 
     with pytest.raises(ValueError):
-        async with open_browser(offline=True, allow=anything):
+        async with open_browser():
             pass
     with pytest.raises(ValueError):
-        async with open_browser():
+        async with open_browser(serve=serve_directory(Path(".")), allow=anything):
             pass
 
 
@@ -152,6 +152,29 @@ async def test_a_served_file_is_fulfilled_and_anything_else_fails(tmp_path: Path
     sent = [(m["method"], m["params"].get("requestId")) for m in socket.sent if m["method"].startswith("Fetch.")]
     assert sent == [("Fetch.fulfillRequest", "1"), ("Fetch.failRequest", "2")]
     assert session.refused == ["https://example.com/x"]
+
+
+async def test_with_a_policy_a_public_request_leaves_and_a_private_one_does_not(tmp_path: Path) -> None:
+    """The human allowed it 2026-09-03: a local page may load its CDN styles."""
+
+    (tmp_path / "a.js").write_text("1", encoding="utf-8")
+
+    async def public_only(url: str) -> bool:
+        return url.startswith("https://cdn.")
+
+    socket = FakeSocket(
+        {"method": "Fetch.requestPaused", "params": {"requestId": "1", "request": {"url": f"{ARTIFACT_ORIGIN}/a.js"}}},
+        {"method": "Fetch.requestPaused", "params": {"requestId": "2", "request": {"url": "https://cdn.tailwindcss.com/"}}},
+        {"method": "Fetch.requestPaused", "params": {"requestId": "3", "request": {"url": "http://169.254.169.254/"}}},
+        {"id": 1, "result": {}},
+    )
+    session = CdpSession(socket, allow=public_only, serve=serve_directory(tmp_path))
+
+    await session.call("Runtime.enable")
+
+    sent = [(m["method"], m["params"].get("requestId")) for m in socket.sent if m["method"].startswith("Fetch.")]
+    assert sent == [("Fetch.fulfillRequest", "1"), ("Fetch.continueRequest", "2"), ("Fetch.failRequest", "3")]
+    assert session.refused == ["http://169.254.169.254/"]
 
 
 async def test_no_browser_is_a_typed_failure_the_model_reads(tmp_path: Path) -> None:
