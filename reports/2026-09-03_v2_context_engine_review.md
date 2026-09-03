@@ -276,6 +276,39 @@ schema back), and `75245bc` was deployed.
   in both stores, additive, contract-tested; the version-0 file migrates
   through it.
 
+## Test 9, the first live turn on the engine: one regression, one dead end, one blank
+
+Run `a459c70e`, plan off, 13 model calls, 11 tool calls, 184 s, the ceiling.
+
+**The regression is mine.** The review said "shorten old tool results"; the
+implementation also shortened the long arguments of the calls that produced
+them, which the references do not do. The trace shows the effect exactly:
+`stubbed` becomes 1 at step 3 — the content of the first `write_file` shown
+as `<1104 characters, shortened>` — and at step 4 the model writes
+`index.html` again, then styles, then app, three times round, eleven writes,
+no `inspect_page`, no `send_file`, and an answer saying it cannot send files.
+Test 8, the same request an hour earlier, had one rewrite and delivered all
+four items. The model's own words are its memory of what it did; with them
+replaced by a placeholder it does the work again. Withdrawn: only tool
+results are stubbed now (ISS-0022). The size numbers were as designed — the
+turn stayed at 2–3k tokens across twelve steps where test 8 grew 600 a step —
+and were bought with the wrong thing.
+
+**The dead end.** `/compact` answered "nothing to fold" on 32 messages,
+because the cut could only land on a user message and the newest 26 were one
+turn's calls and results. A cut may now land before any user or assistant
+message, never before a tool result (ISS-0023). The reply also says why when
+there is nothing.
+
+**The blank.** No `cached_tokens` on any call: vLLM reports
+`prompt_tokens_details` only with `--enable-prompt-tokens-details`, which the
+serve command never passed. Added in the tree; it takes a model-app deploy,
+which is a new boot and a gate (ISS-0024). Until then the cache is measured
+by prefill time alone.
+
+Also: `/compact` was recorded as a failed turn because the command path did
+not close its trace (ISS-0025).
+
 **Not done.** The live numbers. Both acceptances need the human's own turns:
 a repeat question in one thread to read `cached_tokens` against the previous
 request's size, and the Task Board request to compare step sizes with test

@@ -11,8 +11,8 @@ from app.context import Context, ContextPolicy, build_prelude, fold_older_messag
 from app.context.window import (
     DEFAULT_SYSTEM_PROMPT,
     facts_layer,
-    first_user_turn,
     shortened,
+    turn_boundary,
     system,
 )
 from app.memory import LOCAL_USER_ID, SqliteStore
@@ -142,8 +142,9 @@ def result(identifier: str, text: str) -> Message:
 
 
 def test_old_tool_results_become_stubs_and_the_newest_stay_whole() -> None:
-    """Run `9c42241c`, 2026-09-03: twelve steps, every earlier result and
-    every earlier file argument re-sent each time."""
+    """Run `9c42241c`, 2026-09-03: twelve steps, every earlier result re-sent
+    each time. Run `a459c70e` the same day: shortening the model's own file
+    arguments as well made it write every file again, so those stay whole."""
 
     messages = [
         user("build it"),
@@ -157,11 +158,8 @@ def test_old_tool_results_become_stubs_and_the_newest_stay_whole() -> None:
 
     surface, count = shortened(messages, keep=2)
 
-    assert count == 2, "one result and one call's arguments"
-    assert surface[1].tool_calls[0].arguments == {
-        "path": "a.html",
-        "content": "<1000 characters, shortened>",
-    }
+    assert count == 1, "one result; the model's own call arguments are never touched"
+    assert surface[1].tool_calls[0].arguments == {"path": "a.html", "content": "x" * 1000}
     first = surface[2].content[0].text
     assert first.startswith("[write_file a.html: 334 characters; shortened")
     assert "call the tool again" in first
@@ -351,11 +349,36 @@ def test_a_cut_moves_forward_to_the_start_of_a_turn() -> None:
         user("ask again"),
     ]
 
-    assert first_user_turn(messages, 1) == 3
+    assert turn_boundary(messages, 1) == 1, "before the call, with its result behind it"
+    assert turn_boundary(messages, 2) == 3, "never between the call and its result"
 
 
 def test_a_cut_with_no_later_turn_lands_at_the_end() -> None:
-    assert first_user_turn([user("only")], 1) == 1
+    assert turn_boundary([user("only")], 1) == 1
+
+
+async def test_a_long_tool_turn_can_still_be_folded(store: SqliteStore) -> None:
+    """2026-09-03: a thread whose tail was one 26-message tool turn had no user
+    boundary to cut at, so `/compact` folded nothing."""
+
+    messages = [user("build it")]
+    for index in range(12):
+        messages.append(
+            Message(role="assistant", tool_calls=(ToolCall(id=f"c{index}", name="t", arguments={}),))
+        )
+        messages.append(
+            Message(role="tool", content=[ContentPart(kind="text", text="r")], tool_call_id=f"c{index}")
+        )
+    store.append("t1", messages, LOCAL_USER_ID)
+
+    folded = await fold_older_messages(
+        EchoBackend(), store, "t1", ContextPolicy(keep_recent=8), force=True
+    )
+
+    assert folded == "they talked about files"
+    _, through = store.summary("t1")
+    assert through == 17, "cut moved forward to the next assistant message"
+    assert store.messages("t1", after=through - 1)[0].role == "assistant"
 
 
 def test_a_cut_before_the_first_message_is_clamped_not_taken_from_the_end() -> None:
@@ -364,8 +387,8 @@ def test_a_cut_before_the_first_message_is_clamped_not_taken_from_the_end() -> N
     Python would read that as an index from the end; here it means the beginning.
     """
 
-    assert first_user_turn([user("only")], -4) == 0
-    assert first_user_turn([], -4) == 0
+    assert turn_boundary([user("only")], -4) == 0
+    assert turn_boundary([], -4) == 0
 
 
 # --- folding -----------------------------------------------------------------

@@ -51,6 +51,65 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0025 — `/compact` is recorded as a failed turn
+
+- **Status:** fixed in the tree, 2026-09-03 — the command finishes its trace
+  as answered. Not yet deployed
+- **Seen:** 2026-09-03, deployed, run `eb455286`: `/compact` answered the
+  person and the run row says `failed`, `incomplete`.
+- **Costs:** a reliability figure that counts a command as a broken turn.
+- **Reproduce:** `/compact`; read the run.
+- **Cause:** the command path never closed its trace, and the runner closes
+  an unclosed one as incomplete.
+- **Evidence:** `reports/2026-09-03_v2_context_engine_review.md`
+- **Related:** none
+
+### ISS-0024 — the server does not say what it served from its cache
+
+- **Status:** fixed in the tree, 2026-09-03 — `--enable-prompt-tokens-details`
+  on the model server. **Needs a model-app deploy**, which is a new boot and
+  a human gate.
+- **Seen:** 2026-09-03, deployed, run `a459c70e`: every `model_finished`
+  without `cached_tokens`, so `/context` and the trace cannot show the cache.
+- **Costs:** the measurement 4.6a's assembly is judged by is blank.
+- **Reproduce:** any turn; read `model_finished`.
+- **Cause:** vLLM reports `prompt_tokens_details` only with that flag, which
+  the serve command did not pass.
+- **Evidence:** `reports/2026-09-03_v2_context_engine_review.md`
+- **Related:** ROADMAP 4.6a acceptance
+
+### ISS-0023 — a forced fold finds nothing to cut in a tool-heavy tail
+
+- **Status:** fixed in the tree, 2026-09-03 — a fold may cut before any
+  user or assistant message, never before a tool result. Not yet deployed
+- **Seen:** 2026-09-03, deployed: `/compact` after the Task Board turn
+  answered "nothing to fold" on a 32-message thread whose newest 26 were one
+  turn's calls and results.
+- **Costs:** the person asks for a fold and gets none; a size-forced fold
+  inside a long turn has the same dead end.
+- **Reproduce:** a long tool turn, then `/compact`.
+- **Cause:** the cut only landed on a user message, and there was none in
+  the last eight.
+- **Evidence:** `reports/2026-09-03_v2_context_engine_review.md`
+- **Related:** ISS-0019
+
+### ISS-0022 — shortening the model's own file arguments made it write every file again
+
+- **Status:** fixed in the tree, 2026-09-03 — only tool results are stubbed;
+  the model's text and call arguments are never shortened. Not yet deployed
+- **Seen:** 2026-09-03, deployed, run `a459c70e`, "Task Board test 9": from
+  the step where its first `write_file` content was shown as
+  `<1104 characters, shortened>`, the model rewrote index, styles and app in
+  a cycle, eleven writes, the ceiling, no screenshot, no files, and an
+  answer saying it cannot send files. Test 8 on the same request, before
+  the shortening, had one rewrite and delivered everything.
+- **Costs:** the work is not delivered and the turn costs the ceiling.
+- **Reproduce:** the Task Board request with argument shortening on.
+- **Cause:** what the model wrote is what it remembers doing; with it
+  replaced by a placeholder it does the work again.
+- **Evidence:** `reports/2026-09-03_v2_context_engine_review.md`
+- **Related:** ISS-0019, ISS-0003
+
 ### ISS-0021 — the end-of-turn token reaches the chat as a message
 
 - **Status:** fixed in the tree, 2026-09-03 — the streamed-completion reader

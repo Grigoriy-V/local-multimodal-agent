@@ -503,6 +503,11 @@ class Server:
             "--limit-mm-per-prompt",
             json.dumps(MM_LIMITS),
             "--enable-auto-tool-choice",
+            # `usage.prompt_tokens_details.cached_tokens` on every completion:
+            # the one free measurement of how well a request was assembled for
+            # the prefix cache. Off by default in vLLM; without it the client's
+            # `cached_tokens` is `None`, as it was on 2026-09-03.
+            "--enable-prompt-tokens-details",
             "--tool-call-parser",
             "gemma4",
             "--reasoning-parser",

@@ -742,6 +742,10 @@ class TelegramAdapter:
             return
         if command == "/compact":
             await self._on_compact(agent, current_thread(store, user_id), incoming.chat_id)
+            # Answered, without a turn: a command that reached the model for a
+            # summary is not a failed turn. Recorded as `incomplete` on
+            # 2026-09-03 until this line.
+            trace.finish("answer_delivered")
             return
         if command == "/can":
             # Answered from the wiring, not by the model. When the assistant
@@ -959,11 +963,13 @@ class TelegramAdapter:
         """Fold the older part of this conversation now. One summarizer call."""
 
         folded = await agent.compact(thread_id)
+        keep = agent.policy.keep_recent
         await self.client.send_message(
             chat_id,
-            f"Folded {folded} older messages into the summary; the newest stay verbatim."
+            f"Folded {folded} older messages into the summary; the newest {keep} stay verbatim."
             if folded
-            else "Nothing to fold: this conversation is short enough to carry whole.",
+            else f"Nothing to fold: the newest {keep} messages always stay verbatim, and "
+            "that is all there is past the summary.",
         )
 
     async def _show_conversations(

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from app.context.window import ContextPolicy, first_user_turn, system, transcript
+from app.context.window import ContextPolicy, system, transcript, turn_boundary
 from app.memory import ConversationStore
 from app.models import ContentPart, Message, ModelBackend
 
@@ -77,7 +77,7 @@ async def fold_older_messages(
     if len(pending) <= policy.summarize_after and not oversized and not force:
         return None
 
-    cut = first_user_turn(pending, len(pending) - policy.keep_recent)
+    cut = turn_boundary(pending, len(pending) - policy.keep_recent)
     if cut <= 0 or cut >= len(pending):
         return None
 

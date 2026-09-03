@@ -840,9 +840,10 @@ projection with three rules, and only these. The facts retrieved for the turn
 are sent after history, immediately before the turn, so everything ahead of
 them is stable between turns and a served prefix cache survives it. A tool
 result older than the newest `keep_results` (two) is shown as a stub naming
-the tool, its subject, the size and the way back, and the long arguments of
-the call that produced it are shortened the same way; failures and short
-results stay whole. Pictures share one prompt's media budget whichever turn
+the tool, its subject, the size and the way back; failures and short
+results stay whole, and the model's own text and call arguments are never
+shortened (the first deployed version shortened long call arguments too, and
+the first live turn rewrote every file — ISS-0022; withdrawn the same day). Pictures share one prompt's media budget whichever turn
 they arrived in, newest kept. History is never rewritten; the summary is the
 only step that spends a model call, and only when the shortened surface is
 still above budget. Every step records what the surface was made of

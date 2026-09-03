@@ -157,13 +157,19 @@ STUB_MIN_CHARS = 200
 
 
 def shortened(messages: Sequence[Message], keep: int) -> tuple[list[Message], int]:
-    """Tool results older than the newest `keep` become stubs; so do the long
-    arguments of the calls that produced them.
+    """Tool results older than the newest `keep` become stubs.
 
     A stub names the tool, what it was asked about, the size of what it said
     and the way back — the call can be made again, and history still holds
     the whole result. Failures are kept: they are short, and they are why the
     model did what it did next. The count is what a trace reports.
+
+    The model's own words — its text and the arguments of its calls — are
+    never shortened. They were, for one deployed afternoon (run `a459c70e`,
+    2026-09-03): with the content of its earlier `write_file` shown as
+    `<1104 characters, shortened>`, the model wrote every file again, three
+    times round, and never reached the screenshot. What it wrote is what it
+    remembers doing; what a tool said back is what it can ask for again.
     """
 
     results = [index for index, message in enumerate(messages) if message.role == "tool"]
@@ -175,7 +181,6 @@ def shortened(messages: Sequence[Message], keep: int) -> tuple[list[Message], in
         for message in messages
         for call in message.tool_calls
     }
-    old_calls = {messages[index].tool_call_id for index in old}
     out: list[Message] = []
     count = 0
     for index, message in enumerate(messages):
@@ -187,17 +192,6 @@ def shortened(messages: Sequence[Message], keep: int) -> tuple[list[Message], in
                 out.append(replace(message, content=[ContentPart(kind="text", text=stub(call, text, media))]))
                 count += 1
                 continue
-        if message.tool_calls and any(call.id in old_calls for call in message.tool_calls):
-            trimmed = tuple(
-                replace(call, arguments=shortened_arguments(call.arguments))
-                if call.id in old_calls
-                else call
-                for call in message.tool_calls
-            )
-            if trimmed != message.tool_calls:
-                count += 1
-            out.append(replace(message, tool_calls=trimmed))
-            continue
         out.append(message)
     return out, count
 
@@ -215,15 +209,6 @@ def stub(call, text: str, media: Sequence[ContentPart]) -> str:
         kinds = ", ".join(f"{part.kind}" for part in media)
         size = f"{size}, {kinds}" if size else kinds
     return f"[{what}{about}: {size}; shortened, call the tool again for the full result]"
-
-
-def shortened_arguments(arguments: dict) -> dict:
-    return {
-        name: f"<{len(value)} characters, shortened>"
-        if isinstance(value, str) and len(value) > STUB_MIN_CHARS
-        else value
-        for name, value in arguments.items()
-    }
 
 
 def within_media_budget(
@@ -281,18 +266,22 @@ def transcript(messages: Sequence[Message]) -> str:
     return "\n".join(lines)
 
 
-def first_user_turn(messages: Sequence[Message], start: int) -> int:
-    """Move a cut forward to the next user turn.
+def turn_boundary(messages: Sequence[Message], start: int) -> int:
+    """Move a cut forward to the next place a step begins.
 
-    Cutting between an assistant's tool call and the tool's reply would leave an
-    orphan result the provider rejects, so a cut only lands where a turn begins.
+    Cutting between an assistant's tool call and the tool's reply would leave
+    an orphan result the provider rejects, so a cut lands before a user
+    message or before an assistant message — never before a tool result. A
+    cut inside a long tool-using turn is allowed on purpose: on 2026-09-03 a
+    thread whose newest 26 messages were one turn's calls and results could
+    not be folded at all, and `/compact` said there was nothing to fold.
 
     A negative `start` means the caller wanted to keep more messages than exist;
     it is clamped rather than left to index from the end of the list.
     """
 
     for index in range(max(0, start), len(messages)):
-        if messages[index].role == "user":
+        if messages[index].role in ("user", "assistant"):
             return index
     return len(messages)
 
