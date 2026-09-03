@@ -4,9 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. 4.6a, the context engine, closed 2026-09-03
-on the human's own live turn (below). Next in order is 4.6b; selecting it is
-the human's word.
+**Current approved step:** none. 4.6a and 4.6b, the context engine and the
+way back into history, both closed 2026-09-03 (below). Next in order is 4.7;
+selecting it is the human's word.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -247,7 +247,7 @@ What exists. How it was reached, and every number, is in the linked report.
      whole by design. One measurement is carried, not owed: `cached_tokens`
      is read on the first warm turn after the model-app redeploy that brings
      the flag. `reports/2026-09-03_v2_context_engine_review.md`.
-   - **4.6b Exact recovery from archived history.** A search over what was
+   - **4.6b Exact recovery from archived history — done 2026-09-03.** A search over what was
      actually said, returning real messages and tool results rather than another
      summary, so a detail a summary lost is recoverable. Full-text in both
      profiles; it joins the `ConversationStore` contract suite. No vector store.
