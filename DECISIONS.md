@@ -830,3 +830,63 @@ Supersedes / Superseded by
 
 Fills the seam left deliberately empty by 2026-08-30, "Whether a turn may end is
 a seam, not a policy". Does not change what that seam does or its default.
+
+## 2026-09-03 — A tool result is a typed outcome, and the runtime survives any model
+
+Decision
+
+A tool returns content on success and raises `ToolError` with a stable code on
+failure; the executor turns every outcome, refusal and unexpected exception into
+`ToolOutcome(content, failure: ToolFailure | None)`, projects it into the tool
+message and carries the typed failure on that message through the checkpoint.
+`failure is None` is the only definition of success. The `error:` prefix stays
+as the wording the model reads and stops being a protocol anything reads back.
+The executor owns normalization, bounds, sanitizing, a per-tool timeout,
+telemetry with the reason, and the projection; the loop keeps deciding when a
+batch runs, pauses or is halted.
+
+The runtime, not the model server, is responsible for surviving what a model
+emits. A call with unreadable arguments becomes one refused call with the
+tool's signature, never a failed request; names are resolved against the
+allowlist and arguments coerced to the declared schema; fragments of another
+call are removed and nothing is ever invented. The corrected Gemma 4 parser in
+`tools/gemma4_parser.py` stays offline and is not deployed.
+
+One implementation per capability, parameterized by what actually differs — a
+root for the filesystem — and a backend interface only at the first real second
+implementation, which is the sandbox. The browser is designed as one session
+with the full operation set, snapshot-with-refs first, and exposes observation
+only until the roadmap says otherwise.
+
+Why
+
+Every live failure since 4.2 ran through the tool boundary, and the boundary was
+the last Version 1 shape in the loop: a string convention four consumers parsed,
+an OS error wrapped in platform wording, a corrupted call the request died on.
+The context engine has to shorten tool results and cannot be built on prose it
+parses. A per-model parser on the server would fix one emission of one model on
+one server and would have to be redone for the next; the product runs on
+whatever OpenAI-compatible endpoint is configured. DeepSeek Harness, Hermes
+Agent and OpenClaw all converge on the typed union, the bounded and sanitized
+error, the allowlisted repair that refuses rather than guesses, and the
+snapshot-and-ref browser loop; the comparison is in
+`reports/2026-09-03_v2_tool_system_references_and_queue.md`.
+
+Consequences
+
+`Message` gains `failure`, checkpointed now and stored when the schema-3
+migration lands in 4.6a, so the tool system needs no migration of its own and
+4.6a and 4.6b keep sharing one. `tool_failed` carries a code and a message
+(ISS-0007). The migration order and acceptance are in
+`docs/v2_tool_system.md`, which the implementation follows; the draft
+`docs/v2_tool_system_design.md` is kept as its origin. The queue after 4.4 is
+tools, browser, context engine, archive recovery, scenario suite, then
+`ask_user` and "saying only what was observed", for the reasons in the report.
+
+Supersedes / Superseded by
+
+Refines "Tools declare consequence; the graph owns consent" (2026-08-01): the
+declaration is renamed `requires_approval` and the consent path is unchanged.
+Refines the tool execution seam of 2026-08-30: the same three stages, now owning
+what flows through them. Rejects the parser-redeploy option recorded in
+`reports/2026-08-31_v2_todo_live_failure.md`.
