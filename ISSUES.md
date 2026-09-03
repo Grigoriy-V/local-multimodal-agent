@@ -51,6 +51,22 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0019 — the page is written twice, identically, after the plan is updated
+
+- **Status:** open
+- **Seen:** 2026-09-03, deployed, five turns in a row (runs `b100a27a`,
+  `f41278c9`, `af276ed7`, `752486c1`, `7673ce55`)
+- **Costs:** after the three files are written and the plan is ticked, the
+  model writes `index.html` again with byte-identical content (1245
+  characters both times, compared in run `7673ce55`): one model call of
+  about 9 s and 368 output tokens per turn for nothing.
+- **Reproduce:** the Task Board request with a plan; compare the two
+  `write_file` calls on `index.html`.
+- **Cause:** unknown. It follows the `todo_write` update every time, as if
+  the model re-executes the step it just marked done.
+- **Evidence:** `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Related:** ISS-0016
+
 ### ISS-0018 — an existing folder is replaced without a word
 
 - **Status:** open
@@ -248,6 +264,12 @@ Rules that keep the file honest:
   have been shown, and by the time we know it should not have been, the person
   has been reading it for up to 58 s. Nothing in a stream says in advance
   whether it will end in a tool call.
+- **Also seen:** 2026-09-03, run `7673ce55`, after the sends: the answer
+  was delivered with the screenshot attached, three sends followed, and the
+  model closed with the same functional list again plus "файлы отправлены"
+  (108 tokens) — not verbatim, so the display rule let it through. The
+  core prompt's "add only what is new" is not obeyed; a second bubble with
+  the same list is what the person sees.
 - **Also seen:** 2026-09-03, thread `d88734a2`, run `af276ed7`, after the
   hold: the bare `todo_write` that followed the steering deleted the held
   draft through the adapter's no-text path (fixed the same day), and the
@@ -413,6 +435,9 @@ Rules that keep the file honest:
   (`DECISIONS.md` 2026-09-03). If that does not hold live, the human has
   reopened an adapter delivery of a markdown image, on the condition that
   no delivery path blocks another.
+- **Held, first turn:** run `7673ce55`, "Task Board test 6": the screenshot
+  sent with the answer, then the three files, all unprompted, no markdown
+  image. One turn is not a rate; the status stays mitigated.
 - **Decided:** 2026-09-03, the human rejected a mechanical backstop in the
   adapter (delivering a markdown image the model wrote) as a crutch.
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`

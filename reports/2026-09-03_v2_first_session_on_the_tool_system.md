@@ -261,6 +261,27 @@ four times per turn; the answer said "готово" and nothing about what had
 been there. Recorded as ISS-0018. The person's expectation: notice the place
 is taken, say so, and decide or ask — never replace in silence.
 
+## First turn on the handover phrase: delivered, with a tail
+
+Run `7673ce55`, "Task Board test 6", 90 s, 12 model calls, 11 tool calls, no
+failure, no steering. The answer was written once with `send_file` of the
+screenshot attached and delivered in place; then `index.html`, `style.css`
+and `script.js` were sent, one call each; no markdown image, no path list
+offered as delivery. That is what the phrase was for, and it held on the
+first turn.
+
+What got worse: the model closed with a second message — the same functional
+list again, minus the files, plus "Файлы приложения отправлены в чат", 108
+tokens — which the exact-match display rule does not catch, so the person
+sees the list twice. And the three sends went one per model call, about
+1.2 s and 6.6 k input tokens each, where one completion could carry all
+three. Neither is a runtime defect: both are the model not doing what the
+core prompt says after a tool.
+
+Also settled: the second `index.html` write is byte-identical to the first,
+in a fresh folder, so it is not ISS-0018 but its own thing (ISS-0019).
+
 ## Next gate
 
-The person's own turn in Telegram on this code.
+The person's own turn in Telegram on this code; the tail and the serial
+sends go to 4.7.
