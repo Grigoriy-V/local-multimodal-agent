@@ -930,3 +930,14 @@ on the Volume, run ids `deployed-<8 hex>-<n>` in the deployed telemetry —
 and prints the same report. The after-deploy rule now reads
 `--deployed --after-deploy`. Not yet deployed or run.
 
+**First deployed run, `loop_live --deployed R S`, 2026-09-04** (runs
+`deployed-a4a3b845-160`, `-170`): all scenarios passed. *R*: `list_files`,
+a 21.8 s first command (the container's cold start plus pandas and
+matplotlib importing from the image, no install), a 5 s second, `read_file
+chart.png` — the picture looked at, straight from the new brief paragraph,
+no detour through the browser — `send_file`; 63 s, six model calls.
+*S*: the same five calls as locally, 14.7 s. What this says beside the
+local runs: the same two shapes pass in the environment a person actually
+gets, with the image's libraries and no venv, and the chart run is the
+day's first in which the look was taken without being pushed to it.
+
