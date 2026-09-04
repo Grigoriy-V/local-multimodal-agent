@@ -279,7 +279,10 @@ What exists. How it was reached, and every number, is in the linked report.
      and outcomes rather than model wording, and compared against item 3's
      numbers, including that a turn continues correctly across a compaction.
      Live suites run as one warm window and only with explicit permission,
-     because every run wakes a GPU.
+     because every run wakes a GPU. Reviewed against the references
+     2026-09-04, options and a recommended shape in
+     `reports/2026-09-04_v2_restart_resume_review.md`; **not approved, not
+     started.**
    - **4.8 `ask_user`** for a genuinely missing decision, not for permission.
      Was 4.5; moved behind the tool system it returns through, and behind the
      suite that can accept it.
