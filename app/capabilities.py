@@ -174,7 +174,10 @@ def _shell_lines(tools: Toolbox, where: str | None) -> list[str]:
         "traceback names the file, the line and the cause, and what it tells you "
         "to do is the fix, not a reason to start over or to give up. Before you "
         "say something is missing here, check with a command. A command cannot "
-        "ask you anything: give it its answers on the command line.",
+        "ask you anything: give it its answers on the command line. Your other "
+        "tools are not shell commands: the shell does not know inspect_page, "
+        "read_file or send_file — you call those as tools, and run_command runs "
+        "programs.",
     ]
 
 

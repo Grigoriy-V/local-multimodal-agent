@@ -941,3 +941,17 @@ local runs: the same two shapes pass in the environment a person actually
 gets, with the image's libraries and no venv, and the chart run is the
 day's first in which the look was taken without being pushed to it.
 
+**After-deploy in the worker, `--deployed --after-deploy`, 2026-09-04**
+(runs `deployed-ff5caf04-10/-20/-70`): A and B pass. G — the person's
+request, plan off — six of eight: the three files written and sent, no
+tool failed, the turn ended early; **no look and no screenshot**, because
+the model tried to look with the shell: `cd "Task Board" && inspect_page
+index.html`, exit 127, then a heredoc copy of the page "to inspect", then
+`ls -R` and "I'll just verify the files exist". G passed on 2026-09-03
+with `inspect_page` called as a tool; what is new since is `run_command`
+in the toolbox, and the brief's shell line says "Python, pip, node, npm,
+git and the like are commands here" without saying that the tools are
+not. One sentence added to that line: the shell does not know
+`inspect_page`, `read_file` or `send_file`; those are called as tools,
+`run_command` runs programs. Then G again, deployed.
+

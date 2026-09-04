@@ -242,6 +242,8 @@ def test_the_brief_says_where_commands_run_and_what_survives(workspace: Path) ->
     assert "run_command runs a shell command on this machine" in brief
     # The tool's own line about reading its result (2026-09-04).
     assert "read the whole output" in brief and "traceback names" in brief
+    # G deployed, 2026-09-04: `cd "Task Board" && inspect_page index.html`, exit 127.
+    assert "not shell commands" in brief
     assert "virtual" in brief and "workspace" in brief
     without = registry.toolbox(registry.grant(capabilities=[name for name in DEFAULT_CAPABILITIES if name != SHELL_RUN]))
     assert "run_command" not in capability_brief(without)
