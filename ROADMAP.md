@@ -251,7 +251,7 @@ What exists. How it was reached, and every number, is in the linked report.
      `keep_turns = 2` exchanges, and a fold by size folds the oldest
      exchanges one at a time until enough is freed rather than everything
      older than the floor; `fitted` folds again, at most twice more, when
-     the first fold fell short. Deployed the same day (`9607b92`); `self_test` on the new container, after-deploy run A, B, G all passed (G 77 s). `DECISIONS.md` 2026-09-04.
+     the first fold fell short. Deployed the same day (`9607b92`); `self_test` on the new container, after-deploy run A, B, G all passed (G 77 s); the human's own `/check` and session on it the same day, nothing wrong seen. `DECISIONS.md` 2026-09-04.
    - **4.6b Exact recovery from archived history — done 2026-09-03.** A search over what was
      actually said, returning real messages and tool results rather than another
      summary, so a detail a summary lost is recoverable. Full-text in both
