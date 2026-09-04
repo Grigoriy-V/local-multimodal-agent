@@ -33,6 +33,10 @@ scripted answer:
                                       look at the document, send_file
     Q  a command past its timeout     shell.timeout reaches the model and the
                                       turn goes on
+    R  data turned into a picture     a CSV summed with a command, a chart
+                                      made from it, handed over
+    S  a failing script repaired      the check run, the traceback read, one
+                                      file fixed, the check run again green
 
 Each scenario is checked, not only printed: a line starting with PASS or FAIL
 says whether what happened is what the scenario expects, and the exit code is
@@ -53,7 +57,11 @@ default, with the numbers a plan-on run can be compared against. H and I are
 the live half of 4.6b: the way back to what a summary or a stub stands for.
 J and K are the live half of 4.7: restart, resume, and a turn across a
 compaction, asserted on harness events. O, P and Q are the live half of 5b:
-a command run on this machine, in the workspace, through the one tool. Every scenario line also carries the
+a command run on this machine, in the workspace, through the one tool. R and
+S (2026-09-04, the human's ask: one PDF scenario is not enough to judge code
+execution) are the two other shapes work with commands takes — data into a
+picture, and a repair driven by a traceback — asserted on the files and the
+last exit code, never on how the model got there. Every scenario line also carries the
 derived GPU-active seconds and cost of its run, the item 3 estimate
 (`app/telemetry/cost.py`), so a run can be read beside the 2026-08-29
 baseline printed at the end. Every run of it costs GPU time and needs
@@ -266,8 +274,8 @@ def chosen(argv: list[str]) -> frozenset[str]:
 
     if "--after-deploy" in argv:
         return frozenset(AFTER_DEPLOY)
-    letters = {arg.upper() for arg in argv if len(arg) == 1 and arg.upper() in "ABCDEFGHIJKOPQ"}
-    return frozenset(letters) if letters else frozenset("ABCDEFGHIJKOPQ")
+    letters = {arg.upper() for arg in argv if len(arg) == 1 and arg.upper() in "ABCDEFGHIJKOPQRS"}
+    return frozenset(letters) if letters else frozenset("ABCDEFGHIJKOPQRS")
 
 
 async def main() -> int:
@@ -691,6 +699,68 @@ async def main() -> int:
                     "shell.timeout reached the loop": "shell.timeout" in codes,
                     "the model answered after it": bool(q.answer),
                     "it did not wait a minute": q.seconds < 45,
+                },
+            )
+
+        if wanted("R"):
+            # R — data into a picture. The second shape work with commands
+            # takes: a file that is there, summed with whatever the model
+            # runs, and a chart the person asked for. The checks are the
+            # files and the number, not the library. (The model has no tool
+            # yet to look at a PNG it made — recorded 2026-09-04 — so no
+            # check asks for a look here.)
+            (root / "sales.csv").write_text(
+                "region,amount\nnorth,10\nsouth,25\nnorth,20\neast,15\nsouth,20\n",
+                encoding="utf-8",
+            )
+            r = await Turn(agent, telemetry, 160).ask(
+                "chat-r",
+                "In my workspace there is sales.csv with the columns region and amount. "
+                "Using run_command, compute the total amount per region, save a bar "
+                "chart of those totals as chart.png in my workspace, send me the chart, "
+                "and tell me which region has the largest total and what it is.",
+            )
+            failed += r.report(
+                "R data turned into a picture",
+                {
+                    "run_command ran": "run_command" in r.tools,
+                    "chart.png exists": (root / "chart.png").is_file(),
+                    "send_file ran": "send_file" in r.tools,
+                    "the answer names the largest total": "45" in r.answer,
+                },
+            )
+
+        if wanted("S"):
+            # S — a failing script repaired. The third shape: a check that
+            # fails, a traceback that says why, one file changed, the check
+            # green. Asserted on the last exit code and the file, so a rewrite
+            # of the whole file and a one-line edit both pass; what is
+            # measured is that the traceback was acted on, not how.
+            (root / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+            (root / "check_calc.py").write_text(
+                "from calc import add\n\nresult = add(2, 3)\nassert result == 5, "
+                "f'add(2, 3) gave {result}, expected 5'\nprint('calc ok')\n",
+                encoding="utf-8",
+            )
+            s_turn = await Turn(agent, telemetry, 170).ask(
+                "chat-s",
+                "In my workspace, check_calc.py fails when run with python. Run it with "
+                "run_command, fix the bug in calc.py so that check_calc.py prints "
+                "'calc ok', run it again to prove it, and tell me what was wrong.",
+            )
+            runs = [
+                message
+                for message in s_turn.tool_results
+                if s_turn._names.get(message.tool_call_id or "") == "run_command"
+            ]
+            last = " ".join(part.text or "" for part in runs[-1].content) if runs else ""
+            failed += s_turn.report(
+                "S a failing script repaired",
+                {
+                    "the check was run at least twice": len(runs) >= 2,
+                    "calc.py was changed": "a - b" not in (root / "calc.py").read_text(encoding="utf-8"),
+                    "the last run is green": "exit code: 0" in last and "calc ok" in last,
+                    "an answer was given": bool(s_turn.answer),
                 },
             )
 

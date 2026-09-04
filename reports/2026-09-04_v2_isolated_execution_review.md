@@ -821,3 +821,64 @@ command. What plan mode adds is what the no-plan run lacks — the request
 held as a goal, so "in Russian" is not traded away for a green exit code.
 That is the goal discussion, next.
 
+## 14. The request as the turn's goal — option, 2026-09-04
+
+**What was measured.** Japan, the same image, the same prompt: with `/plan`
+on, a PDF in Russian; with it off, a PDF in English and a sentence
+explaining why — the request traded for a green exit code. Every "not a
+win but a shift" run of the day ended the same way: the model stopped
+when it had *something*, not when it had what was asked. This is the
+first measured benefit of plan mode, and not the one it was built for: the
+list did not make the model plan better, it made it keep the request in
+front of it until the list was closed, because `FinishesItsOwnList`
+refuses an ending with open items.
+
+**What the references do.** DeepSeek Harness: `goal` — one durable
+objective per session, created and updated by the model with tools,
+`/goal` for the human, and a `goal-round-driver` that turns an active goal
+into rounds of work until it is complete or blocked. OpenClaw: no goal
+object; a heartbeat and the session's own instructions. Claude Code and
+Codex: the model's training; the harness only ends the turn when the
+model stops.
+
+**Option for us, not built.** The goal is the person's request — it
+already exists in the turn, and asking the model to *create* one is a
+second list to keep true. What is missing is the check at the end. A
+turn that did work (at least one tool ran) does not end on the model's
+first answer: the harness asks it one more question, without tools —
+"The person asked: ‹the message›. Did what you did give them that, as
+asked? Answer `done`, `blocked: ‹why›` or `not yet`." — and
+
+- `done` ends the turn with the answer as it stands;
+- `not yet` gives the tools back for another round, at most two more,
+  inside the turn's existing budget;
+- `blocked` ends the turn, and the answer must carry the reason (the
+  model's own sentence, not a template).
+
+One short model call per working turn (about a second and 200 tokens);
+nothing for a turn that used no tool. It is plan mode's benefit without
+the list, and `/plan` stays what it is. Compared with what the human
+refused in 4.9 ("says what it saw"): that check was written from the
+shape of one defect (a screenshot claimed, a tool not run); this one is
+DeepSeek's round driver reduced to its smallest form, about every request
+and no tool. The risk, and the measurement: a 12B model that answers
+`done` reflexively, which the two Japan runs decide — the no-plan run's
+English PDF against a request "in Russian" is exactly the question it
+would be asked. If it says `done` there, the mechanism is worthless and
+is not built; if it says `not yet` and the next round registers the
+font, it is worth its second. The instrument is `prompt_scenarios` with
+the check on and off. Recorded as an option; the human decides.
+
+**Two more shapes of work with commands, 2026-09-04** (the human: one PDF
+scenario is not enough): `scripts/loop_live.py` R — `sales.csv` seeded,
+totals per region with a command, `chart.png`, `send_file`, the largest
+total in the answer — and S — `calc.py` with `a - b` and a `check_calc.py`
+that asserts `add(2, 3) == 5`, run, fixed, run again green. Both asserted
+on files and the last exit code, not on the route. Found while writing R:
+the model has **no tool to look at a PNG it made** — `view_pages` renders
+PDF pages, `inspect_page` opens HTML, `read_file` reads text — so "open
+what you produced and look at it" is impossible for a picture. A gap, not
+a defect: the roadmap's, as "a file the model reads is shown in its own
+kind" (`read_file` returning an image part for an image). Not run yet:
+every run wakes the GPU.
+

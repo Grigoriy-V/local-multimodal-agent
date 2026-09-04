@@ -798,6 +798,10 @@ message begins a turn. Whole-list replacement is the only operation, items have
 no identity, and at most one may be `in_progress`.
 
 An unfinished plan is the first production extension in the turn-stopping seam.
+
+*Measured 2026-09-04:* the plan's first proven benefit is that seam, not the
+planning — with the list on, a request for a PDF in Russian was met; with it
+off, the same model delivered English and explained why (`reports/2026-09-04_v2_isolated_execution_review.md` §14).
 It refuses one ending, names the open items, and offers the alternative that
 costs nothing: update the list to say what actually happened.
 

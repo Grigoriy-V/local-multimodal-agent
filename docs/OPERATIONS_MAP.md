@@ -586,6 +586,12 @@ generated from the toolbox, no planning guidance either. Answered without the
 model. Asked for on 2026-09-03 to separate the plan's defects (ISS-0016,
 ISS-0019) from the rest; off by default the same day, `DECISIONS.md`.
 
+Measured 2026-09-04 (`reports/2026-09-04_v2_isolated_execution_review.md`
+§14): the same request for a PDF in Russian, the same image — with the plan
+on it was delivered in Russian, with it off in English. The benefit is not
+better planning; it is that an open list refuses an ending, so the request
+stays in front of the model until it is met. Still off by default.
+
 ```text
 ui/telegram/adapter.py -> /plan dispatch
 app/agent/todo.py      -> PLAN_SWITCH, planning_enabled, set_planning

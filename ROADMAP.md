@@ -213,8 +213,13 @@ What exists. How it was reached, and every number, is in the linked report.
    venv's python binary as a script six times, and the brief's venv recipe
    run verbatim as every turn's first command — so the everyday libraries
    went into the image (`BASE_PACKAGES`) and `where` states facts without
-   a command, deployed. **Next, each its own gate:** the cold start and
-   the imports on the new image, P in Russian, the after-deploy run. Until 2026-09-04 this was 5a;
+   a command, deployed; then three more of the harness's found the same
+   way (results shortened mid-turn ISS-0041, an identical run refused after
+   the file changed ISS-0042, `pip` not `python3`'s ISS-0043), the
+   harness's own line on a non-zero exit, and the first measured benefit of
+   `/plan` (report §14: the request stays the goal). **Next, each its own
+   gate:** the after-deploy run with R and S, the goal check as an option
+   (§14), then the close of the step. Until 2026-09-04 this was 5a;
    the local half was 5b and is item 7 now, on the human's word: local work
    on files is a stage of its own, not a sub-step of the sandbox.
 
