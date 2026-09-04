@@ -843,7 +843,13 @@ result older than the newest `keep_results` (two) is shown as a stub naming
 the tool, its subject, the size and the way back; failures and short
 results stay whole, and the model's own text and call arguments are never
 shortened (the first deployed version shortened long call arguments too, and
-the first live turn rewrote every file — ISS-0022; withdrawn the same day). Pictures share one prompt's media budget whichever turn
+the first live turn rewrote every file — ISS-0022; withdrawn the same day).
+**Amended 2026-09-04, on the human's word:** the turn in progress is never
+shortened, only stored history is. The rule's reason — the model has already
+said what it made of a result — holds for a previous turn and not for the
+one being worked on; with a command's tracebacks stubbed mid-turn the model
+repeated its first error at the fourth attempt (ISS-0041), the mirror of
+ISS-0022. A long turn is bounded by the size fold, not by the stub count. Pictures share one prompt's media budget whichever turn
 they arrived in, newest kept. History is never rewritten; the summary is the
 only step that spends a model call, and only when the shortened surface is
 still above budget. Every step records what the surface was made of

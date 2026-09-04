@@ -203,9 +203,14 @@ What exists. How it was reached, and every number, is in the linked report.
    in `BASE_TOOLS`, redeployed). P in Russian then looped six times on
    fpdf2's API without opening the result and was stopped: the model's;
    on the human's word the prompt core gained `WORKING_METHOD`, how an
-   agent works whatever the model (report §12), unmeasured. **Next, each
-   its own gate:** deploy, P again, `tools/prompt_scenarios.py` against
-   the previous prompt, the after-deploy run. Until 2026-09-04 this was 5a;
+   agent works whatever the model (report §12), measured once: no visible
+   change. Then the harness's share was found (ISS-0041): the turn's own
+   tool results were being stubbed after the newest two, a command's
+   traceback included, so the model repeated its first error at the
+   fourth attempt; fixed, the turn in progress is never shortened
+   (`DECISIONS.md` 2026-09-03 amended). **Next, each its own gate:**
+   deploy, P in Russian again, the after-deploy run; the libraries in the
+   image on the human's list. Until 2026-09-04 this was 5a;
    the local half was 5b and is item 7 now, on the human's word: local work
    on files is a stage of its own, not a sub-step of the sandbox.
 

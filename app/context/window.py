@@ -96,9 +96,11 @@ class ContextPolicy:
     # conversation with most of a 64k window empty (ISS-0032).
     summarize_after: int = 60
     retrieved_facts: int = 5
-    # How many of the newest tool results a request carries verbatim. Older
-    # ones are shown as stubs; the model has already said what it made of
-    # them, and can call the tool again.
+    # How many of the newest tool results in *stored history* a request
+    # carries verbatim. Older ones are shown as stubs: the model has already
+    # said what it made of them, and can read them back. The turn in progress
+    # is never shortened (ISS-0041): its results are what the model is working
+    # on, and its size is the size fold's business.
     keep_results: int = 2
     max_input_tokens: int | None = None
 
@@ -144,10 +146,13 @@ class Context:
     def surface(self, new: Sequence[Message]) -> Surface:
         """The request, shortened on the surface only.
 
-        History and the turn are shortened together, newest first: the media
-        budget is one prompt's, whichever turn a picture arrived in, and the
-        tool results kept verbatim are the newest ones wherever they are. The
-        person's own words are never touched.
+        The media budget is one prompt's, whichever turn a picture arrived
+        in. Tool results are shortened in stored history only: the turn in
+        progress is shown whole, because what a tool said back is why the
+        model does what it does next, and until the turn ends it has not said
+        what it made of it (ISS-0041: with its tracebacks stubbed, the model
+        repeated the first attempt's error at the fourth). The person's own
+        words are never touched.
         """
 
         combined = [*self.history, *new]
@@ -194,16 +199,18 @@ STUB_MIN_CHARS = 200
 
 
 def shortened(
-    messages: Sequence[Message], keep: int, stored: int = 0, base: int = 0
+    messages: Sequence[Message], keep: int, stored: int | None = None, base: int = 0
 ) -> tuple[list[Message], int]:
-    """Tool results older than the newest `keep` become stubs.
+    """Stored tool results older than the newest `keep` become stubs.
 
     A stub names the tool, what it was asked about, the size of what it said
-    and the way back: the first `stored` messages are in history at positions
-    from `base`, and their stubs name the position for `read_history`; the
-    rest are this turn's, not stored yet, and can only be called again.
-    Failures are kept: they are short, and they are why the model did what it
-    did next. The count is what a trace reports.
+    and the way back: the first `stored` messages (all of them, by default)
+    are in history at positions from `base`, and a stub names the position
+    for `read_history`. The rest are this turn's, not stored yet, and are
+    never shortened — they are what the model is working on, and a stub that
+    says "call the tool again" is, for a command, "run the failing script
+    again" (ISS-0041). Failures are kept too: they are short, and they are why
+    the model did what it did next. The count is what a trace reports.
 
     The model's own words — its text and the arguments of its calls — are
     never shortened. They were, for one deployed afternoon (run `a459c70e`,
@@ -213,8 +220,10 @@ def shortened(
     remembers doing; what a tool said back is what it can ask for again.
     """
 
+    if stored is None:
+        stored = len(messages)
     results = [index for index, message in enumerate(messages) if message.role == "tool"]
-    old = set(results[: max(0, len(results) - keep)])
+    old = {index for index in results[: max(0, len(results) - keep)] if index < stored}
     if not old:
         return list(messages), 0
     calls = {
@@ -230,9 +239,8 @@ def shortened(
             media = [part for part in message.content if part.kind != "text"]
             if len(text) > STUB_MIN_CHARS or media:
                 call = calls.get(message.tool_call_id or "")
-                position = base + index if index < stored else None
                 out.append(
-                    replace(message, content=[ContentPart(kind="text", text=stub(call, text, media, position))])
+                    replace(message, content=[ContentPart(kind="text", text=stub(call, text, media, base + index))])
                 )
                 count += 1
                 continue
@@ -240,7 +248,7 @@ def shortened(
     return out, count
 
 
-def stub(call, text: str, media: Sequence[ContentPart], position: int | None = None) -> str:
+def stub(call, text: str, media: Sequence[ContentPart], position: int) -> str:
     what = call.name if call is not None else "tool"
     about = ""
     if call is not None:
@@ -252,8 +260,6 @@ def stub(call, text: str, media: Sequence[ContentPart], position: int | None = N
     if media:
         kinds = ", ".join(f"{part.kind}" for part in media)
         size = f"{size}, {kinds}" if size else kinds
-    if position is None:
-        return f"[{what}{about}: {size}; shortened, call the tool again for the full result]"
     # Only where the result is. The first wording offered "or call the tool
     # again for a fresh one" as well, and live (run `live-90`, 2026-09-03)
     # the model took that, found the file gone, and never came back for the

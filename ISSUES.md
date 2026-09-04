@@ -53,7 +53,12 @@ Rules that keep the file honest:
 
 ### ISS-0041 — within one turn, the errors a command met are shortened away while the model is still fixing them
 
-- **Status:** open — harness, observed
+- **Status:** fixed in the tree, 2026-09-04 — the turn in progress is never
+  shortened; stubs are for stored history only, where the model has already
+  said what it made of a result, and a stub names where it is stored
+  (`shortened` in `app/context/window.py`; `DECISIONS.md` 2026-09-03,
+  amended). The size fold, which 4.7 checked in the middle of a turn (K),
+  is what bounds a long turn. Not yet deployed
 - **Seen:** 2026-09-04, deployed, runs `510fe752` and `3b3c86d8` (P in
   Russian): six rewrites of one script, each answered by a traceback with
   `exit code: 1`. `context_prepared` shows `stubbed` climbing 1, 2, 3, 4, 5

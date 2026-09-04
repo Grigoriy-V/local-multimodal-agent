@@ -597,3 +597,9 @@ The rule's own reason — "the model has already said what it made of them"
 — holds for a previous turn and not for the one in progress; and the stub
 tells a command to run again.
 
+Fixed the same day on the human's word: `shortened` stubs only stored
+history; the turn's results stay whole whatever their number; the "call the
+tool again" wording is gone with the case it served. `tests/test_context.py`
+carries the six-traceback turn. To be measured: P in Russian again, after a
+deploy.
+

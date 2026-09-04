@@ -162,7 +162,7 @@ def test_old_tool_results_become_stubs_and_the_newest_stay_whole() -> None:
     assert surface[1].tool_calls[0].arguments == {"path": "a.html", "content": "x" * 1000}
     first = surface[2].content[0].text
     assert first.startswith("[write_file a.html: 334 characters; shortened")
-    assert "call the tool again" in first
+    assert "read_history 2" in first
     assert surface[4].content[0].text == "z" * 500
     assert surface[6].content[0].text == "w" * 500
     assert messages[2].content[0].text.endswith("y" * 300), "history itself is untouched"
@@ -542,8 +542,8 @@ async def test_nothing_is_lost_when_a_thread_is_folded(store: SqliteStore) -> No
 
 def test_a_stub_in_history_says_where_the_whole_result_is() -> None:
     """4.6b: a shortened result names its stored position, so the model can
-    read it back rather than run the tool again; a result of this turn has
-    no position yet and can only be called again."""
+    read it back rather than run the tool again. The turn's own results are
+    never shortened (ISS-0041), however many there are."""
 
     history = [
         user("fetch it"),
@@ -566,8 +566,27 @@ def test_a_stub_in_history_says_where_the_whole_result_is() -> None:
         "[fetch_page https://example.com/: 500 characters; shortened — the full result is "
         "stored: read_history 42]"
     )
-    assert surface.turn[1].content[0].text.endswith("shortened, call the tool again for the full result]")
-    assert surface.stubbed == 2
+    assert [m.content[0].text for m in surface.turn if m.role == "tool"] == ["q" * 500, "r" * 500, "s" * 500]
+    assert surface.stubbed == 1
+
+
+def test_the_turn_in_progress_keeps_every_result_it_met() -> None:
+    """ISS-0041, deployed 2026-09-04: six rewrites of one script, each answered
+    by a traceback with exit code 1 — a result, not a failure — and from the
+    fourth step the earlier tracebacks were stubs that said "call the tool
+    again". The model repeated the first attempt's error exactly. What a tool
+    said back within the turn is why the model does what it does next, so the
+    turn is shown whole and only stored history is shortened."""
+
+    context = Context(history=[user("earlier"), call("h1"), result("h1", "h" * 400)], keep_results=2)
+    turn = [user("fix it")]
+    for index in range(6):
+        turn += [call(f"c{index}", "run_command", command="python script.py"), result(f"c{index}", f"Traceback {index} " + "t" * 400)]
+
+    surface = context.surface(turn)
+
+    assert [m.content[0].text[:11] for m in surface.turn if m.role == "tool"] == [f"Traceback {i}" for i in range(6)]
+    assert surface.stubbed == 1, "the one stored result, older than the newest two"
 
 
 def test_the_summary_says_where_its_exact_words_are() -> None:

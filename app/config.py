@@ -176,9 +176,10 @@ class AgentSettings(BaseSettings):
     # that decides on any server that reports one; this bounds the rest.
     summarize_after: int = 60
     retrieved_facts: int = 5
-    # How many of the newest tool results a request carries in full; older
-    # ones are stubs on the surface and whole in history. Two is the result the
-    # model is reading and the one before it.
+    # How many of the newest tool results of stored history a request carries
+    # in full; older ones are stubs on the surface and whole in history. The
+    # turn in progress is never shortened (ISS-0041). Two is the result the
+    # model was reading when the previous turn ended and the one before it.
     keep_results: int = 2
     # What one turn may spend before it has to stop and say so. These are the
     # only ceiling on an autonomous turn: the loop ends when the model stops
