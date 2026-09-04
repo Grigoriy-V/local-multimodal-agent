@@ -330,3 +330,39 @@ async def test_the_third_identical_successful_call_is_answered_without_running(
     assert spoken(result["messages"][-1]) == "Done."
     assert backend.tools_seen[-1] is not None, "tools stay offered"
     assert (workspace / "page.html").read_text(encoding="utf-8") == "<p>hi</p>"
+
+
+def _turn(*steps: tuple[str, dict[str, object]]) -> list[Message]:
+    """Assistant call then its successful result, for each step."""
+
+    messages: list[Message] = []
+    for index, (name, arguments) in enumerate(steps):
+        call_id = f"c{index}"
+        messages.append(Message(role="assistant", content=[], tool_calls=[ToolCall(id=call_id, name=name, arguments=arguments)]))
+        messages.append(Message(role="tool", tool_call_id=call_id, content=[ContentPart(kind="text", text="exit code: 1")]))
+    return messages
+
+
+def test_a_change_to_the_workspace_between_two_identical_commands_makes_the_second_new() -> None:
+    """ISS-0042, deployed 2026-09-04: `python3 make_pdf.py` after each rewrite of
+    `make_pdf.py`, and the fourth run — of the version that registered its
+    font — was refused as "already succeeded twice", because a non-zero exit is
+    a success and nothing reset the count. A write in between is a changed
+    world; the same run unchanged three times is still the loop."""
+
+    from app.agent.graph import succeeded_before
+
+    run = ToolCall(id="x", name="run_command", arguments={"command": "python3 make_pdf.py"})
+    rewrite = ("write_file", {"path": "make_pdf.py", "content": "v"})
+    same_run = ("run_command", {"command": "python3 make_pdf.py"})
+
+    edited_between = _turn(rewrite, same_run, rewrite, same_run, rewrite, same_run)
+    unchanged = _turn(rewrite, same_run, same_run, same_run)
+    read_between = _turn(same_run, ("read_file", {"path": "make_pdf.py"}), same_run, same_run)
+
+    changing = ["write_file", "edit_file", "run_command"]
+    assert succeeded_before(edited_between, run, changing) == 1
+    assert succeeded_before(unchanged, run, changing) == 3
+    assert succeeded_before(read_between, run, changing) == 3
+    assert succeeded_before(edited_between, run) == 3, "without the names, the old count"
+

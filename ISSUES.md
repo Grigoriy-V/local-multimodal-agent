@@ -51,6 +51,34 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0042 — a command is refused as "already done" after the file it runs was rewritten
+
+- **Status:** fixed in the tree, 2026-09-04 — `succeeded_before` starts its
+  count over when a different call of a tool that changes the workspace
+  (`mutates`) succeeded in between; an identical call still counts against
+  itself, so ISS-0019's loop is still caught. Not yet deployed
+- **Seen:** 2026-09-04, deployed, run `f25fd7cd` (P in Russian): `write_file
+  make_pdf.py` → `python3 make_pdf.py` (exit 1) → rewrite → run (exit 1) →
+  rewrite → `ls` the fonts → rewrite with `add_font` for both faces → `python3
+  make_pdf.py`: "this exact call has already succeeded twice in this turn
+  with these same arguments and was not run again". The fourth version, the
+  one that had a chance, never ran; the model tried the same line twice
+  more, then a one-line `python3 -c` with the whole script, and gave up.
+- **Costs:** the turn's work thrown away at the step where it would have
+  paid; the person gets text instead of the file.
+- **Reproduce:** any edit-and-run loop longer than two rounds where the run
+  command is the same line, which is every edit-and-run loop.
+- **Cause:** the identical-success guard (ISS-0019, a byte-identical write
+  seven times) counts over the whole turn and never resets; a non-zero exit
+  is a success by design. Hermes's rule — a landed mutation between two
+  attempts makes the retry a new experiment — was recorded as an option in
+  the 2026-09-03 references review and not taken.
+- **Evidence:** `reports/2026-09-04_v2_isolated_execution_review.md` §12
+- **Related:** ISS-0019, ISS-0013 (the failure guard learned the same lesson
+  the other way), ISS-0041
+
+---
+
 ### ISS-0041 — within one turn, the errors a command met are shortened away while the model is still fixing them
 
 - **Status:** fixed in the tree, 2026-09-04 — the turn in progress is never

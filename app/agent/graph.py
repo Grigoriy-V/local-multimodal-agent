@@ -15,7 +15,7 @@ import json
 
 import time
 from dataclasses import dataclass, field, replace
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
@@ -255,12 +255,20 @@ def failed_before(messages: Sequence[Message], call: ToolCall) -> int:
     return seen
 
 
-def succeeded_before(messages: Sequence[Message], call: ToolCall) -> int:
-    """How often this exact call has already succeeded in this turn.
+def succeeded_before(
+    messages: Sequence[Message], call: ToolCall, changed_by: Collection[str] = ()
+) -> int:
+    """How often this exact call has succeeded since the world last changed.
 
     The same identity as `failed_before` — name and arguments — over the
-    results that carry no failure. No reset: a success in between is what a
-    failing call needed, and what a repeating success is being counted for.
+    results that carry no failure. A success of a *different* call of a tool
+    that changes the workspace (`changed_by`, the toolbox's `mutates` names)
+    starts the count over: the same command after the file it runs was
+    rewritten is a new experiment, not a replay (Hermes's rule, recorded in
+    the 2026-09-03 references review and taken 2026-09-04 when the guard
+    refused the run of a script's fourth version because the first three had
+    "succeeded" — ISS-0042). An identical call does not reset itself, so the
+    same script run three times unchanged is still the loop of ISS-0019.
     """
 
     successes = {
@@ -268,15 +276,29 @@ def succeeded_before(messages: Sequence[Message], call: ToolCall) -> int:
         for message in messages
         if message.role == "tool" and not tool_failed(message)
     }
-    return sum(
-        1
-        for message in messages
-        for earlier in message.tool_calls
-        if earlier.id in successes
-        and earlier.name == call.name
-        and earlier.arguments == call.arguments
-        and earlier.raw_arguments == call.raw_arguments
-    )
+    by_id = {
+        earlier.id: earlier for message in messages for earlier in message.tool_calls
+    }
+
+    def same(earlier: ToolCall) -> bool:
+        return (
+            earlier.name == call.name
+            and earlier.arguments == call.arguments
+            and earlier.raw_arguments == call.raw_arguments
+        )
+
+    seen = 0
+    for message in messages:
+        if message.role != "tool" or message.tool_call_id not in successes:
+            continue
+        earlier = by_id.get(message.tool_call_id or "")
+        if earlier is None:
+            continue
+        if same(earlier):
+            seen += 1
+        elif earlier.name in changed_by:
+            seen = 0
+    return seen
 
 
 INTERRUPTED_REASON = (
@@ -871,16 +893,17 @@ def build_agent(
         # Judged against the whole batch, so a ceiling the batch crosses is
         # still the ceiling; the refused repeats are then simply not run.
         limit = exceeded(state, len(calls))
+        changing = [name for name in toolbox.names if getattr(toolbox.get(name), "mutates", False)]
         done_again = [
             call
             for call in calls
-            if succeeded_before(state.messages[:-1], call) >= MAX_IDENTICAL_SUCCESSES
+            if succeeded_before(state.messages[:-1], call, changing) >= MAX_IDENTICAL_SUCCESSES
         ]
         if done_again:
             trace.event(
                 "tool_repeated_success",
                 tool=done_again[0].name,
-                attempts=succeeded_before(state.messages[:-1], done_again[0]),
+                attempts=succeeded_before(state.messages[:-1], done_again[0], changing),
                 step=state.steps,
             )
             calls = [call for call in calls if call not in done_again]

@@ -720,3 +720,19 @@ suite measures. Not this: a per-session *root* (the person's files would
 be unreachable), or a session directory only for commands (the round trip
 would break on the first relative path).
 
+**P in Russian on the clean workspace, 2026-09-04** (run `f25fd7cd`): the
+image's fpdf2 reached (`/.uv/.venv/.../fpdf/fpdf.py`), no venv made, `ls`
+on the fonts on its own, and four versions of `make_pdf.py`: DejaVu without
+`add_font` (the error named it), Arial for Cyrillic (`latin-1`), a
+version that was mostly a comment, then one with `add_font` for both faces
+from `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf` — plausibly the
+right one — whose run the harness refused: "this exact call has already
+succeeded twice in this turn with these same arguments" (ISS-0042). The
+identical-success guard of ISS-0019 counts `python3 make_pdf.py` across
+the turn, a non-zero exit is a success, and a rewrite of the file between
+two runs reset nothing. Hermes's rule, read on 2026-09-03 and left as an
+option, is now taken: a success of another workspace-changing tool between
+two identical calls starts the count over; the same call unchanged three
+times is still refused. The model's part: after the refusal it sent the
+same line twice more and then the whole script as a `python3 -c` one-liner.
+
