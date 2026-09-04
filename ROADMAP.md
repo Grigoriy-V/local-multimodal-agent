@@ -317,8 +317,12 @@ What exists. How it was reached, and every number, is in the linked report.
      the residual acceptance 4.3 did not demonstrate. `ISSUES.md` ISS-0004,
      `reports/2026-08-30_v2_prompt_assembly.md`. Reviewed against the
      references 2026-09-04, options and a recommended shape in
-     `reports/2026-09-04_v2_observed_claims_review.md`; **not approved, not
-     started.**
+     `reports/2026-09-04_v2_observed_claims_review.md`; the shape was
+     **withdrawn the same day on the human's word** as a script written
+     from past defects (§9 there; the rule is in `AGENTS.md`). The step
+     stays measurement, not a mechanism. What §9 found the harness's: the
+     memory layer that says nothing when its keyword retrieval finds
+     nothing (ISS-0028), a retrieval design question, unscheduled.
 
 5. **Isolated execution.** A sandbox backend behind the 4.2 seam: shell, Python
    and package installation in a restricted workspace holding no control-plane

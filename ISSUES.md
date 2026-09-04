@@ -227,6 +227,13 @@ Rules that keep the file honest:
 - **Reproduce:** the two messages above in a thread with facts.
 - **Cause:** the model's own choice; the same class as ISS-0004 — describing
   a check or a source it did not open.
+- **Also, 2026-09-04:** partly the harness's. Facts reach the model only
+  through the per-turn layer, a keyword match of the latest user text
+  against the facts, and when nothing matches the layer is absent without
+  a word; "Что ты помнишь" and "да" match nothing. The model was looking
+  at a context with no facts and no sign that a search had run. The
+  retrieval design, not a check on the answer, is where this belongs;
+  `reports/2026-09-04_v2_observed_claims_review.md` §9.
 - **Evidence:** `reports/2026-09-03_v2_history_recovery_review.md`
 - **Related:** ISS-0004
 
@@ -576,6 +583,10 @@ Rules that keep the file honest:
 - **Evidence:** runs `8ffab1aa` (inspect, "вот скриншот", nothing outbound),
   `240f09ea` (same), `eda12665` ("не могу прикрепить"), `29c2bd17`
   (`send_file` of the PNG, delivered), 2026-09-03T04:06–04:09Z; `reports/2026-09-03_v2_first_session_on_the_tool_system.md`
+- **Not seen since:** both runs predate the tool result naming the
+  `send_file` call (2026-09-03, `handover`); since it, run `7673ce55` and
+  the 2026-09-04 after-deploy G sent the screenshot unprompted. To be
+  closed on evidence; `reports/2026-09-04_v2_observed_claims_review.md` §9.
 - **Related:** ISS-0003 is the same shape for a file; 4.7 scenario suite is
   where a prompt change would be accepted
 

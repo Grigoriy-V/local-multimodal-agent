@@ -151,3 +151,49 @@ run (GPU), the deploy, the after-deploy run.
 
 No implementation, no deploy, no GPU run. The next gate is the human's word
 on §5 A and the acceptance in §6, then a separate start signal.
+
+## 9. Withdrawn, 2026-09-04, on the human's word
+
+The human read §5 A and named it: checks 1 and 2 are past bugs rewritten as
+a script — "wrote HTML and did not run the browser" is the model's choice of
+how to work, hard-coded, which the primary principle forbids; and no
+reference ships such a rule (Claude Code ships the `Stop` seam, the checks
+are each project's own). Check 3 as an adapter rule was left in doubt and
+called overkill for now. **Option A is withdrawn; 4.9 stays measurement.**
+The human's rule is now in `AGENTS.md`, Primary principle.
+
+Asked whether two of the five are the harness's after all, the record says:
+
+- **"I checked my memory, nothing is saved"** (ISS-0028) — partly the
+  harness's. Facts reach the model only through the per-turn retrieval,
+  which is a keyword match of the *latest user text* against the facts
+  (`latest_text` → `store.search`), and when nothing matches the layer is
+  simply absent — no line says a search ran and found nothing, and the
+  brief never says facts arrive this way. "Что ты помнишь" and "да" match
+  no fact by keyword, so the model was looking at a context with no facts
+  and no sign why. It still had `search_memory` and chose a sentence over
+  the call, but the harness handed it the reason for that sentence. The
+  general property this violates: what the model is told about its memory
+  should be true of the memory, not of one keyword query. Fixing it is a
+  design question about retrieval (what the automatic layer is for beside
+  the tool, and what it says when it finds nothing), not a check on the
+  answer.
+- **"Here is the screenshot", nothing sent** (ISS-0010) — the model sees
+  the screenshot itself (`inspect_page` returns the image to it), so from
+  where it sits the picture *is* in the conversation. The brief has said
+  since 2026-09-03 that observation tools keep their evidence between the
+  model and the tool, and the tool result names the `send_file` call. Both
+  runs of ISS-0010 (04:06Z) predate that second mitigation; since it,
+  runs `7673ce55` and the 2026-09-04 after-deploy G sent the screenshot
+  unprompted. Not seen since; to be closed on evidence, not built on.
+
+Which of the family predate the tool system (4.5, 2026-09-03) and are still
+current: the page described from its address alone — seen again on the tool
+system (run `45f78d7e`), current. A file handed over as a path — seen again
+2026-09-04 with the send made and a markdown image beside it, current in
+that reduced form. An application called working without a look — seen
+again on the tool system ("Task Board test 3"), current; its named cause,
+that nothing can exercise a page, is a capability gap (browser actions exist
+since 2026-09-03 and are not exposed to the model), not a check. The
+screenshot claim — not seen since the tool result names the send. The
+memory claim — on the tool system, and partly the harness's, above.

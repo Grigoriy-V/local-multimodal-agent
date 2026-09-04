@@ -20,6 +20,15 @@ Avoid bureaucracy and overengineering. If a process or mechanism adds work
 without a concrete safety, evidence or user-value benefit, stop and propose a
 smaller implementation that preserves the product rather than a smaller product.
 
+**A change must not close one observed case for that case alone.** A check
+written from a defect's own shape — "this tool ran and that one did not" —
+is a crutch, and this is a harness: before building a mechanism, say which of
+the harness, the model, a skill or the instructions in `AGENTS.md` the
+behaviour belongs to, and build only when it is the harness's, stated as a
+general property of the system rather than the case (human's rule,
+2026-09-04). What belongs to the model is measured with the scenario suite,
+not scripted.
+
 ## Execution
 
 Codex is the primary project agent and Supervisor. It owns architecture,
