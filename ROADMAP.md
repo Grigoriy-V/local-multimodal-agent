@@ -217,9 +217,11 @@ What exists. How it was reached, and every number, is in the linked report.
    way (results shortened mid-turn ISS-0041, an identical run refused after
    the file changed ISS-0042, `pip` not `python3`'s ISS-0043), the
    harness's own line on a non-zero exit, and the first measured benefit of
-   `/plan` (report §14: the request stays the goal). **Next, each its own
-   gate:** the after-deploy run with R and S, the goal check as an option
-   (§14), then the close of the step. Until 2026-09-04 this was 5a;
+   `/plan` (report §14: the request stays the goal). `read_file` shows an image as a picture,
+   and two more command scenarios, R (data into a chart, looked at, sent)
+   and S (a failing script repaired from its traceback), pass live on this
+   machine. **Next, each its own gate:** the goal check as an option (§14),
+   the after-deploy run, then the close of the step. Until 2026-09-04 this was 5a;
    the local half was 5b and is item 7 now, on the human's word: local work
    on files is a stage of its own, not a sub-step of the sandbox.
 

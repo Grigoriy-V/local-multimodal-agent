@@ -906,3 +906,9 @@ picture, and the refusal did not say where a picture is looked at. The
 remedy pattern again, at the tool: the unsupported-file failure names
 `read_file` for an image. Then R again.
 
+R again with the remedy (run `live-160`, second run): `list_files`,
+`read_file sales.csv`, two commands, `inspect_page chart.png` refused —
+now saying where a picture is looked at — and the next call was `read_file
+chart.png`, then `send_file`; south, 45. Five of five. Eight model calls,
+72 s, most of it the local venv install again.
+
