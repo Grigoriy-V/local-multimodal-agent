@@ -747,3 +747,12 @@ in the system", with the brief's own sentence naming
 the traceback saying `FPDF.add_font() beforehand`. Sorted: the model's.
 Nothing in the harness touched this turn.
 
+**The tool's own sentence, 2026-09-04, on the human's word:** `run_command`'s
+line in the brief now says that a non-zero exit means the command did not
+do what was meant, that the whole output is read before the next step,
+that a traceback names file, line and cause and what it says to do is the
+fix rather than a reason to start over or give up, and that "something is
+missing here" is checked with a command before it is said — DeepSeek's
+placement (beside the tool, not in the persona), about every command and
+no particular failure. To be measured with P.
+

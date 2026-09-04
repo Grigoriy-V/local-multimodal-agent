@@ -160,11 +160,20 @@ def _shell_lines(tools: Toolbox, where: str | None) -> list[str]:
     if "run_command" not in tools.names:
         return []
     place = where or "in your workspace"
+    # The tool's own sentence about reading its result, at the tool, the way
+    # DeepSeek Harness puts "check the exit code, investigate failures before
+    # moving on" beside bash rather than in the persona (2026-09-04, after a
+    # day of turns that rewrote a script against a traceback that named its
+    # own fix). About every command, not about any one failure.
     return [
         f"- run_command runs a shell command {place}. It gives you the exit code "
         "and the output. Use it to run, test and check what you make, and to "
-        "install what that needs. A command cannot ask you anything: give it its "
-        "answers on the command line.",
+        "install what that needs. A non-zero exit code means the command did not "
+        "do what you meant: read the whole output before your next step — a "
+        "traceback names the file, the line and the cause, and what it tells you "
+        "to do is the fix, not a reason to start over or to give up. Before you "
+        "say something is missing here, check with a command. A command cannot "
+        "ask you anything: give it its answers on the command line.",
     ]
 
 
