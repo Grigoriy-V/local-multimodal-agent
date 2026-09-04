@@ -58,7 +58,8 @@ Rules that keep the file honest:
   said what it made of a result, and a stub names where it is stored
   (`shortened` in `app/context/window.py`; `DECISIONS.md` 2026-09-03,
   amended). The size fold, which 4.7 checked in the middle of a turn (K),
-  is what bounds a long turn. Not yet deployed
+  is what bounds a long turn. Deployed the same day (v71) and seen live:
+  twelve steps, `stubbed=0` on each, every traceback in view
 - **Seen:** 2026-09-04, deployed, runs `510fe752` and `3b3c86d8` (P in
   Russian): six rewrites of one script, each answered by a traceback with
   `exit code: 1`. `context_prepared` shows `stubbed` climbing 1, 2, 3, 4, 5

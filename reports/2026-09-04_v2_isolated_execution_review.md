@@ -603,3 +603,31 @@ tool again" wording is gone with the case it served. `tests/test_context.py`
 carries the six-traceback turn. To be measured: P in Russian again, after a
 deploy.
 
+**Two threads after the fix, 2026-09-04** (deploy v71 at 12:11 UTC; the
+first thread ran at 11:54 on v70, before it).
+
+*Tea in English* (run `558aa25c`, v70): `python3 -m venv .venv &&
+.venv/bin/pip install fpdf` (33 s), `write_file`, `.venv/bin/python
+make_pdf.py`, `send_file` — four tools, 100 s, the PDF delivered. No look
+at it (ISS-0040 stands).
+
+*Juice in Russian* (thread `30ed956f`, five turns, v71): `stubbed=0` on
+every one of twelve steps of the first turn — the turn's results were all
+visible, the fix holds. The model wrote a correct reportlab script with
+`TTFont` registered from `/usr/share/fonts/truetype/dejavu/`, ran `pip
+list` and `find /usr/share/fonts` when the human asked, and never got a
+PDF, because every run was `python3 .venv/bin/python create_pdf.py` —
+python running the venv's python *binary* as a script — answered six
+times by `File ".venv/bin/python", line 1: ELF … source code cannot
+contain null bytes`, with the traceback in full view each time. It blamed
+`write_file`, made four more venvs (`.venv_new`, `.venv_ru`, `.venv_fpdf`,
+`.venv_final`, 60 s of installs) and ended by handing the person the code
+to run themselves. Sorted: the model's reading of an error that names its
+own file on the first line. One harness observation beside it: the
+runner's `where` carries a recipe — `python3 -m venv .venv &&
+.venv/bin/pip install ...` — and the model ran that line, verbatim, as
+the first command of every turn, venv or no venv. A brief that prescribes
+a step gets the step; one that states a fact ("a `.venv` in the workspace
+is the `python` a command gets") leaves the step to the model. Option,
+unbuilt: `where` states facts and no commands.
+
