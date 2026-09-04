@@ -123,6 +123,9 @@ BASE_TOOLS = (
 # 55 s cold and the first import of fonttools 50 s — and the venv itself was
 # the first step of every turn, made again and again. With these here, a venv
 # in the workspace is the exception a project needs, not the way in.
+# `uv_pip_install`, because `uv_sync` above made the image's Python a uv venv
+# (`/.uv/.venv`) that carries no `pip` module; a `pip_install` layer fails on
+# it (measured on the first build, 2026-09-04).
 BASE_PACKAGES = (
     "reportlab",
     "fpdf2",
@@ -139,7 +142,7 @@ BASE_PACKAGES = (
 # packages on top, no browser. Like the renderer it is defined by what it is
 # not given below: no secret. The Volume it does get, because the workspace is
 # the one thing a command and the worker have to agree on.
-command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS).pip_install(*BASE_PACKAGES))
+command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS).uv_pip_install(*BASE_PACKAGES))
 
 # Where the workspace stops dying with the container. A container's filesystem
 # is gone the moment it scales down, so a file the assistant wrote in one

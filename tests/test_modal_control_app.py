@@ -374,7 +374,7 @@ def test_a_command_runs_where_no_secret_is() -> None:
 def test_the_command_image_carries_the_base_tools_and_no_browser() -> None:
     text = source()
 
-    assert "command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS).pip_install(*BASE_PACKAGES))" in text
+    assert "command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS).uv_pip_install(*BASE_PACKAGES))" in text
     for tool in ("nodejs", "npm", "git", "ffmpeg", "imagemagick", "poppler-utils", "pandoc", "jq"):
         assert f'"{tool}"' in text
     # A document made without a Cyrillic font is black squares (P, live, 2026-09-04).
@@ -443,6 +443,6 @@ def test_the_everyday_libraries_are_in_the_image_not_on_the_volume() -> None:
 
     text = source()
 
-    assert ".pip_install(*BASE_PACKAGES)" in text
+    assert ".uv_pip_install(*BASE_PACKAGES)" in text
     for package in ("reportlab", "fpdf2", "python-docx", "openpyxl", "pandas", "matplotlib", "pypdf"):
         assert f'"{package}"' in text
