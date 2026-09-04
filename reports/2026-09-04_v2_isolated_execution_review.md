@@ -776,3 +776,16 @@ answered wrongly by the harness. Also seen: 16–20 s for single commands
 (`find`, `pandoc`, the first run) in a warm container — to be measured
 apart from the model before it is called the Volume's commit and reload.
 
+**P in Russian with `/plan` on, 2026-09-04** (run `effea350`, fresh
+thread, the same image and fonts as the four runs before it): `todo_write`
+with three items, the content written first as Markdown, then a script
+that registered DejaVu from `/usr/share/fonts/truetype/dejavu/` at the
+first attempt (`uni=True`, deprecated but working), two error rounds each
+fixed from the traceback (a wrong `fpdf.constants` import removed), exit 0,
+`send_file juice_info.pdf`. 95 s, nine model calls, delivered in Russian;
+no look at it. The human asked whether the comparison is honest given the
+font was already there: it is the same environment as the last four runs,
+all of which had the font and the libraries, so the one thing that differed
+is plan mode — and it is one sample, which is what `prompt_scenarios` with
+`/plan` on and off exists to turn into a number.
+
