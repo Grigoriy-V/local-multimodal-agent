@@ -259,8 +259,8 @@ def chosen(argv: list[str]) -> frozenset[str]:
 
     if "--after-deploy" in argv:
         return frozenset(AFTER_DEPLOY)
-    letters = {arg.upper() for arg in argv if len(arg) == 1 and arg.upper() in "ABCDEFGHI"}
-    return frozenset(letters) if letters else frozenset("ABCDEFGHI")
+    letters = {arg.upper() for arg in argv if len(arg) == 1 and arg.upper() in "ABCDEFGHIJK"}
+    return frozenset(letters) if letters else frozenset("ABCDEFGHIJK")
 
 
 async def main() -> int:
@@ -542,18 +542,23 @@ async def main() -> int:
             # goes on. The checks are the fold event inside the turn, the
             # work done, and an answer — the roadmap's "continues correctly
             # across a compaction", on events.
-            filler = " ".join(f"note {n}: the orchard at {n * 37} elm street keeps {n * 3} trees" for n in range(1, 60))
-            agent.store.append(
-                "chat-k",
-                [
-                    text_message("Here are my orchard notes, keep them in mind:\n" + filler),
-                    Message(role="assistant", content=[ContentPart(kind="text", text="Noted: fifty-nine orchard entries.")]),
-                    text_message("And the second batch:\n" + filler.replace("elm", "oak")),
-                    Message(role="assistant", content=[ContentPart(kind="text", text="Noted the second batch too.")]),
-                ],
-                USER,
-            )
-            agent.context_tokens = 9000
+            # Twelve stored messages, because the newest eight always stay
+            # verbatim: a fold needs something older than that to fold.
+            seeded = []
+            for batch, street in enumerate(("elm", "oak", "ash", "fir", "yew", "bay")):
+                notes = " ".join(
+                    f"note {n}: the orchard at {n * 37} {street} street keeps {n * 3} trees"
+                    for n in range(1, 12)
+                )
+                seeded.append(text_message(f"Orchard notes, batch {batch + 1}:\n{notes}"))
+                seeded.append(
+                    Message(
+                        role="assistant",
+                        content=[ContentPart(kind="text", text=f"Noted batch {batch + 1}.")],
+                    )
+                )
+            agent.store.append("chat-k", seeded, USER)
+            agent.context_tokens = 7600
             agent.rewire()
             k = await Turn(agent, telemetry, 100).ask(
                 "chat-k",
