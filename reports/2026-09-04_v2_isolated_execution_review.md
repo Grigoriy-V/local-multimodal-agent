@@ -955,3 +955,13 @@ not. One sentence added to that line: the shell does not know
 `inspect_page`, `read_file` or `send_file`; those are called as tools,
 `run_command` runs programs. Then G again, deployed.
 
+G again in the worker with the sentence (run `deployed-26898cd1-70`):
+seven of eight. `inspect_page` was called as a tool this time — after a
+`run_command` whose whole text was the model talking to itself: "I will
+use the inspect_page tool directly as a tool call, not as a shell
+command. Wait, I am an agent. I should just call the tool." — the
+screenshot was sent, and the three files were not; the run before sent
+the files and no screenshot. Two samples, each with half of the handover
+G asks for. The sentence did what it was for; what remains is the
+model's, measured by G.
+
