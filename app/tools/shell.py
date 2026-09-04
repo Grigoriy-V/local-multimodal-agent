@@ -167,8 +167,20 @@ class Runner(Protocol):
     async def run(self, command: str, cwd: Path, timeout: float) -> Finished: ...
 
 
-def command_environment(workspace: Path, source: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment a command gets: what a shell needs, home in the workspace."""
+def command_environment(
+    workspace: Path, source: dict[str, str] | None = None, venv: bool = True
+) -> dict[str, str]:
+    """The environment a command gets: what a shell needs, home in the workspace.
+
+    `venv` says whether a `.venv` in the workspace goes first on `PATH`. On the
+    person's machine it does — the local runner made it, it is the project's
+    environment. In the deployed container it does not: the image carries the
+    libraries and the brief names them, and a venv left on the Volume by an
+    earlier session, first on `PATH`, made `python3` find fpdf 1.7 where the
+    brief said fpdf2 (run `a7d5c61c`, 2026-09-04). There, as in Claude Code
+    and Codex, nothing is activated for the developer: a venv is used when a
+    command names it.
+    """
 
     source = os.environ if source is None else source
     env = {name: source[name] for name in _PASSED if name in source}
@@ -183,7 +195,7 @@ def command_environment(workspace: Path, source: dict[str, str] | None = None) -
     # The workspace's own Python first, when there is one: `python` and `pip`
     # are the project's, as in a developer's activated shell. A workspace
     # without a venv keeps the machine's `python`.
-    if venv_bin(workspace).is_dir():
+    if venv and venv_bin(workspace).is_dir():
         env["PATH"] = os.pathsep.join([str(venv_bin(workspace)), *filter(None, [env.get("PATH", "")])])
         env["VIRTUAL_ENV"] = str(workspace / VENV)
     env["PYTHONUTF8"] = "1"
@@ -275,13 +287,17 @@ class LocalRunner:
         )
         self._runs = 0
 
+    # Whether a `.venv` in the workspace is put first on `PATH`; see
+    # `command_environment`.
+    venv_on_path = True
+
     def prepare(self, cwd: Path) -> None:
         """What the workspace needs before a command runs here: its temp, its venv."""
 
         ensure_venv(cwd)
 
     def _start(self, command: str, cwd: Path):
-        env = command_environment(cwd)
+        env = command_environment(cwd, venv=self.venv_on_path)
         if self.bounded:
             shell_windows.grant_workspace(cwd)
             self._runs += 1
@@ -355,6 +371,8 @@ class ContainerRunner(LocalRunner):
     so. `where` is never read here — the worker's runner is the one the brief
     quotes.
     """
+
+    venv_on_path = False
 
     def prepare(self, cwd: Path) -> None:
         ensure_tmp(cwd)

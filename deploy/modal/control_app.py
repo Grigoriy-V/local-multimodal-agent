@@ -279,10 +279,11 @@ class ModalRunner:
         "ffmpeg, imagemagick, poppler (pdftotext, pdftoppm), pandoc; TrueType fonts "
         "with Cyrillic under /usr/share/fonts/truetype (DejaVu, Liberation). The "
         "container is disposable: what a command installs into it is gone by the "
-        "next turn, and what it writes in the workspace stays. A `.venv` directory "
-        "in the workspace, when there is one, is the `python` and `pip` a command "
-        "gets, and it survives; node packages in the workspace survive too. The "
-        "result says `new environment` when the container is fresh"
+        "next turn, and what it writes in the workspace stays. `python3` and `pip` "
+        "are the container's; nothing in the workspace is activated for you, so a "
+        "venv there is used only when a command names its own python. Node "
+        "packages in the workspace survive. The result says `new environment` "
+        "when the container is fresh"
     )
 
     async def run(self, command: str, cwd: Path, timeout: float):

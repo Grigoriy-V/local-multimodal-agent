@@ -672,3 +672,51 @@ used only when a command names it (the references' behaviour: nothing is
 activated for the developer); and the debris on the Volume is the human's
 to delete.
 
+## 13. Where a conversation works: a directory of its own, and the person's files — option, 2026-09-04
+
+The human's question after the venv-on-PATH finding: should a session get
+a directory of its own, where the agent may make a venv and build things,
+while still working on the files in the root — because nobody has hands on
+the server, and everything landing in the root is "a sea of problems".
+Today's root proves it: twenty `Task Board test N` directories, five venvs
+and a `fonts/` from one day of tests, and a venv that poisoned the next
+session's `python3`.
+
+**OpenClaw** (`gateway/sandboxing`, read again for this): a sandboxed
+session works in a **sandbox workspace of its own** under
+`~/.openclaw/sandboxes`, one per agent, per session or shared by
+configuration; the agent's main workspace is a separate directory, mounted
+into the container read-only at `/agent` or read-write at `/workspace`
+when the deployment allows, hidden by default; the sandbox workspace is
+deleted with its container when pruned. Package installation is "image
+provisioning, not normal sandbox-turn behaviour" — their answer to venvs
+is the same as ours today, the libraries in the image. So their shape is
+two directories: the session's, disposable, and the person's, shared and
+mounted beside it.
+
+**Claude Code and Codex** have one concept for this that OpenClaw's two
+directories are a special case of: a **working directory** inside a
+**boundary**. `cwd` is where relative paths go and new files land; the
+boundary (the project, the allowed roots) is what may be touched at all;
+`../x` is fine while it stays inside the boundary. Nothing is activated in
+either.
+
+**Option for us, not built:** keep the person's root (`/workspaces/<user>`)
+as the boundary every tool validates against, as now, and give each
+conversation a working directory inside it — `<user>/sessions/<thread>/`
+— as the `cwd` of commands *and* the base of relative paths for the file
+tools, so a command and `write_file` still agree on where `make_pdf.py`
+is. The brief states two facts: the working directory is the
+conversation's own, where new files and a venv land; the person's files
+are one level up, reachable by `../name`, and `send_file` takes any path
+inside the root. A `/new` starts in a fresh directory; the old one stays
+on the Volume until the person deletes it (or a later rule prunes it).
+What it costs: one `cwd` notion added to the registry (`Toolbox` roots
+stay), a relative-path base in the file tools, the `where` and workspace
+lines in the brief, and a scenario asserting a file made in the session
+directory is found by a command and sent, and a file in the root is
+readable by `../`. What it risks: the model reading `..` wrong, which the
+suite measures. Not this: a per-session *root* (the person's files would
+be unreachable), or a session directory only for commands (the round trip
+would break on the first relative path).
+

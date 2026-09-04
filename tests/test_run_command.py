@@ -433,3 +433,16 @@ def test_create_agent_hands_the_runner_to_the_registry(tmp_path: Path) -> None:
         assert isinstance(create_agent(agent_settings=settings).capability_registry.runner, LocalRunner)
     finally:
         agent.store.close()
+
+
+def test_the_container_activates_nothing_from_the_workspace(workspace: Path) -> None:
+    """Run `a7d5c61c`, 2026-09-04: a `.venv` left on the Volume, first on
+    `PATH`, made `python3` find fpdf 1.7 where the brief said fpdf2."""
+
+    from app.tools.shell import ContainerRunner
+
+    (workspace / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")).mkdir(parents=True)
+
+    assert command_environment(workspace, {"PATH": "/usr/bin"}, venv=ContainerRunner.venv_on_path)["PATH"] == "/usr/bin"
+    assert command_environment(workspace, {"PATH": "/usr/bin"}, venv=LocalRunner.venv_on_path)["PATH"] != "/usr/bin"
+
