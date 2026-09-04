@@ -558,3 +558,29 @@ venv is the exception rather than the first step (a human's list, and a
 rebuild per change); or accept the cost as the price of an install that
 survives.
 
+**What DeepSeek Harness has for "make the model an agent", read 2026-09-04**
+(`packages/core/system-prompt`, `preset/agent-presets/presets/standard`,
+`shell/tool-bash`, `fs/tool-fs`, `fs/fs-observation-policy`,
+`guard/repeat-tool-reminder`, `plan`, `todo`, `goal`, `hooks`). There is no
+global prompt block of the kind added here. The persona is one sentence
+("You are a coding agent powered by {{model}}. Your working directory is
+{{cwd}}."), and everything else is small and placed at the seam it is
+about: a per-tool prompt section ("Check the [exit code: N] marker on every
+bash result; investigate failures before moving on"; "Read the file first
+… unless you just created or edited it"); a **tool-boundary policy**,
+`fs-observation-policy`, under which an edit of a file the session has not
+read fails with `FS_NOT_OBSERVED` and the remedy "read the file, then
+retry", and a file changed since it was read fails `FS_STALE_VERSION` — a
+mechanism, general (every file, every edit), stated as a property ("you
+change what you have seen"); an **advisory repeat reminder** at 3, 5 and 8
+identical calls; plan mode's section, which is the fullest prose they have
+("Explore first … Resolve discoverable facts by inspection … Do not ask the
+user where code lives when you can find out") and applies only while
+planning; `todo_write` and a durable goal as state the model keeps; hooks
+as the deployment's own reactions to tool results. The agentic habit itself
+they take from the model (DeepSeek V4) — nothing in the harness pretends
+to supply it. Read against ours: our repeat guard, typed failures with
+remedies and tool-boundary policies (a path root, a `mutates` flag, the
+write boundary) are the same kind of thing; what we do not have is a
+per-tool sentence at the tool and an observation rule at the file seam.
+
