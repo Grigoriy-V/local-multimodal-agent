@@ -31,6 +31,7 @@ from app.telemetry import NO_TRACE, TurnTrace
 from .base import (
     BAD_ARGUMENTS,
     INTERNAL,
+    OUTPUT_CUT,
     TIMEOUT,
     UNKNOWN_TOOL,
     Tool,
@@ -245,17 +246,27 @@ class ToolExecutor:
         tool = self.toolbox.get(name)
         resolved = replace(call, name=name)
         if call.raw_arguments is not None:
-            return PreparedToolCall(
-                call=resolved,
-                tool=tool,
-                refusal=ToolFailure(
+            if call.cut:
+                refusal = ToolFailure(
+                    code=OUTPUT_CUT,
+                    message=(
+                        f"your answer was cut at the output limit before the arguments "
+                        f"of {name} ended, so the call was not run and nothing was "
+                        "changed; send it in smaller pieces — write_file with the first "
+                        "part, then edit_file to add the rest — rather than the same "
+                        "call again"
+                    ),
+                )
+            else:
+                refusal = ToolFailure(
                     code=BAD_ARGUMENTS,
                     message=(
                         f"bad arguments for {name}: they could not be read as a JSON "
                         "object, so the call was not run"
                     ),
-                ),
-                approval_required=False,
+                )
+            return PreparedToolCall(
+                call=resolved, tool=tool, refusal=refusal, approval_required=False
             )
         resolved = self.toolbox.coerce(resolved)
         problem = self.toolbox.validation_error(resolved)

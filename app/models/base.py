@@ -80,6 +80,12 @@ class ToolCall:
     name: str
     arguments: dict[str, Any]
     raw_arguments: str | None = None
+    # The model's answer ended at its output limit before this call's
+    # arguments did (`finish_reason == "length"`). Until 2026-09-04 such a
+    # call was refused as "bad JSON", which is not what happened, and the
+    # model's natural retry was the same file cut at the same place
+    # (ISS-0031). The executor names the real cause instead.
+    cut: bool = False
 
 
 @dataclass(frozen=True)

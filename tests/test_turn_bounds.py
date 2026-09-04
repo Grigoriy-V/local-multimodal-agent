@@ -191,8 +191,16 @@ async def test_the_tool_ceiling_counts_calls_and_not_steps(store: SqliteStore) -
     assert len(ran) == 2
 
 
+class Restless(ScriptedBackend):
+    """Asks for a different ping every time, so nothing but time stops it."""
+
+    async def invoke(self, messages, tools=None, response_format=None):
+        self.default = calls("ping", n=len(self.requests))
+        return await super().invoke(messages, tools, response_format)
+
+
 async def test_a_turn_that_spent_its_seconds_stops(store: SqliteStore) -> None:
-    backend = ScriptedBackend(default=calls("ping"))
+    backend = Restless(default=calls("ping"))
     agent = loop(
         backend, store, budget=TurnBudget(max_steps=99, max_seconds=0.000_001)
     )

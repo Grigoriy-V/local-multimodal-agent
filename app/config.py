@@ -24,9 +24,11 @@ class ModelSettings(BaseSettings):
     # avoids guessing from a URL or from the shape of a secret.
     auth_style: Literal["bearer", "modal_proxy"] = "bearer"
     timeout: float = 120.0
-    # Version 1.5 coding profile. This is an output cap, not reserved output and
-    # not the server context length; the validated server context stays 16k.
-    max_tokens: int = 4096
+    # An output cap, not reserved output and not the server's context length
+    # (64k since 2026-08-30). 8192 since 2026-09-04: a single file of about
+    # 15k characters is 5k tokens, and 4096 cut it mid-call (ISS-0031); output
+    # is cheap next to prefill, and the loop's budget bounds the rest.
+    max_tokens: int = 8192
     temperature: float = 0.0
     # Extra attempts after the first, for failures that say "later", not "no".
     retries: int = 2
@@ -168,7 +170,10 @@ class AgentSettings(BaseSettings):
     # deliberate act rather than the consequence of where it was started.
     workspace: str = "workspace"
     keep_recent: int = 8
-    summarize_after: int = 16
+    # How many messages past the summary before the conversation folds on
+    # count alone. The size trigger, from the model's own window, is the one
+    # that decides on any server that reports one; this bounds the rest.
+    summarize_after: int = 60
     retrieved_facts: int = 5
     # How many of the newest tool results a request carries in full; older
     # ones are stubs on the surface and whole in history. Two is the result the

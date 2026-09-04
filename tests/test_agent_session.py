@@ -457,3 +457,51 @@ async def test_the_workspace_is_the_only_readable_root(
 
     assert body(produced[1]).startswith("error: path")
     assert "must not be read" not in prompt_text(backend.requests[1])
+
+
+# --- a fold that fails does not fail the turn ----------------------------------------
+
+
+class _Overflowing(ScriptedBackend):
+    """Answers as scripted; the summarizer's request does not fit."""
+
+    async def invoke(self, messages, tools=None, response_format=None):
+        if "running summary" in body(messages[0]):
+            self.requests.append(list(messages))
+            raise ContextOverflowError("HTTP 400: maximum context length")
+        return await super().invoke(messages, tools, response_format)
+
+
+async def test_a_summarizer_that_does_not_fit_does_not_fail_a_delivered_turn(
+    database: Path, workspace: Path
+) -> None:
+    """ISS-0029: the answer was streamed, then the fold in `persist` raised
+    and the person read "That request failed" under a complete answer."""
+
+    policy = ContextPolicy(keep_recent=4, summarize_after=8)
+    backend = _Overflowing(default=says("ok"))
+    agent = open_agent(database, workspace, backend, policy)
+
+    answers = [await agent.answer("t1", user(f"turn {turn}")) for turn in range(6)]
+
+    assert all(body(reply[-1]) == "ok" for reply in answers)
+    assert agent.store.summary("t1") == (None, 0), "nothing folded, nothing lost"
+    assert agent.store.message_count("t1") == 12
+    assert any("running summary" in body(request[0]) for request in backend.requests)
+
+
+async def test_a_fold_before_a_step_that_does_not_fit_still_answers(
+    database: Path, workspace: Path
+) -> None:
+    """The same guard in `fitted`: the request goes unfolded and the overflow
+    path answers if it must; here it fits, so the answer is the answer."""
+
+    policy = ContextPolicy(keep_recent=2, summarize_after=100)
+    backend = _Overflowing(default=says("ok"), limit=100)
+    agent = open_agent(database, workspace, backend, policy)
+
+    for turn in range(3):
+        await agent.answer("t1", user(f"turn {turn}"))
+
+    assert agent.store.message_count("t1") == 6
+    assert any("running summary" in body(request[0]) for request in backend.requests)

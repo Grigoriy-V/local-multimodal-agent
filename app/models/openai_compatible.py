@@ -207,11 +207,18 @@ def readable(completion: Completion) -> Completion:
     the next attempt is not a copy of this one.
     """
 
-    if not any(unreadable(call) for call in completion.tool_calls):
-        return completion
-    return replace(
-        completion, tool_calls=tuple(repaired(call) for call in completion.tool_calls)
-    )
+    calls = completion.tool_calls
+    if completion.finish_reason == "length":
+        # The server stopped the model at its output limit. A call whose
+        # arguments cannot be read after that was cut, not malformed, and
+        # the model has to be told which (ISS-0031).
+        calls = tuple(
+            replace(call, cut=True) if call.raw_arguments is not None else call
+            for call in calls
+        )
+    if not any(unreadable(call) for call in calls):
+        return completion if calls is completion.tool_calls else replace(completion, tool_calls=calls)
+    return replace(completion, tool_calls=tuple(repaired(call) for call in calls))
 
 
 def unreadable(call: ToolCall) -> str:

@@ -135,7 +135,10 @@ Rules that keep the file honest:
 
 ### ISS-0032 — the conversation folds every twelve messages whatever their size
 
-- **Status:** open
+- **Status:** fixed in the tree, 2026-09-04 — `summarize_after` is 60, a
+  fallback for a server that reports no window; the size trigger is the rule.
+  The summary's word cap now follows what a fold covers (150 + 15 a message,
+  at most 600). Deployed the same day
 - **Seen:** 2026-09-03, deployed, thread `4fd35f80`: four folds in sixteen
   turns (`count` at 12, 24, 36, `asked` at 15) with requests between 4k and
   10k tokens against a 52k budget
@@ -153,7 +156,10 @@ Rules that keep the file honest:
 
 ### ISS-0031 — a tool call cut at the output limit is reported to the model as bad JSON
 
-- **Status:** open
+- **Status:** fixed in the tree, 2026-09-04 — `finish_reason == "length"`
+  marks an unreadable call as `cut`, and the executor refuses it as
+  `output_cut`, naming the limit and the way out (smaller pieces);
+  `MODEL_MAX_TOKENS` default 8192. Deployed the same day
 - **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.3); not yet seen live
 - **Costs:** a `write_file` whose content runs past `MODEL_MAX_TOKENS`
   (4096) arrives with `finish_reason="length"` and unterminated arguments;
@@ -170,7 +176,9 @@ Rules that keep the file honest:
 
 ### ISS-0030 — the summarizer is handed every tool result in full
 
-- **Status:** open
+- **Status:** fixed in the tree, 2026-09-04 — the summarizer reads the same
+  stubs the model reads (`shortened(keep=0)`, with positions). Deployed the
+  same day
 - **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.1); the cost is visible in
   today's folds of thread `4fd35f80`, each carrying whole page fetches
 - **Costs:** a fold of twelve messages with three page fetches sends the
@@ -187,7 +195,9 @@ Rules that keep the file honest:
 
 ### ISS-0029 — a summarizer request that does not fit fails a turn whose answer was already delivered
 
-- **Status:** open
+- **Status:** fixed in the tree, 2026-09-04 — both folds catch `BackendError`
+  and record `context_fold_failed`; the turn keeps its answer. Deployed the
+  same day
 - **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.1); not yet seen live
 - **Costs:** the answer streams to the person, then `persist` folds, the
   summarizer's request exceeds the window, the node raises, and the chat
@@ -354,7 +364,10 @@ Rules that keep the file honest:
 
 ### ISS-0019 — the page is written twice, identically, after the plan is updated
 
-- **Status:** open
+- **Status:** mitigated, 2026-09-04 — the third byte-identical successful
+  call in a turn is answered "already done" without running
+  (`MAX_IDENTICAL_SUCCESSES`); the second still runs and `write_file` still
+  answers `unchanged:`. The model's habit itself is not fixed
 - **Seen:** 2026-09-03, deployed, five turns in a row (runs `b100a27a`,
   `f41278c9`, `af276ed7`, `752486c1`, `7673ce55`)
 - **Costs:** after the three files are written and the plan is ticked, the

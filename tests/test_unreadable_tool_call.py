@@ -222,3 +222,22 @@ async def test_the_text_already_shown_is_not_unsaid() -> None:
     assert [event.text for event in events if isinstance(event, TextDelta)] == [
         "Writing it now."
     ]
+
+
+def test_a_call_cut_at_the_output_limit_is_marked_as_cut() -> None:
+    """ISS-0031: `finish_reason == "length"` with unreadable arguments is a
+    cut call, not a malformed one, and the executor names the cause."""
+
+    from app.models import Completion
+    from app.models.openai_compatible import readable, tool_call
+
+    cut = Completion(
+        text="",
+        tool_calls=(tool_call("c1", "write_file", '{"path": "a.html", "content": "<html'),),
+        finish_reason="length",
+    )
+    whole = Completion(text="", tool_calls=cut.tool_calls, finish_reason="tool_calls")
+
+    assert readable(cut).tool_calls[0].cut is True
+    assert readable(whole).tool_calls[0].cut is False
+    assert readable(cut).tool_calls[0].raw_arguments is not None

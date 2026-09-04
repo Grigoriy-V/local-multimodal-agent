@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from app.context.window import ContextPolicy, system, transcript, turn_boundary
+from app.context.window import ContextPolicy, shortened, system, transcript, turn_boundary
 from app.memory import ConversationStore
 from app.models import ContentPart, Message, ModelBackend
 
@@ -18,24 +18,52 @@ from app.models import ContentPart, Message, ModelBackend
 # things, and what is still open. Prose loses the file names first.
 INSTRUCTION = (
     "You maintain a running summary of a conversation. Rewrite the summary so it "
-    "covers the earlier summary and the new exchange together, at most 200 words, "
+    "covers the earlier summary and the new exchange together, at most {words} words, "
     "as four short sections: Goal (what the person wants), Done (what has been done, "
     "naming files, paths, numbers and decisions exactly as written), Open (questions "
     "or work not finished), Preferences (how the person wants things). Leave out a "
     "section that would be empty. Plain text, no preamble."
 )
 
+# How long a summary may be, from how much it is asked to cover. A fold by
+# size takes in everything but the newest window at once — forty messages
+# is ordinary — and two hundred words for forty messages loses the file
+# names first. Fifteen words a message, from a floor, to a ceiling that is
+# still a small share of any window.
+WORDS_FLOOR = 150
+WORDS_PER_MESSAGE = 15
+WORDS_CEILING = 600
+
+
+def summary_words(covered: int) -> int:
+    return min(WORDS_CEILING, WORDS_FLOOR + WORDS_PER_MESSAGE * covered)
+
 
 async def summarize(
     backend: ModelBackend,
     previous: str | None,
     messages: Sequence[Message],
+    first_position: int = 0,
 ) -> str:
-    body = transcript(messages)
+    """One summarizer call over the surface of `messages`, not their whole text.
+
+    Every tool result the summarizer reads is the stub the model itself reads
+    once a result is old: the tool, its subject, the size and the stored
+    position. What a tool said back is not what the summary is for — the
+    model's own next message already says what it made of it — and whole
+    results made a fold the largest prefill of a conversation, and on a long
+    tool turn a request that could exceed the window (ISS-0029, ISS-0030).
+    A summary that carries positions is also one the model can follow with
+    `read_history`.
+    """
+
+    surface, _ = shortened(messages, keep=0, stored=len(messages), base=first_position)
+    body = transcript(surface)
     if previous:
         body = f"Earlier summary:\n{previous}\n\nNew exchange:\n{body}"
+    instruction = INSTRUCTION.format(words=summary_words(len(messages)))
     completion = await backend.invoke(
-        [system(INSTRUCTION), Message(role="user", content=[ContentPart(kind="text", text=body)])]
+        [system(instruction), Message(role="user", content=[ContentPart(kind="text", text=body)])]
     )
     return completion.text.strip()
 
@@ -51,10 +79,13 @@ async def fold_older_messages(
 ) -> str | None:
     """Summarize everything past the verbatim window. Returns the new summary.
 
-    Two things can trigger a fold: too many messages, or a request that grew
-    past `max_input_tokens`. The second is what makes the bound a token bound —
-    eight short turns and eight turns carrying images are the same number of
-    messages and nothing like the same request.
+    Two things can trigger a fold: a request that grew past
+    `max_input_tokens`, or — as the fallback for a server that does not say
+    how large a request may be — too many messages. The first is the rule:
+    the decision of 2026-09-03 says the summary is spent only when the
+    shortened surface is still above budget, and until ISS-0032 the count
+    fired first in every conversation, folding every twelve messages with
+    most of the window empty.
 
     `used_tokens` is what the model reported for the request just made, not an
     estimate of it. That makes the trigger exact and one turn late, which is why
@@ -81,7 +112,7 @@ async def fold_older_messages(
     if cut <= 0 or cut >= len(pending):
         return None
 
-    updated = await summarize(backend, previous, pending[:cut])
+    updated = await summarize(backend, previous, pending[:cut], first_position=through)
     if not updated:
         return None
     store.set_summary(thread_id, updated, through + cut)

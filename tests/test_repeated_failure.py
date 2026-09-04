@@ -303,3 +303,30 @@ def test_a_fenced_value_that_lost_the_next_argument_is_named_as_the_cause(
     assert error is not None
     assert error.startswith("missing required argument(s): path; content ends with a markdown fence")
     assert "path first and no fence" in error
+
+
+# --- identical successes are bounded too ------------------------------------------
+
+
+async def test_the_third_identical_successful_call_is_answered_without_running(
+    store: SqliteStore, workspace: Path
+) -> None:
+    """ISS-0019: the same page written seven times in one turn, each a full
+    generation. The third byte-identical success is refused and the turn
+    goes on; nothing ends."""
+
+    same = calls("write_file", path="page.html", content="<p>hi</p>")
+    backend = ScriptedBackend(same, same, same, says("Done."))
+    agent = build_agent(backend, Toolbox(filesystem_tools(workspace)), store, OWNER)
+
+    result = await agent.ainvoke(ask("make a page"))
+
+    results = [m for m in result["messages"] if m.role == "tool"]
+    assert len(results) == 3
+    assert results[0].failure is None and results[1].failure is None
+    assert results[2].failure is not None and results[2].failure.code == "not_run"
+    assert "already succeeded twice" in spoken(results[2])
+    assert not result.get("stopping"), "one refused call is not an ending"
+    assert spoken(result["messages"][-1]) == "Done."
+    assert backend.tools_seen[-1] is not None, "tools stay offered"
+    assert (workspace / "page.html").read_text(encoding="utf-8") == "<p>hi</p>"

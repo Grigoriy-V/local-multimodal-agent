@@ -398,7 +398,7 @@ async def test_a_short_thread_is_not_summarized(store: SqliteStore) -> None:
     backend = EchoBackend()
     store.append("t1", exchange(3), LOCAL_USER_ID)
 
-    result = await fold_older_messages(backend, store, "t1", ContextPolicy())
+    result = await fold_older_messages(backend, store, "t1", ContextPolicy(summarize_after=16))
 
     assert result is None
     assert backend.requests == []
@@ -410,7 +410,7 @@ async def test_a_long_thread_is_folded_and_the_summary_records_its_reach(
 ) -> None:
     store.append("t1", exchange(12), LOCAL_USER_ID)
 
-    await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy())
+    await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy(summarize_after=16))
 
     summary, through = store.summary("t1")
     assert summary == "they talked about files"
@@ -438,7 +438,7 @@ async def test_the_summarizer_is_shown_the_older_messages_not_the_recent_ones(
     backend = EchoBackend()
     store.append("t1", exchange(12), LOCAL_USER_ID)
 
-    await fold_older_messages(backend, store, "t1", ContextPolicy())
+    await fold_older_messages(backend, store, "t1", ContextPolicy(summarize_after=16))
 
     [request] = backend.requests
     body = request[-1].content[0].text
@@ -449,10 +449,10 @@ async def test_the_summarizer_is_shown_the_older_messages_not_the_recent_ones(
 async def test_folding_twice_carries_the_earlier_summary_forward(store: SqliteStore) -> None:
     backend = EchoBackend()
     store.append("t1", exchange(12), LOCAL_USER_ID)
-    await fold_older_messages(backend, store, "t1", ContextPolicy())
+    await fold_older_messages(backend, store, "t1", ContextPolicy(summarize_after=16))
     store.append("t1", exchange(12), LOCAL_USER_ID)
 
-    await fold_older_messages(backend, store, "t1", ContextPolicy())
+    await fold_older_messages(backend, store, "t1", ContextPolicy(summarize_after=16))
 
     body = backend.requests[1][-1].content[0].text
     assert "Earlier summary:" in body
@@ -535,7 +535,7 @@ async def test_nothing_is_lost_when_a_thread_is_folded(store: SqliteStore) -> No
 
     store.append("t1", exchange(12), LOCAL_USER_ID)
 
-    await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy())
+    await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy(summarize_after=16))
 
     assert store.message_count("t1") == 24
 
@@ -576,3 +576,62 @@ def test_the_summary_says_where_its_exact_words_are() -> None:
 
     assert "search_history finds them, read_history returns them" in summary.content[0].text
     assert "search_history" not in alone.content[0].text
+
+
+# --- what the summarizer reads --------------------------------------------------------
+
+
+async def test_the_summarizer_reads_stubs_not_whole_results(store: SqliteStore) -> None:
+    """ISS-0030: a fold sent every tool result whole, up to 32k each; the
+    summarizer now reads the same stubs the model reads, with positions."""
+
+    backend = EchoBackend()
+    store.append(
+        "t1",
+        [
+            user("fetch it"),
+            call("c1", "fetch_page", url="https://example.com/"),
+            result("c1", "p" * 5_000),
+            *[user(f"and {index}") for index in range(10)],
+        ],
+        LOCAL_USER_ID,
+    )
+
+    await fold_older_messages(backend, store, "t1", ContextPolicy(keep_recent=4, summarize_after=8))
+
+    [request] = backend.requests
+    body = request[-1].content[0].text
+    assert "p" * 200 not in body, "the whole result is not sent"
+    assert "[fetch_page https://example.com/: 5000 characters; shortened — the full result is stored: read_history 2]" in body
+    assert "and 3" in body and "and 9" not in body
+
+
+async def test_the_summary_may_grow_with_what_it_covers(store: SqliteStore) -> None:
+    backend = EchoBackend()
+    store.append("t1", exchange(12), LOCAL_USER_ID)
+
+    await fold_older_messages(backend, store, "t1", ContextPolicy(summarize_after=16))
+
+    [request] = backend.requests
+    instruction = request[0].content[0].text
+    covered = store.summary("t1")[1]
+    assert f"at most {150 + 15 * covered} words" in instruction
+
+
+def test_the_summary_length_has_a_floor_and_a_ceiling() -> None:
+    from app.context.summary import summary_words
+
+    assert summary_words(0) == 150
+    assert summary_words(12) == 330
+    assert summary_words(100) == 600
+
+
+async def test_the_count_trigger_is_a_fallback_past_sixty_messages(store: SqliteStore) -> None:
+    """ISS-0032: sixteen messages folded every conversation every twelve
+    messages with most of the window empty; the size trigger is the rule."""
+
+    store.append("t1", exchange(20), LOCAL_USER_ID)
+
+    assert await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy()) is None
+    store.append("t1", exchange(11), LOCAL_USER_ID)
+    assert await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy()) is not None

@@ -588,3 +588,19 @@ def test_show_run_prints_the_code_and_the_message() -> None:
     text = render_run(run_row, trace)
 
     assert "fs.not_found: path 'absent.txt' does not exist" in text
+
+
+def test_a_cut_call_is_refused_by_naming_the_output_limit(tmp_path) -> None:
+    from dataclasses import replace
+
+    from app.tools import ToolExecutor, Toolbox, filesystem_tools
+    from app.models.openai_compatible import tool_call
+
+    call = replace(tool_call("c1", "write_file", '{"path": "a.html", "content": "<h'), cut=True)
+    prepared = ToolExecutor(Toolbox(filesystem_tools(tmp_path))).pre_execute(call)
+
+    assert prepared.refusal is not None
+    assert prepared.refusal.code == "output_cut"
+    assert "cut at the output limit" in prepared.refusal.message
+    assert "smaller pieces" in prepared.refusal.message
+    assert not (tmp_path / "a.html").exists()

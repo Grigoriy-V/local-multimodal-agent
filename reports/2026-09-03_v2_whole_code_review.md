@@ -341,3 +341,30 @@ were not re-read today; their shapes are as recorded in the two earlier
 reports and marked where recalled. The Chainlit path was read, not run.
 Postgres-specific paths were read against the contract suite, which runs on
 SQLite here.
+
+## Built, 2026-09-04: items 1 and 2 of §4
+
+After the human's "да" and "заканчивай 1 и 2 пункт и всё":
+
+- **2.1** `summarize()` reads `shortened(messages, keep=0)` — every tool
+  result a stub with its stored position — and the instruction's word cap is
+  `150 + 15 × messages`, at most 600, so a fold by size that covers forty
+  messages is not asked to fit them into two hundred words. Both folds
+  (`fitted`, `persist`) catch `BackendError`, record `context_fold_failed`
+  and go on; a delivered answer is never followed by a failure.
+- **2.2** `summarize_after` 16 → 60 in `ContextPolicy` and `AgentSettings`,
+  a fallback for a server that reports no window; folding is by size, as
+  the 2026-09-03 decision already said.
+- **2.3** `ToolCall.cut`, set by `readable()` when `finish_reason ==
+  "length"` and the arguments could not be read; `pre_execute` refuses such a
+  call as `output_cut` — "your answer was cut at the output limit before the
+  arguments ended … send it in smaller pieces". `MODEL_MAX_TOKENS` default
+  4096 → 8192.
+- **2.4** `succeeded_before` beside `failed_before`: the third identical
+  successful call of a turn is answered `not_run` ("already succeeded twice
+  … the earlier result stands") without running, and the turn goes on. A
+  model that keeps sending it then meets the failure guard two halts later,
+  which ends the turn — the cascade is deliberate.
+
+Tests: eleven new; the offline suite green (count in the commit). Not done
+here: 2.5–2.13, by the human's word; the live check is the after-deploy run.

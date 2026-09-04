@@ -23,6 +23,7 @@ ToolReturn = str | Sequence[ContentPart]
 # adds one only when something has to branch on it.
 UNKNOWN_TOOL = "unknown_tool"  # the name matched nothing the toolbox has
 BAD_ARGUMENTS = "bad_arguments"  # the arguments failed the schema or were unreadable
+OUTPUT_CUT = "output_cut"  # the model's answer hit its output limit inside the call
 DECLINED = "declined"  # the person answered no to an approval
 NOT_RUN = "not_run"  # the loop halted the call: budget, stop, or a repeating failure
 TIMEOUT = "timeout"  # the executor's deadline passed

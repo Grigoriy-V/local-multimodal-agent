@@ -20,6 +20,7 @@ from app.agent.runtime import Agent
 from app.agent.stop import MemoryStopRequests
 from app.agent.stopping import STOP_ON_ANSWER, Candidate, Steering
 from app.config import AgentSettings, TelegramSettings
+from app.context import ContextPolicy
 from app.memory import SqliteStore
 from app.models import Completion, ContentPart, Message, ToolCall
 from app.instructions import INSTRUCTIONS_FILE
@@ -158,6 +159,7 @@ def build(
     backend: ScriptedBackend,
     stops: MemoryStopRequests | None = None,
     stopping=STOP_ON_ANSWER,
+    policy: ContextPolicy | None = None,
 ) -> TelegramAdapter:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -177,6 +179,7 @@ def build(
             user_id=user_id,
             stops=stops,
             stopping=stopping,
+            policy=policy,
         )
 
     client = TelegramClient(settings, transport=telegram.transport())
@@ -1050,7 +1053,7 @@ async def test_a_fold_during_a_turn_is_announced(
     conversation was folded, and how much, without reading a trace."""
 
     backend = ScriptedBackend(default=says("a summary of what was said"))
-    adapter = build(telegram, settings, tmp_path, backend)
+    adapter = build(telegram, settings, tmp_path, backend, policy=ContextPolicy(summarize_after=16))
     for index in range(8):
         await adapter.handle_update(text_update(f"message {index}", update_id=index + 1))
     assert not any(text.startswith("Folded") for text in telegram.sent)

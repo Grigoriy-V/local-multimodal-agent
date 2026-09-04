@@ -62,7 +62,12 @@ class ContextPolicy:
     """
 
     keep_recent: int = 8
-    summarize_after: int = 16
+    # The message count past which the conversation folds whatever its size.
+    # A fallback for a model that does not report its window, not the rule:
+    # the size trigger is exact and fires first on any server that reports
+    # one. Sixteen, until 2026-09-03, folded every twelve messages of every
+    # conversation with most of a 64k window empty (ISS-0032).
+    summarize_after: int = 60
     retrieved_facts: int = 5
     # How many of the newest tool results a request carries verbatim. Older
     # ones are shown as stubs; the model has already said what it made of

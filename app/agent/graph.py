@@ -127,6 +127,13 @@ REPEATED_FAILURE = "repeated"
 # page, and only the person ended it.
 MAX_IDENTICAL_FAILURES = 2
 
+# How many times one identical call may *succeed* in a turn before it is not
+# run again. Two is the same file written twice, which is ordinary; the third
+# byte-identical write is the rewrite loop of ISS-0019 (seven in one turn,
+# each a full generation). Unlike a repeating failure this does not end the
+# turn: the call is answered with "already done" and the model goes on.
+MAX_IDENTICAL_SUCCESSES = 2
+
 # The states in which the turn is already finishing: the model gets one last
 # request, without tools, for the answer the person is owed, and nothing asks an
 # extension whether it may spend more.
@@ -240,6 +247,30 @@ def failed_before(messages: Sequence[Message], call: ToolCall) -> int:
     return seen
 
 
+def succeeded_before(messages: Sequence[Message], call: ToolCall) -> int:
+    """How often this exact call has already succeeded in this turn.
+
+    The same identity as `failed_before` — name and arguments — over the
+    results that carry no failure. No reset: a success in between is what a
+    failing call needed, and what a repeating success is being counted for.
+    """
+
+    successes = {
+        message.tool_call_id
+        for message in messages
+        if message.role == "tool" and not tool_failed(message)
+    }
+    return sum(
+        1
+        for message in messages
+        for earlier in message.tool_calls
+        if earlier.id in successes
+        and earlier.name == call.name
+        and earlier.arguments == call.arguments
+        and earlier.raw_arguments == call.raw_arguments
+    )
+
+
 def halted(call: ToolCall, reason: str) -> Message:
     """A call that was not run, phrased as a tool result the model can read.
 
@@ -255,6 +286,11 @@ BUDGET_REASON = (
     "will run, so answer now with what you already have"
 )
 STOP_REASON = "the user asked to stop; this call was not run"
+DONE_REASON = (
+    "this exact call has already succeeded twice in this turn with these same "
+    "arguments and was not run again; the earlier result stands — change the "
+    "arguments, or move on"
+)
 REPEAT_REASON = (
     "this exact call has already failed the same way in this turn and was not "
     "run again; no further tools will run, so say plainly what you could not do "
@@ -667,9 +703,16 @@ def build_agent(
         estimated = backend.estimate_tokens(state.context.prompt(turn)) + schema_tokens
         if estimated <= policy.max_input_tokens:
             return state.context
-        folded = await fold_older_messages(
-            backend, store, state.thread_id, policy, force=True
-        )
+        try:
+            folded = await fold_older_messages(
+                backend, store, state.thread_id, policy, force=True
+            )
+        except BackendError as error:
+            # A summarizer that could not answer is not a reason to lose the
+            # step: the request goes as it is, and the overflow path below
+            # answers if it does not fit (ISS-0029).
+            trace.event("context_fold_failed", where="fitted", error_type=type(error).__name__)
+            return state.context
         if folded is None:
             # Nothing left to fold: the size is the current turn, not the
             # history behind it. Send it and let the overflow path answer.
@@ -753,7 +796,25 @@ def build_agent(
                 "messages": [halted(call, REPEAT_REASON) for call in calls],
                 "stopping": REPEATED_FAILURE,
             }
+        # A call that keeps succeeding identically is not work either. It is
+        # answered without running and the turn goes on — not a budget, not
+        # an ending, one refused call (ISS-0019).
+        # Judged against the whole batch, so a ceiling the batch crosses is
+        # still the ceiling; the refused repeats are then simply not run.
         limit = exceeded(state, len(calls))
+        done_again = [
+            call
+            for call in calls
+            if succeeded_before(state.messages[:-1], call) >= MAX_IDENTICAL_SUCCESSES
+        ]
+        if done_again:
+            trace.event(
+                "tool_repeated_success",
+                tool=done_again[0].name,
+                attempts=succeeded_before(state.messages[:-1], done_again[0]),
+                step=state.steps,
+            )
+            calls = [call for call in calls if call not in done_again]
         stopping: dict[str, Any] = {}
         if limit:
             trace.event(
@@ -771,7 +832,10 @@ def build_agent(
             calls = [call for call in calls if delivers(call)]
             if not calls:
                 return {
-                    "messages": [halted(call, BUDGET_REASON) for call in halted_calls],
+                    "messages": [
+                        *(halted(call, BUDGET_REASON) for call in halted_calls),
+                        *(halted(call, DONE_REASON) for call in done_again),
+                    ],
                     **stopping,
                 }
         else:
@@ -815,6 +879,7 @@ def build_agent(
             spent += 1
             messages.append(result)
         messages.extend(halted(call, BUDGET_REASON) for call in halted_calls)
+        messages.extend(halted(call, DONE_REASON) for call in done_again)
         return {
             "messages": messages,
             "tool_calls": state.tool_calls + spent,
@@ -823,11 +888,19 @@ def build_agent(
         }
 
     async def persist(state: AgentState, config: RunnableConfig) -> None:
-        with trace_of(config).step("persist"):
+        trace = trace_of(config)
+        with trace.step("persist"):
             store.append(state.thread_id, state.messages, user_id)
+        try:
             await fold_older_messages(
                 backend, store, state.thread_id, policy, state.usage.input_tokens
             )
+        except BackendError as error:
+            # The answer is already with the person and the turn is stored. A
+            # fold that could not be made is tried again before the next
+            # step; it must not turn a delivered answer into "That request
+            # failed" (ISS-0029).
+            trace.event("context_fold_failed", where="persist", error_type=type(error).__name__)
 
     def after_model(state: AgentState) -> str:
         if state.steered is not None:
