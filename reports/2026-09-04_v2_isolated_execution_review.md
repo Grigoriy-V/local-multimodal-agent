@@ -789,3 +789,14 @@ all of which had the font and the libraries, so the one thing that differed
 is plan mode — and it is one sample, which is what `prompt_scenarios` with
 `/plan` on and off exists to turn into a number.
 
+**The harness's line on a non-zero exit, 2026-09-04, on the human's word**
+(their ask all day: "on an error the harness should say why not — look at
+what is there"): a command result with a non-zero exit code now ends with
+`UNWANTED_EXIT` (`app/tools/shell.py`) — the command did not do what was
+meant, read the output, the traceback names file, line and cause and what
+it says to do is the fix, check with a command before deciding something
+is missing. DeepSeek's remedy-on-failure, applied to the one result that
+is not a failure by design and is read as one; about every command, tested
+to name no file type. The same words as the tool's brief line, but at the
+moment they matter. Deployed together with `pip` in the image (ISS-0043).
+

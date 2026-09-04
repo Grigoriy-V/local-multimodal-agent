@@ -448,3 +448,16 @@ def test_the_container_activates_nothing_from_the_workspace(workspace: Path) -> 
     assert command_environment(workspace, {"PATH": "/usr/bin"}, venv=ContainerRunner.venv_on_path)["PATH"] == "/usr/bin"
     assert command_environment(workspace, {"PATH": "/usr/bin"}, venv=LocalRunner.venv_on_path)["PATH"] != "/usr/bin"
 
+
+
+def test_a_non_zero_exit_carries_the_harness_own_line_and_a_zero_does_not() -> None:
+    """The human's ask, 2026-09-04: at the moment of an error, say how to read it."""
+
+    from app.tools.shell import UNWANTED_EXIT
+
+    failed = describe(Finished(exit_code=1, output="Traceback ...", cut=False, seconds=0.3))
+    fine = describe(Finished(exit_code=0, output="ok", cut=False, seconds=0.3))
+
+    assert failed.endswith(UNWANTED_EXIT) and "Traceback ..." in failed
+    assert UNWANTED_EXIT not in fine
+    assert "pdf" not in UNWANTED_EXIT.lower() and "font" not in UNWANTED_EXIT.lower()

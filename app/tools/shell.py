@@ -378,8 +378,26 @@ class ContainerRunner(LocalRunner):
         ensure_tmp(cwd)
 
 
+# What a non-zero exit carries with it, at the moment it happens: DeepSeek's
+# remedy on a typed failure, applied to the one result that is not a failure by
+# design and is read as one by the model. About every command, not about any
+# one error (the human's rule, and their ask, 2026-09-04: "the harness should
+# say why not — look at what is there").
+UNWANTED_EXIT = (
+    "The command did not do what you meant. Read the output above before your "
+    "next step: a traceback names the file, the line and the cause, and what it "
+    "says to do is the fix, not a reason to start over or give up. Before you "
+    "decide something is missing here, check with a command (ls, find, pip show)."
+)
+
+
 def describe(finished: Finished) -> str:
-    """What the model reads: the exit code first, then what the command said."""
+    """What the model reads: the exit code first, then what the command said.
+
+    A non-zero exit ends with the harness's own line about reading it
+    (`UNWANTED_EXIT`): the result is not a failure of the tool, and until
+    2026-09-04 nothing said what it was.
+    """
 
     lines = [f"exit code: {finished.exit_code}   ({finished.seconds:.1f} s)"]
     if finished.fresh:
@@ -392,6 +410,9 @@ def describe(finished: Finished) -> str:
     else:
         lines.append("output:")
     lines.append(finished.output.strip() or "(no output)")
+    if finished.exit_code != 0:
+        lines.append("")
+        lines.append(UNWANTED_EXIT)
     return "\n".join(lines)
 
 
