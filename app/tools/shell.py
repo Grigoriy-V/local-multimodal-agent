@@ -3,15 +3,19 @@
 `run_command` is the one tool; Python, `pip`, `node`, `git` are commands it
 runs, not tools of their own. Where a command runs is the `Runner`'s business
 and differs by profile: on the person's own machine it is a process in the
-workspace with a reduced environment (`LocalRunner`); deployed it will be a
-container beside the renderer that holds no secret. The tool, the result the
-model reads and the codes are the same in both.
+workspace with a reduced environment (`LocalRunner`); deployed it is a Modal
+Function beside the renderer that holds no secret (`ModalRunner` in
+`deploy/modal/control_app.py`, which runs a `LocalRunner` inside that
+container). The tool, the result the model reads and the codes are the same
+in both.
 
 What a command gets: the workspace as its working directory, its home and its
-temp, an environment reduced to what a shell needs, and the workspace's own
-virtual environment as `python` and `pip` — the project's environment,
+temp, an environment reduced to what a shell needs, and — when the workspace
+has a `.venv` — that as `python` and `pip`, the project's environment,
 activated, as it would be in a developer's own shell. Nothing from the process
-that started the agent — no `.env` value, no token — is passed on.
+that started the agent — no `.env` value, no token — is passed on. The runner
+says in `where` what survives between turns, because that differs: on the
+person's machine everything, in the deployed container only the workspace.
 
 What a command may change is, by the references' one shared property, the
 workspace and nothing else (Codex's writable roots, Claude Code's sandbox on
@@ -112,11 +116,17 @@ if _sys.platform == "win32":
 """
 
 
-def ensure_venv(workspace: Path) -> bool:
-    """The workspace's virtual environment, made on first use. Returns whether it was made now."""
+def ensure_tmp(workspace: Path) -> None:
+    """Where a command's temporary and profile files go, inside the workspace."""
 
     (workspace / TMP / "appdata").mkdir(parents=True, exist_ok=True)
     (workspace / TMP / "local").mkdir(parents=True, exist_ok=True)
+
+
+def ensure_venv(workspace: Path) -> bool:
+    """The workspace's virtual environment, made on first use. Returns whether it was made now."""
+
+    ensure_tmp(workspace)
     made = False
     if not venv_python(workspace).exists():
         subprocess.run(
@@ -149,7 +159,9 @@ class Finished:
 class Runner(Protocol):
     """Where a command runs. One method; the profile chooses the implementation."""
 
-    # Said once in the brief, so the model knows which shell it is writing for.
+    # The runner's own account of itself, said once in the brief: which shell a
+    # command line is written for, whether a write boundary holds, and what
+    # survives between turns. Not guessed by the brief, because it differs.
     where: str
 
     async def run(self, command: str, cwd: Path, timeout: float) -> Finished: ...
@@ -168,9 +180,12 @@ def command_environment(workspace: Path, source: dict[str, str] | None = None) -
     env["TEMP"] = env["TMP"] = env["TMPDIR"] = str(tmp)
     env["APPDATA"] = str(tmp / "appdata")
     env["LOCALAPPDATA"] = str(tmp / "local")
-    # The workspace's Python first: `python` and `pip` are the project's.
-    env["PATH"] = os.pathsep.join([str(venv_bin(workspace)), *filter(None, [env.get("PATH", "")])])
-    env["VIRTUAL_ENV"] = str(workspace / VENV)
+    # The workspace's own Python first, when there is one: `python` and `pip`
+    # are the project's, as in a developer's activated shell. A workspace
+    # without a venv keeps the machine's `python`.
+    if venv_bin(workspace).is_dir():
+        env["PATH"] = os.pathsep.join([str(venv_bin(workspace)), *filter(None, [env.get("PATH", "")])])
+        env["VIRTUAL_ENV"] = str(workspace / VENV)
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -232,6 +247,11 @@ class LocalRunner:
     on Windows too, with the person as the boundary; this does the same and
     withholds the agent's own environment. The shell is the platform's: `cmd`
     on Windows, `/bin/sh` elsewhere, which is what `shell=True` means.
+
+    The same class runs the command inside the deployed container, where the
+    container is the boundary and `prepare` makes no venv: what is installed
+    there must land in the workspace by the model's own choice, and the
+    `ModalRunner` says so in its `where`.
     """
 
     def __init__(self) -> None:
@@ -247,8 +267,18 @@ class LocalRunner:
             else "; there is no write boundary here, so keep every change inside your "
             "workspace"
         )
-        self.where = f"on this machine ({system}), through {shell}{boundary}"
+        self.where = (
+            f"on this machine ({system}), through {shell}{boundary}. `python` and `pip` "
+            "there are the workspace's own virtual environment, so `pip install` lands "
+            "in the workspace and nowhere else; node packages go in the workspace too. "
+            "Everything in the workspace survives between turns"
+        )
         self._runs = 0
+
+    def prepare(self, cwd: Path) -> None:
+        """What the workspace needs before a command runs here: its temp, its venv."""
+
+        ensure_venv(cwd)
 
     def _start(self, command: str, cwd: Path):
         env = command_environment(cwd)
@@ -272,7 +302,7 @@ class LocalRunner:
     async def run(self, command: str, cwd: Path, timeout: float) -> Finished:
         started = time.monotonic()
         try:
-            await asyncio.to_thread(ensure_venv, cwd)
+            await asyncio.to_thread(self.prepare, cwd)
         except (OSError, subprocess.SubprocessError) as error:
             raise ToolError(
                 f"the workspace's Python environment could not be made: {error}",
@@ -314,6 +344,20 @@ class LocalRunner:
             cut=cut,
             seconds=time.monotonic() - started,
         )
+
+
+class ContainerRunner(LocalRunner):
+    """The command's side inside the deployed container: a plain process, no venv made.
+
+    The container is the boundary, so nothing is restricted here, and nothing is
+    installed for the model either: a venv in the workspace is its own choice,
+    as it is for a developer, and the `ModalRunner` beside the worker tells it
+    so. `where` is never read here — the worker's runner is the one the brief
+    quotes.
+    """
+
+    def prepare(self, cwd: Path) -> None:
+        ensure_tmp(cwd)
 
 
 def describe(finished: Finished) -> str:

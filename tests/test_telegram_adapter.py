@@ -2399,3 +2399,28 @@ async def test_giving_up_is_said_to_the_person(
     adapter = build(telegram, settings, tmp_path, ScriptedBackend())
     await adapter.give_up(text_update("make a page"), 3)
     assert any("interrupted 3 times" in text for text in telegram.sent)
+
+
+def test_the_adapter_passes_the_runner_it_was_started_with(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deployed worker hands over the Function beside the renderer; a
+    command must never run in the worker's own container."""
+
+    import ui.telegram.adapter as module
+
+    seen: dict[str, object] = {}
+
+    def recording(**kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(module, "create_agent", recording)
+    marker = object()
+
+    TelegramAdapter(
+        TelegramClient(TelegramSettings(), transport=FakeTelegram().transport()),
+        TelegramSettings(),
+        AgentSettings(),
+        runner=marker,
+    )._default_agent("someone")
+
+    assert seen["runner"] is marker

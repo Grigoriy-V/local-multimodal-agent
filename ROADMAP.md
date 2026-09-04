@@ -187,9 +187,19 @@ What exists. How it was reached, and every number, is in the linked report.
    Volume round trip, O, P, Q through Telegram, the after-deploy run, the
    cold-start number. What the tool and the modes are is built (item 7
    below, the local half); this item is the second runner and the deploy.
-   **Not started.** Until 2026-09-04 this was 5a; the local half was 5b and
-   is item 7 now, on the human's word: local work on files is a stage of
-   its own, not a sub-step of the sandbox.
+   **Built 2026-09-04, not yet deployed** (report §12): the `run_command`
+   Function on `command_image` (the worker's layers plus `BASE_TOOLS`), the
+   Volume and no secret, 180 s scaledown, 660 s timeout; `ModalRunner` in
+   the worker commits before and reloads after each call, the Function the
+   other way round; `create_agent` and the Telegram adapter take a
+   `runner`, and the worker passes it so a command never runs beside the
+   secrets; no venv is made in the container and the runner's `where` says
+   what survives; `scripts/measure_command_cold_start.py`. Offline: seven
+   structural tests and three runner tests. **Next, each its own gate:**
+   deploy, the Volume round trip live, the cold-start number, O, P, Q
+   through Telegram, the after-deploy run. Until 2026-09-04 this was 5a;
+   the local half was 5b and is item 7 now, on the human's word: local work
+   on files is a stage of its own, not a sub-step of the sandbox.
 
 6. **Optimization after the agent is observable.** Adaptive scaledown through
    `autoscale.py`. Prefix caching is confirmed active and needs no work before
@@ -215,8 +225,9 @@ What exists. How it was reached, and every number, is in the linked report.
    way to choose the project folder in the UI, the workspace is
    `AGENT_WORKSPACE/<user>`; Chainlit has no `/mode` or `/plan`; the
    boundary's partial cases (Everyone-writable places, hard links); a
-   non-Windows local profile has no boundary. Order relative to 5 and 6 is
-   the human's call.
+   non-Windows local profile has no boundary; the careful mode asks on
+   every change, and OpenClaw's "allow always" (report §3) is the option
+   once the mode is used. Order relative to 5 and 6 is the human's call.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the

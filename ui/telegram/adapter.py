@@ -45,6 +45,7 @@ from app.instructions import (
 from app.capabilities import Delivery
 from app.config import AgentSettings, TelegramSettings
 from app.memory import ConversationStore, Thread
+from app.tools import Runner
 from app.models import ContentPart, Message
 from app.telemetry import NO_TRACE, Telemetry, TurnTrace
 from ui.telegram.api import (
@@ -584,9 +585,13 @@ class TelegramAdapter:
         agent_factory: Callable[[str], Agent] | None = None,
         telemetry: Telemetry | None = None,
         stops: StopRequests | None = None,
+        runner: Runner | None = None,
     ) -> None:
         self.client = client
         self.settings = settings or TelegramSettings()
+        # Where a command runs, decided by whoever started this process: the
+        # deployed worker hands over the Function beside the renderer.
+        self.runner = runner
         self.agent_settings = agent_settings or AgentSettings()
         # One recorder for every person this process serves. Whether a turn is
         # measured at all is decided by whoever started the worker, not here.
@@ -613,6 +618,7 @@ class TelegramAdapter:
             delivery=DELIVERY,
             telemetry=self.telemetry,
             stops=self.stops,
+            runner=self.runner,
         )
 
     # --- identity and access -------------------------------------------------

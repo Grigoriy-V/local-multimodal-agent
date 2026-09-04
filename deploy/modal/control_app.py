@@ -9,6 +9,9 @@ No function is invoked by importing this module. Database migrations are an
 explicit local operation through ``tools/setup_control_plane.py``.
 """
 
+import time
+from pathlib import Path
+
 import modal
 from fastapi import Request
 
@@ -88,6 +91,32 @@ agent_image = _with_source(_with_browser).env(
 # volume. Sharing the build keeps the browser a single installation.
 render_image = _with_source(_with_browser)
 
+# What a command finds installed where it runs (`DECISIONS.md` 2026-09-04): a
+# developer's base set, so the everyday cases need no install at all. Not
+# LibreOffice, for its size. Python is the image's own 3.12 with `pip` and
+# `venv`; what a project needs beyond this goes into a venv in the workspace,
+# which is on the Volume and outlives the container.
+BASE_TOOLS = (
+    "nodejs",
+    "npm",
+    "git",
+    "curl",
+    "zip",
+    "unzip",
+    "tar",
+    "jq",
+    "ffmpeg",
+    "imagemagick",
+    "poppler-utils",
+    "pandoc",
+)
+
+# Where a command runs: the same layers as the worker, the base tools on top,
+# no browser. Like the renderer it is defined by what it is not given below:
+# no secret. The Volume it does get, because the workspace is the one thing a
+# command and the worker have to agree on.
+command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS))
+
 # Where the workspace stops dying with the container. A container's filesystem
 # is gone the moment it scales down, so a file the assistant wrote in one
 # message did not exist in the next — the capability was advertised and only
@@ -122,6 +151,133 @@ with control_image.imports():
     from app.config import AgentSettings, TelegramSettings  # noqa: F401
     from ui.telegram.inbox import PostgresUpdateInbox  # noqa: F401
     from ui.telegram.webhook import TelegramWebhook  # noqa: F401
+
+
+# The container's own count, so the first command in a fresh container can say
+# so: nothing an earlier command installed into the container is here, and what
+# is in the workspace is. This is what "the container is disposable" means to
+# the model, said once in the result instead of assumed.
+_commands_run = 0
+
+
+@app.function(
+    image=command_image,
+    # No `secrets`, and that is the function: a command the model wrote, or a
+    # package it installed, runs where there is no TELEGRAM_TOKEN, no
+    # MODEL_API_KEY and no AGENT_DATABASE_URL to read. The Volume is mounted
+    # whole, as it is in the worker: one operator today, and a command in one
+    # person's directory can reach another's, which is the known limit until
+    # workspaces are mounted one at a time.
+    volumes={WORKSPACE_ROOT: workspaces},
+    cpu=1.0,
+    memory=2048,
+    min_containers=0,
+    max_containers=8,
+    # Three minutes, the human's number (2026-09-04): long enough that the
+    # commands of one piece of work land in one container, so a `pip install`
+    # is still there for the run that follows it a minute later, and short
+    # enough that an idle container is not paid for. Anything a person needs
+    # past that is in the workspace.
+    scaledown_window=180,
+    # Above the tool's own ceiling (`MAX_TIMEOUT`, 600 s) and the executor's
+    # deadline on top of it, so the command is always the thing that is killed,
+    # by the runner, with its partial output kept.
+    timeout=660,
+    include_source=False,
+)
+async def run_command(workspace: str, command: str, timeout: float) -> dict[str, object]:
+    """Run one shell command in one person's workspace, beside the secrets, not with them.
+
+    `workspace` is the person's directory name inside the Volume, never a path
+    the caller chose freely: it is resolved under `WORKSPACE_ROOT` and refused
+    if it climbs out. The Volume is reloaded before the command, so it sees
+    what the worker wrote this turn, and committed after, so the worker sees
+    what the command wrote — the round trip that makes one filesystem out of
+    two containers.
+
+    The result is a plain dictionary: what `Finished` holds, or `failure` with
+    the runner's own code, so the worker can raise the same typed `ToolError`
+    it would have raised locally.
+    """
+
+    global _commands_run
+
+    from app.tools.base import ToolError
+    from app.tools.shell import ContainerRunner
+
+    root = Path(WORKSPACE_ROOT).resolve()
+    cwd = (root / workspace).resolve()
+    if cwd == root or root not in cwd.parents:
+        return {"failure": {"code": "shell.not_started", "message": "the workspace is not inside the volume", "detail": None}}
+    fresh = _commands_run == 0
+    _commands_run += 1
+    await workspaces.reload.aio()
+    try:
+        # The worker made the person's directory before it wrote anything; a
+        # probe with a name of its own gets one made here, inside the root.
+        cwd.mkdir(parents=True, exist_ok=True)
+        finished = await ContainerRunner().run(command, cwd, timeout)
+    except ToolError as error:
+        return {"failure": {"code": error.code, "message": str(error), "detail": error.detail}}
+    finally:
+        await workspaces.commit.aio()
+    return {
+        "exit_code": finished.exit_code,
+        "output": finished.output,
+        "cut": finished.cut,
+        "seconds": finished.seconds,
+        "fresh": fresh,
+    }
+
+
+class ModalRunner:
+    """The worker's side of `run_command`: the `Runner` the deployed agent gets.
+
+    A command runs in the Function above; the worker's part is to make sure
+    the two containers see one workspace. Everything the worker wrote this turn
+    is committed before the call, and everything the command wrote is reloaded
+    after it, so a file from `write_file` is there for the command and a file
+    from the command is there for `read_file`, in the same turn.
+    """
+
+    where = (
+        "in a Linux container of its own, through sh, with no secret in it and "
+        "your workspace mounted. Installed there: python3 with pip and venv, node "
+        "and npm, git, curl, zip, unzip, tar, jq, ffmpeg, imagemagick, poppler "
+        "(pdftotext, pdftoppm), pandoc. The container is disposable: what a "
+        "command installs into it — apt, a pip install into the system python — "
+        "is gone by the next turn, and what it writes in the workspace stays. So "
+        "install Python packages into a venv in the workspace (`python3 -m venv "
+        ".venv && .venv/bin/pip install ...`); once `.venv` exists, `python` and "
+        "`pip` are its own. Node packages land in the workspace on their own. The "
+        "result says `new environment` when the container is fresh"
+    )
+
+    async def run(self, command: str, cwd: Path, timeout: float):
+        from app.tools.base import ToolError
+        from app.tools.shell import COMMAND_NOT_STARTED, Finished
+
+        root = Path(WORKSPACE_ROOT).resolve()
+        try:
+            relative = Path(cwd).resolve().relative_to(root)
+        except ValueError as error:
+            raise ToolError("the workspace is not on the volume", code=COMMAND_NOT_STARTED) from error
+        started = time.monotonic()
+        await workspaces.commit.aio()
+        result = await run_command.remote.aio(str(relative.as_posix()), command, timeout)
+        await workspaces.reload.aio()
+        failure = result.get("failure")
+        if failure:
+            raise ToolError(str(failure["message"]), code=str(failure["code"]), detail=failure.get("detail"))
+        return Finished(
+            exit_code=int(result["exit_code"]),
+            output=str(result["output"]),
+            cut=bool(result["cut"]),
+            # The whole wait, not the command's own: the container's start is
+            # part of what the person waited for, and the model should see it.
+            seconds=time.monotonic() - started,
+            fresh=bool(result["fresh"]),
+        )
 
 
 def _settings() -> tuple[object, object]:
@@ -187,7 +343,9 @@ async def process_telegram_update(update_id: int) -> bool:
     # and the adapter that decides how it ended. Its tables are migrated by
     # `tools/setup_control_plane.py`, never by a worker starting up.
     telemetry = open_telemetry(agent)
-    adapter = TelegramAdapter(client, telegram, agent, telemetry=telemetry)
+    # The runner is passed, never defaulted: without it the agent would run
+    # commands in this container, beside the secrets.
+    adapter = TelegramAdapter(client, telegram, agent, telemetry=telemetry, runner=ModalRunner())
     inbox = PostgresUpdateInbox(agent.database_url, agent.database_schema)
     # Around the turn, not around the process. A container is reused for as long
     # as its idle window holds, so a container that has been alive since before
@@ -301,7 +459,7 @@ async def self_test(include_model: bool = False, include_credit: bool = False) -
     telegram, _ = _settings()
     owner = "deployed-self-test"
     agent = create_agent(
-        agent_settings=AgentSettings(), user_id=owner, delivery=DELIVERY
+        agent_settings=AgentSettings(), user_id=owner, delivery=DELIVERY, runner=ModalRunner()
     )
     try:
         costs = ("free",)

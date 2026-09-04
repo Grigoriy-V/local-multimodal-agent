@@ -53,6 +53,7 @@ from app.tools import (
     PRESENT_FILES,
     CapabilityGrant,
     CapabilityRegistry,
+    Runner,
     ToolExecutor,
     Toolbox,
     history_tools,
@@ -734,6 +735,7 @@ def create_agent(
     stops: StopRequests = NO_STOPS,
     stopping: TurnStopping | None = None,
     system_prompt: str | None = None,
+    runner: Runner | None = None,
 ) -> Agent:
     """Build the default agent from configuration.
 
@@ -755,6 +757,11 @@ def create_agent(
     `system_prompt` exists so one prompt can be measured against another
     through the same wiring the product uses. An interface never passes it: the
     prompt a person talks to is the default, and a variant is a comparison.
+
+    `runner` is where a command runs. Left out, it is a process on this
+    machine, which is the local profile; the deployed worker passes the Modal
+    Function beside the renderer, because a command must never run in the
+    container that holds the secrets.
     """
 
     agent_settings = agent_settings or AgentSettings()
@@ -774,6 +781,7 @@ def create_agent(
         backend=OpenAICompatibleBackend(model_settings or ModelSettings()),
         store=open_store(agent_settings),
         workspace=workspace,
+        capability_registry=CapabilityRegistry(workspace, runner=runner) if runner else None,
         policy=policy,
         system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
         checkpoints=agent_settings.checkpoints,

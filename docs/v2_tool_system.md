@@ -276,7 +276,7 @@ tool over local, Docker, SSH, Modal) and DeepSeek's `ctx.fs` seam (one contract,
 step, and this step lays no groundwork for them beyond the typed outcome they
 would return through.
 
-## Shell: one tool, a runner behind it (5b, 2026-09-04)
+## Shell: one tool, a runner behind it (5b and 5, 2026-09-04)
 
 `run_command(command, timeout_seconds=120)` runs one shell command in the
 workspace and returns the exit code, the elapsed time and the output, cut in
@@ -287,8 +287,15 @@ a `Runner` with one method, chosen by the profile and owned by the
 `CapabilityRegistry`: `LocalRunner` is a process on the person's machine in
 the workspace, with the environment reduced to what a shell needs, `HOME` in
 the workspace, and nothing of the agent's own environment passed on; the
-deployed runner (5a) is a container beside the renderer that holds no secret.
-The workspace's `.venv` (made on first use) is first on `PATH`, so `python`
+deployed runner is `ModalRunner` (`deploy/modal/control_app.py`), which
+calls the `run_command` Function — the worker's layers plus base tools, the
+workspaces Volume, no secret, 180 s scaledown — where a `ContainerRunner`
+runs the command as a plain process; the worker commits the Volume before
+the call and reloads after it, the Function reloads before the command and
+commits after, and the first command in a fresh container says `new
+environment`. Locally the workspace's `.venv` is made on first use; in the
+container none is, and the runner's `where` tells the model to make one for
+a project's packages. When `.venv` exists it is first on `PATH`, so `python`
 and `pip` are the project's. On Windows the command runs under a
 write-restricted token (`app/tools/shell_windows.py`): the operating system
 refuses every write outside the workspace and its temp, a `pip install` into

@@ -337,3 +337,95 @@ def test_the_browser_is_installed_before_the_source_is_copied() -> None:
     assert text.count('.add_local_dir("app"') == 1
     assert "control_image = _with_source(_dependencies)" in text
     assert "agent_image = _with_source(_with_browser)" in text
+
+
+# --- step 5: where a command runs, deployed ------------------------------------------------
+
+
+def _function(name: str):
+    tree = ast.parse(source())
+    return next(
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+    )
+
+
+def test_a_command_runs_where_no_secret_is() -> None:
+    """The renderer's pattern, applied to the model's own commands.
+
+    A `pip install` the model wrote runs a package's own setup code; a script it
+    wrote runs whatever it wrote. Neither may run in the container that holds
+    the bot token, the model key and the database URL. So `run_command` gets the
+    workspace Volume and nothing else, and the assertion is here for the same
+    reason the renderer's is: adding `secrets=[control_secret]` is the cheapest
+    way to lose the boundary.
+    """
+
+    command = _keywords_of("run_command")
+
+    assert _image_of("run_command") == "command_image"
+    assert "secrets" not in command
+    assert command["volumes"] == "{WORKSPACE_ROOT: workspaces}"
+    assert command["scaledown_window"] == "180"
+    assert int(command["timeout"]) > 600
+
+
+def test_the_command_image_carries_the_base_tools_and_no_browser() -> None:
+    text = source()
+
+    assert "command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS))" in text
+    for tool in ("nodejs", "npm", "git", "ffmpeg", "imagemagick", "poppler-utils", "pandoc", "jq"):
+        assert f'"{tool}"' in text
+    assert '"libreoffice"' not in text.lower()
+
+
+def test_the_worker_never_runs_a_command_in_its_own_container() -> None:
+    """The runner is passed, never defaulted.
+
+    `create_agent` without a runner makes a `LocalRunner`, which is right on a
+    person's machine and wrong here: it would be a process beside the secrets.
+    """
+
+    worker = ast.get_source_segment(source(), _function("process_telegram_update"))
+    self_test = ast.get_source_segment(source(), _function("self_test"))
+
+    assert worker is not None and "runner=ModalRunner()" in worker
+    assert self_test is not None and "runner=ModalRunner()" in self_test
+
+
+def test_the_two_containers_see_one_workspace() -> None:
+    """A file from `write_file` is there for the command, and the command's file
+    for `read_file`, in the same turn: the worker commits before the call and
+    reloads after it, and the function reloads before the command and commits
+    after it."""
+
+    text = source()
+    runner = text[text.index("class ModalRunner") :]
+    run = runner[runner.index("async def run(") :]
+    function = ast.get_source_segment(text, _function("run_command"))
+
+    assert function is not None
+    assert run.index("await workspaces.commit.aio()") < run.index("run_command.remote.aio(")
+    assert run.index("run_command.remote.aio(") < run.index("await workspaces.reload.aio()")
+    assert function.index("await workspaces.reload.aio()") < function.index("ContainerRunner().run(")
+    assert function.index("ContainerRunner().run(") < function.index("await workspaces.commit.aio()")
+
+
+def test_a_command_cannot_be_pointed_outside_the_volume() -> None:
+    """The workspace argument is a directory name under the root, resolved and checked."""
+
+    function = ast.get_source_segment(source(), _function("run_command"))
+
+    assert function is not None
+    assert "root not in cwd.parents" in function
+    assert "shell.not_started" in function
+
+
+def test_the_deployed_runner_tells_the_model_what_survives() -> None:
+    text = source()
+    where = text[text.index("class ModalRunner") : text.index("async def run(", text.index("class ModalRunner"))]
+
+    assert "no secret" in where
+    assert "disposable" in where
+    assert "venv" in where and "workspace stays" in where

@@ -284,6 +284,7 @@ The file defines three image shapes:
 control_image  -> dependencies + source; no Chromium
 agent_image    -> Chromium/fonts + source; deployed agent worker
 render_image   -> Chromium/fonts + source; isolated page renderer
+command_image  -> dependencies + BASE_TOOLS (node, git, ffmpeg, imagemagick, poppler, pandoc, ...) + source; where a command runs
 ```
 
 Heavy dependencies/browser are layered below copied source so source-only changes can reuse earlier image layers.
@@ -366,6 +367,37 @@ Critical isolation properties in code:
 - no user workspace volume;
 - public URL is checked again in the renderer;
 - response returns rendered text/screenshot/console/refusal evidence to the caller.
+
+#### `run_command`
+
+Purpose: run one shell command the model wrote in one person's workspace,
+in a container that holds no secret (step 5, `DECISIONS.md` 2026-09-04).
+
+Current resource shape:
+
+```text
+CPU: 1
+memory: 2048 MiB
+min containers: 0
+max containers: 8
+scaledown window: 180 s
+timeout: 660 s   (above the tool's 600 s ceiling; the runner kills the command first)
+secrets: none
+volume: assistant-workspaces at /workspaces
+```
+
+The worker calls it through `ModalRunner` (`.remote.aio`), committing the
+Volume before and reloading after; the Function reloads before the command
+and commits after. Python is the image's 3.12; a venv the model makes in the
+workspace is on the Volume and survives, an install into the container does
+not. A venv on the Volume is bound to the image's Python version: a deploy
+that changes it leaves the model making a new one. Every invocation starts a
+container: a product-runtime worker during development.
+
+Cold start is measured with `scripts/measure_command_cold_start.py`, which
+invokes the deployed Function twice (one cold, one warm) and prints the
+wall time beside the command's own; running it starts a container and needs
+permission.
 
 #### `self_test`
 

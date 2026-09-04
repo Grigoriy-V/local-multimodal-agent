@@ -391,3 +391,45 @@ def test_what_cmd_says_in_russian_reaches_the_model_readable(workspace: Path) ->
 
     assert finished.exit_code != 0
     assert "python3" in finished.output and "\ufffd" not in finished.output
+
+
+# --- the deployed shape's share of the local code ---------------------------------------
+
+
+def test_a_workspace_without_a_venv_keeps_the_machines_python(workspace: Path) -> None:
+    """The deployed container makes no venv; the model makes one when a project needs it."""
+
+    env = command_environment(workspace, {"PATH": "/usr/bin"})
+
+    assert env["PATH"] == "/usr/bin"
+    assert "VIRTUAL_ENV" not in env
+    (workspace / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")).mkdir(parents=True)
+    env = command_environment(workspace, {"PATH": "/usr/bin"})
+    assert env["PATH"].split(os.pathsep)[0].startswith(str(workspace / ".venv"))
+    assert env["VIRTUAL_ENV"] == str(workspace / ".venv")
+
+
+def test_the_container_runner_makes_the_temp_and_no_venv(workspace: Path) -> None:
+    from app.tools.shell import ContainerRunner
+
+    finished = run(ContainerRunner().run(f"{PY} -c \"print('container ok')\"", workspace, 60))
+
+    assert finished.exit_code == 0, finished.output
+    assert "container ok" in finished.output
+    assert (workspace / ".tmp" / "appdata").is_dir()
+    assert not (workspace / ".venv").exists()
+
+
+def test_create_agent_hands_the_runner_to_the_registry(tmp_path: Path) -> None:
+    from app.agent.runtime import create_agent
+    from app.config import AgentSettings
+
+    runner = Scripted(Finished(0, "", False, 0.0))
+    settings = AgentSettings(workspace=str(tmp_path / "ws"), database=str(tmp_path / "m.sqlite3"))
+
+    agent = create_agent(agent_settings=settings, runner=runner)
+    try:
+        assert agent.capability_registry.runner is runner
+        assert isinstance(create_agent(agent_settings=settings).capability_registry.runner, LocalRunner)
+    finally:
+        agent.store.close()

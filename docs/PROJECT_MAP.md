@@ -263,12 +263,17 @@ decision stays the model's. `DECISIONS.md` 2026-09-03.
 Commands run through one tool, `run_command`, behind a one-method `Runner`
 the registry owns and the profile chooses (`app/tools/shell.py`). Locally it
 is a process in the person's workspace with the agent's own environment
-withheld; deployed it is a container beside the renderer with no secret
-(5a). What a command installs lives in the workspace, which is what survives
-between turns in both profiles: the workspace's own virtual environment is
-the `python` and `pip` on a command's `PATH`. On Windows a command runs under
-a write-restricted token and the operating system refuses every write
-outside the workspace (`app/tools/shell_windows.py`). A conversation runs in `full` mode, where
+withheld; deployed it is the `run_command` Function beside the renderer
+(`deploy/modal/control_app.py`): the same layers plus a developer's base
+tools, the workspaces Volume, no secret, a disposable container. What a
+command installs lives in the workspace, which is what survives between
+turns in both profiles; when the workspace has a `.venv`, that is the
+`python` and `pip` on a command's `PATH`, and locally one is made on first
+use. The worker commits the Volume before a command and reloads after it,
+the Function the other way round, so the two containers see one workspace
+within a turn. On Windows a command runs under a write-restricted token and
+the operating system refuses every write outside the workspace
+(`app/tools/shell_windows.py`). A conversation runs in `full` mode, where
 everything inside the workspace is autonomous, or `careful`, where the tools
 that change it ask first (`app/agent/mode.py`). `DECISIONS.md` 2026-09-04.
 

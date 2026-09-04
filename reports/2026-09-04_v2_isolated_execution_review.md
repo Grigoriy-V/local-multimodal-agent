@@ -65,6 +65,31 @@ around the workspace, no secret inside, and an honest fallback when the
 boundary cannot be made. They differ on network, and that is a product
 choice, not a security fact.
 
+**OpenClaw on a VPS, read 2026-09-04 before step 5 started** (sandboxing,
+exec, exec-approvals, security, workspace and Docker pages). Their main
+mode is the agent on the operator's own server, and it is our shape: the
+sandbox is **off** by default, `exec` runs on the gateway host with
+`security: "full"`, `ask: "off"`, described as "one trust boundary per
+gateway: a single operator" and a supported deployment; the boundary is the
+VPS or an OS user, and the agent there can reach credentials and env, which
+they advise keeping out of its paths — we keep the secret out of the runner
+altogether. The Docker sandbox is opt-in for foreign senders and
+multi-agent setups (one container per agent, workspace hidden, network
+none): our v2. In their Docker install the gateway container is disposable
+and three bind-mounted directories — state, workspace, keys — are what
+lives: our Volume. The workspace is auto-initialised as a git repository
+and they urge a private remote as backup and rollback. No shell state
+carries between `exec` calls; `process` backgrounds after 10 s. `exec`
+modes `deny` / `allowlist` / `ask` / `auto` / `full`, an "allow always"
+answer bound to exact argv and cwd in SQLite, a model reviewer in `auto`,
+and `askFallback: deny` when nobody can be asked — our "nowhere to ask
+means no". Default `exec` timeout 1800 s against our 120 default and 600
+ceiling. Taken: nothing changes in step 5. Recorded as options: raise the
+ceiling to 1800 on the first live case that needs it; "allow always" for
+the careful mode once it is used (item 7); git in the workspace as the
+Volume's undo; a secret-substituting egress proxy when a command must use
+the person's own keys (v2).
+
 ## 4. The questions the step has to answer
 
 1. **What the boundary is, per profile.** Deployed: the worker's own process
@@ -366,4 +391,58 @@ points listed there); item 5 is the deployed profile alone, where the
 container is the boundary, none of the Windows mechanics apply, and the
 same rule holds for installs: base tools in the image, a venv in the
 workspace only when a project needs its own.
+
+## 12. Step 5 built, 2026-09-04
+
+Started on the human's word after the OpenClaw reading (§3). What was built,
+against the shape in §5:
+
+- **The Function.** `run_command(workspace, command, timeout)` in
+  `deploy/modal/control_app.py`, on `command_image` — the worker's
+  dependency layers plus `BASE_TOOLS` (`nodejs`, `npm`, `git`, `curl`,
+  `zip`, `unzip`, `tar`, `jq`, `ffmpeg`, `imagemagick`, `poppler-utils`,
+  `pandoc`), the source copied last, no browser — with the workspaces
+  Volume, **no secret**, 1 CPU, 2 GiB, `scaledown_window=180`, `timeout=660`
+  (above the tool's 600 s ceiling, so the runner is what kills a command
+  and the partial output is kept). `workspace` is a directory name resolved
+  under `/workspaces` and refused if it climbs out; the directory is made
+  if missing. The Volume is reloaded before the command and committed
+  after. A container-global count makes the first command in a fresh
+  container say `new environment`. The result is a dictionary, `failure`
+  carrying the runner's own code when there is one.
+- **The runner.** `ModalRunner` beside the worker: commits the Volume,
+  calls the Function with `.remote.aio`, reloads, and raises the same typed
+  `ToolError` a local failure would. `seconds` is the whole wait, container
+  included. Its `where` tells the model what is installed, that the
+  container is disposable, that a venv in the workspace is the way to
+  install Python packages and that node packages land there on their own.
+- **The seam.** `create_agent(runner=)` and `TelegramAdapter(runner=)`; the
+  worker and `self_test` pass `ModalRunner()`, asserted by a test, because
+  the default is a `LocalRunner` and that would be a process beside the
+  secrets. `LocalRunner.prepare` is the hook the container's
+  `ContainerRunner` overrides to make no venv (§11: not the model's
+  decision on Modal either). `command_environment` puts `.venv` first on
+  `PATH` only when it exists; locally it always does. The brief's sentence
+  about what survives moved out of `app/capabilities.py` into the runner's
+  `where`, since it differs.
+- **Not done, by choice.** The Volume is mounted whole, as in the worker;
+  one operator today, and a command in one person's directory can reach
+  another's. Recorded in the Function's comment; the fix is mounting one
+  directory at a time when there is a second person.
+
+Measured offline: `tests/test_modal_control_app.py` (seven: the Function
+holds no secret and gets the Volume, the image carries the base tools and no
+browser, the worker and the self-test pass the runner, commit/reload order
+on both sides, the path check, the `where` text) and
+`tests/test_run_command.py` (three: a workspace without a venv keeps the
+machine's Python, `ContainerRunner` makes the temp and no venv,
+`create_agent` hands the runner to the registry), one adapter test; the
+whole suite below. `deploy/modal/control_app.py` imports and builds its
+objects locally.
+
+Not measured yet, each a container start and its own permission: the
+deploy; the round trip (a file from `write_file` seen by the command, a file
+from the command seen by `read_file`, same turn); the cold-start number
+(`scripts/measure_command_cold_start.py`); O, P, Q through Telegram; the
+after-deploy run.
 
