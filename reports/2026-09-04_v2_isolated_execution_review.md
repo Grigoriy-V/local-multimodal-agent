@@ -488,7 +488,8 @@ property the renderer already has — and `fonts-dejavu-core` and
 `fonts-liberation` are now in `BASE_TOOLS`, with the runner's `where`
 saying where the TrueType files are. Not looking at the PDF before sending
 it, twice, is the **model's** (ISS-0040), the brief already asks for the
-look, and it is measured by P, not scripted. Asked again, the model dropped
-the Russian text rather than registering a font it did not know it had;
-with the fonts named in `where`, that is the next P's question.
+look, and it is measured by P, not scripted. Asked to fix it, the model
+did — the second PDF was readable, in English, the human notes — by
+dropping the Russian text rather than registering a font it did not know
+it had; with the fonts named in `where`, that is the next P's question.
 
