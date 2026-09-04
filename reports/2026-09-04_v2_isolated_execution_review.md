@@ -800,3 +800,24 @@ is not a failure by design and is read as one; about every command, tested
 to name no file type. The same words as the tool's brief line, but at the
 moment they matter. Deployed together with `pip` in the image (ISS-0043).
 
+**Japan, plan on and plan off, after the `pip` + hint deploy, 2026-09-04.**
+*Plan on* (run `e2a6471b`): todo, `search_web`, a 403 from Wikipedia, a
+page fetched, the text written, then one command with `add_font('DejaVu',
+'', 'DejaVuSans.ttf')` — `FileNotFoundError`, and the result ended with
+the harness's line; the very next call was `find /usr/share/fonts/truetype
+-name "*.ttf"`, the absolute path went into the script, exit 0,
+`send_file japan.pdf`. Delivered in Russian, 90 s, eleven tools. *Plan
+off* (run `55cf5fa9`): the text written, `set_font('DejaVu')` without
+`add_font` — the error and the line — then Arial and **the text in
+English** with a wrong keyword, then Helvetica and English, exit 0,
+`send_file`, and an honest sentence that the built-in fonts do not carry
+Cyrillic. Delivered, in the wrong language, 48 s. Asked to add pictures:
+one search, then "I have no tool to download files" — with `curl` in the
+image and named in `where`. Neither run looked at its PDF (ISS-0040).
+
+Read together with the morning: from no PDF in five runs to a PDF in both,
+and in the plan run the hint's own suggestion (`find`) was the next
+command. What plan mode adds is what the no-plan run lacks — the request
+held as a goal, so "in Russian" is not traded away for a green exit code.
+That is the goal discussion, next.
+
