@@ -4,11 +4,11 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 5, isolated execution, selected by the human
-2026-09-04 with item 4 closed as a whole and split into 5a (deployed) and
-5b (local). Reviewed against the references and the shape approved the same
-day; 5b built and passed live the same day; 5a is next and its start is a
-separate signal.
+**Current approved step:** 5, isolated execution deployed on Modal, selected
+by the human 2026-09-04 with item 4 closed as a whole. The tool, the modes
+and the local runner were built the same day as its local half and then set
+apart as item 7, a stage of its own, on the human's word; 5 is the deployed
+runner and the deploy, and its start is a separate signal.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -173,45 +173,50 @@ What exists. How it was reached, and every number, is in the linked report.
    keyword retrieval finds nothing. `ask_user` and the `todo` follow-up are
    in Not started.
 
-5. **Isolated execution — current, selected 2026-09-04.** An execution
-   backend behind the 4.2 seam: shell, Python and package installation in a
-   workspace holding no control-plane secret. Isolation, not a confirmation
-   prompt, is the boundary for arbitrary generated code. Every deployed run
-   is a product-runtime worker and a separate human gate during development.
-   The natural-request PDF scenario is accepted only after this capability
-   exists: create the PDF, inspect the real document and explicitly deliver
-   it, without a PDF-specific workflow. Split on the human's word 2026-09-04
-   into the two profiles; reviewed against the references and **the shape
-   approved the same day** (`reports/2026-09-04_v2_isolated_execution_review.md`
-   §5, `DECISIONS.md` 2026-09-04); **not started**. One `run_command`
-   tool; what is installed lives in the workspace; two modes per
-   conversation, `full` (default) and `careful`; cold start measured
-   before anything is built on it. Order: 5b, then 5a.
-
-   - **5b Local (this machine) — done 2026-09-04.** `run_command` over a
-     one-method `Runner`; a process in the workspace with the agent's own
-     environment withheld, killed with its tree at the deadline; the two
-     modes and `/mode`; the brief says where commands run. Offline: 17
-     tests and one adapter test. Live the same day: O (a script written and
-     run), P (the PDF made, checked and sent — the 4.3 acceptance), Q (a
-     command killed at its timeout) passed. ISS-0038, the first install
-     going to the machine's Python: the workspace's own venv is now the
-     `python` and `pip` a command sees (P re-run passed with the install in
-     `.venv`), and the boundary is the references' own: on Windows a
-     command runs under a write-restricted token and the OS refuses every
-     write outside the workspace (report §10, DeepSeek Harness's
-     mechanism, four undocumented conditions found on this machine); the
-     interim installer rules are gone.
-     `reports/2026-09-04_v2_isolated_execution_review.md` §9.
-   - **5a Deployed (Modal) — next.** A `run_command` Function beside the renderer:
-     same image plus base tools, the workspaces Volume, no secret, 180 s
-     scaledown; the Volume round trip, O, P, Q through Telegram, the
-     after-deploy run, the cold-start number.
+5. **Isolated execution, deployed (Modal) — current, selected 2026-09-04.**
+   An execution backend behind the 4.2 seam: shell, Python and package
+   installation in a workspace holding no control-plane secret; the
+   container is the boundary. Every deployed run is a product-runtime
+   worker and a separate human gate during development. The natural-request
+   PDF scenario is accepted here: create the PDF, inspect the real document
+   and explicitly deliver it, without a PDF-specific workflow. Reviewed
+   against the references and **the shape approved 2026-09-04**
+   (`reports/2026-09-04_v2_isolated_execution_review.md` §5, `DECISIONS.md`
+   2026-09-04): a `run_command` Function beside the renderer, same image
+   plus base tools, the workspaces Volume, no secret, 180 s scaledown; the
+   Volume round trip, O, P, Q through Telegram, the after-deploy run, the
+   cold-start number. What the tool and the modes are is built (item 7
+   below, the local half); this item is the second runner and the deploy.
+   **Not started.** Until 2026-09-04 this was 5a; the local half was 5b and
+   is item 7 now, on the human's word: local work on files is a stage of
+   its own, not a sub-step of the sandbox.
 
 6. **Optimization after the agent is observable.** Adaptive scaledown through
    `autoscale.py`. Prefix caching is confirmed active and needs no work before
    it is used deliberately; speculative decoding is the weakest lever, because
    prefill dominates long turns. `reports/2026-08-29_v2_gpu_baseline_measured.md`.
+
+7. **The local profile as a place to work — open, separate, not scheduled.**
+   Working on the person's own files on their own machine, with the local
+   UI: a stage with its own problems, opened by 5b and set apart from the
+   sandbox on the human's word 2026-09-04. **Built and kept** (was 5b, done
+   2026-09-04): `run_command` over a one-method `Runner`; a process in the
+   workspace with the agent's environment withheld, killed with its tree at
+   the deadline; the two modes and `/mode` in Telegram; on Windows a
+   write-restricted token so a command writes only inside the workspace
+   (`app/tools/shell_windows.py`, DeepSeek Harness's mechanism, four
+   undocumented conditions found on this machine; report §10); console
+   output decoded by its code page. Offline 24 shell tests and one adapter
+   test; live O and Q passed, P passed twice and then missed its look-and-
+   send on the model's side (ISS-0039). **Open, recorded, not approved:**
+   the automatic workspace venv is a rule about one toolchain and hides the
+   machine's own packages — to be removed, with the CPython 0o700
+   accommodation moved to a `PYTHONPATH` `sitecustomize` (report §11); no
+   way to choose the project folder in the UI, the workspace is
+   `AGENT_WORKSPACE/<user>`; Chainlit has no `/mode` or `/plan`; the
+   boundary's partial cases (Everyone-writable places, hard links); a
+   non-Windows local profile has no boundary. Order relative to 5 and 6 is
+   the human's call.
 
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the

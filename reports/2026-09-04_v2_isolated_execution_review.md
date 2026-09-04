@@ -333,3 +333,37 @@ profile there is still no boundary and the brief says so.
 Left as built: the workspace venv as the project environment (not a crutch:
 every reference runs commands in the project's environment), temp and
 profile directories inside the workspace.
+
+## 11. The automatic venv, and the local profile set apart, 2026-09-04
+
+Asked whether the automatic `.venv` in the workspace is a crutch by the
+same rule, the answer is yes: a rule about one toolchain (Python gets a
+special environment, node, cargo and go do not), whose local reason — keep
+`pip` out of the machine's Python — the boundary now serves on its own, and
+whose deployed reason — what is installed must survive the container — the
+model can meet the way a developer does, with a venv when the project needs
+one. The references do none of this: Claude Code and Codex run `python` as
+the developer's shell would, with the machine's packages, and a venv is the
+developer's decision. The isolated venv also hides what the machine already
+has, so `reportlab` was downloaded onto a machine that has it.
+
+Agreed in discussion, not built: remove the automatic venv and the `PATH`
+change; keep what is general (the workspace as cwd, home, temp and profile;
+the reduced environment); move the CPython 0o700 accommodation to a
+`sitecustomize.py` on `PYTHONPATH` under the workspace's `.tmp`, which every
+Python — the machine's and any venv the model makes — picks up; say in the
+brief that `python` and its packages are the machine's, that what is there
+is to be used, and that installing is possible only into a venv inside the
+workspace. Cost: on the first `pip install` a refusal from the OS and one
+step to make a venv, when the brief has not already said so.
+
+Then the human's larger reading, recorded on their word: local work on
+files — one's own projects, on one's own machine, through the local UI,
+which today has no way to choose a project folder — is a stage of its own
+with its own problems, not a sub-step of the sandbox, and not the place to
+go now. What 5b built stays and is kept (`ROADMAP.md` item 7, with the open
+points listed there); item 5 is the deployed profile alone, where the
+container is the boundary, none of the Windows mechanics apply, and the
+same rule holds for installs: base tools in the image, a venv in the
+workspace only when a project needs its own.
+
