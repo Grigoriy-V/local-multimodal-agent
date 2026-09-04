@@ -51,21 +51,42 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0039 — a command that succeeds silently is not believed, and is run again
+
+- **Status:** open — model behaviour, measured
+- **Seen:** 2026-09-04, `scripts/loop_live.py` P, run `live-140`, second
+  rerun: `python make_pdf.py` returned `exit code: 0` and `(no output)`, the
+  PDF was on disk, and the model ran the script again, then `python3`
+  (absent on Windows, and the brief says where commands run), then the
+  script again, until the repeat guard refused; it answered without
+  `read_document` or `send_file`. The same request passed twice earlier the
+  same day.
+- **Costs:** a turn's budget spent on nothing, and the delivery the
+  person asked for not made.
+- **Reproduce:** P; not every time.
+- **Cause:** the model's; one observation. What the harness said back was
+  true: exit code zero, no output. Whether "(no output)" reads to the model
+  as "nothing happened" is a question for the scenario runner, not a line
+  to add.
+- **Also:** the `python3` attempt came back as mojibake — `cmd` answers in
+  the OEM code page and the runner read UTF-8 — which the model could not
+  act on; fixed the same day (`decoded` in `app/tools/shell.py`).
+- **Evidence:** `reports/2026-09-04_v2_isolated_execution_review.md` §10
+- **Related:** ISS-0004 family (4.9); roadmap 5b
+
+---
+
 ### ISS-0038 — a package is installed into the machine's own Python rather than the workspace
 
-- **Status:** mitigated, 2026-09-04, awaiting the human's choice of boundary.
-  The workspace's own virtual environment (made on first use) is the
-  `python` and `pip` a command sees, and P re-run the same day put
-  `reportlab` into it. Two interim environment rules keep the case out:
-  `PIP_REQUIRE_VIRTUALENV` and `npm_config_prefix`. The human named them
-  a crutch, rightly — rules about two installers, not the references' one
-  property (a command writes only inside the workspace). That property
-  was then attempted the way Codex's unelevated Windows sandbox suggests,
-  a write-restricted token, and it cannot start an arbitrary process on
-  Windows at all (`STATUS_DLL_INIT_FAILED` with every restricting-SID set
-  and desktop tried); the attempt and the remaining options are in
-  `reports/2026-09-04_v2_isolated_execution_review.md` §10. Deployed (5a)
-  the container is the boundary and none of this applies
+- **Status:** fixed, 2026-09-04 — by the boundary, not by a rule: on Windows
+  a command runs under a write-restricted token and the operating system
+  refuses every write outside the workspace, a `pip install` into the
+  machine's Python included (`app/tools/shell_windows.py`, the DeepSeek
+  Harness mechanism, with what it took to make it start recorded there).
+  The workspace's own venv is the `python` and `pip` a command sees. The
+  interim `PIP_REQUIRE_VIRTUALENV` / `npm_config_prefix` rules, which the
+  human called a crutch, are gone. Not yet deployed (5a); deployed the
+  container is the boundary
 - **Seen:** 2026-09-04, `scripts/loop_live.py` P, run `live-140`, the first
   live turn with `run_command`: asked for a PDF, the model ran
   `pip install reportlab` as its first command, and it landed in

@@ -80,7 +80,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change document parsing/rendering | `app/documents.py` | `read_sections`, `render_pages`, `media_type_for` |
 | Change document model tools | `app/tools/documents.py` | `read_document`, `view_pages`, `document_tools` |
 | Change explicit file delivery | `app/tools/presentation.py` | `send_file`, `presentation_tools`, `outbound=True` |
-| Run a command, or change where commands run | `app/tools/shell.py`, `deploy/modal/control_app.py` (deployed runner, 5a) | `run_command`, `Runner`, `Finished`, `LocalRunner`, `command_environment`, `shell.timeout`, `tests/test_run_command.py` |
+| Run a command, or change where commands run | `app/tools/shell.py`, `app/tools/shell_windows.py` (the write boundary on Windows), `deploy/modal/control_app.py` (deployed runner, 5a) | `run_command`, `Runner`, `Finished`, `LocalRunner`, `command_environment`, `ensure_venv`, `RestrictedProcess`, `grant_workspace`, `shell.timeout`, `tests/test_run_command.py` |
 | Change what asks first: the two modes | `app/agent/mode.py`, `app/tools/base.py` | `set_mode`, `careful_enabled`, `Tool.mutates`, `Toolbox.ask_for_changes`, `/mode` in `ui/telegram/adapter.py` |
 | Change local HTML inspection or what it reports | `app/tools/browser.py` | `inspect_page`, `page_report`, `observe`, `browser_tools` |
 | Change the browser session, its snapshot or an action | `app/tools/chromium.py` | `BrowserSession`, `open_browser`, `format_snapshot`, `_SNAPSHOT`, `tests/test_browser_session.py` |
@@ -223,6 +223,7 @@ filesystem.py    list/read/write/edit workspace files
 documents.py     read_document / view_pages
 presentation.py  send_file (explicit outbound action)
 shell.py         run_command over a Runner: LocalRunner (a process in the workspace); the deployed runner is 5a
+shell_windows.py the write-restricted token and the workspace ACL: a command writes only inside the workspace (Windows)
 browser.py       inspect_page for local/self-contained HTML (observation only)
 chromium.py      Chrome/Edge launch, CDP session, BrowserSession with snapshot/refs/actions
 web.py           search_web / fetch_page / view_web_page wrappers

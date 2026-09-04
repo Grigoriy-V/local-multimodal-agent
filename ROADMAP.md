@@ -197,11 +197,11 @@ What exists. How it was reached, and every number, is in the linked report.
      command killed at its timeout) passed. ISS-0038, the first install
      going to the machine's Python: the workspace's own venv is now the
      `python` and `pip` a command sees (P re-run passed with the install in
-     `.venv`), two interim installer rules hold the case, and the real
-     boundary — a command writes only inside the workspace — is **open on
-     native Windows**: a write-restricted token cannot start a process
-     (report §10), and the human chooses between a second user, WSL2, or
-     no boundary.
+     `.venv`), and the boundary is the references' own: on Windows a
+     command runs under a write-restricted token and the OS refuses every
+     write outside the workspace (report §10, DeepSeek Harness's
+     mechanism, four undocumented conditions found on this machine); the
+     interim installer rules are gone.
      `reports/2026-09-04_v2_isolated_execution_review.md` §9.
    - **5a Deployed (Modal) — next.** A `run_command` Function beside the renderer:
      same image plus base tools, the workspaces Volume, no secret, 180 s

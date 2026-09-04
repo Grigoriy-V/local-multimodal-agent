@@ -793,6 +793,7 @@ agent = [
 app = [
     { name = "httpx" },
     { name = "pydantic-settings" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
 ]
 deploy = [
     { name = "fastapi" },
@@ -828,6 +829,7 @@ agent = [
 app = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
 ]
 deploy = [
     { name = "fastapi", specifier = ">=0.115" },

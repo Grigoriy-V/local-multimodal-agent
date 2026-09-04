@@ -17,6 +17,9 @@ dev = [
 app = [
     "httpx>=0.28",
     "pydantic-settings>=2.6",
+    # The write boundary around a command on native Windows: a restricted
+    # token and the workspace's ACL (`app/tools/shell_windows.py`).
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 # LangGraph pulls langchain-core in transitively. Being installed is not
 # permission to import it; see DECISIONS.md.

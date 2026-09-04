@@ -1225,4 +1225,10 @@ chosen by profile; a `run_command` Function and its image in
 `deploy/modal/control_app.py`; a `mutates` flag on tools and a mode the
 toolbox's `requires_approval` reads; the brief says where commands run and
 that the environment between turns may be fresh. Cold start is measured
-before the deployed shape is built on. `reports/2026-09-04_v2_isolated_execution_review.md`.
+before the deployed shape is built on. **Amended the same day, on the
+human's word:** locally the person is not the only boundary after all — on
+Windows a command runs under a write-restricted token and can write only
+inside the workspace (`app/tools/shell_windows.py`, DeepSeek Harness's
+mechanism), because a rule about installers was a crutch and the
+references' property is a boundary on every write.
+`reports/2026-09-04_v2_isolated_execution_review.md` §10.

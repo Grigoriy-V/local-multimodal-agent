@@ -15,18 +15,13 @@ that started the agent — no `.env` value, no token — is passed on.
 
 What a command may change is, by the references' one shared property, the
 workspace and nothing else (Codex's writable roots, Claude Code's sandbox on
-macOS and Linux). On native Windows there is no operating-system primitive
-for that boundary short of a second user account or WSL2: a write-restricted
-token (`CreateRestrictedToken`, the obvious route) cannot start an arbitrary
-process at all — initialization fails with `STATUS_DLL_INIT_FAILED` whatever
-the restricting SIDs and desktop, which is why Chromium starts its sandboxed
-processes with a second, initial token and drops it after startup. Tried and
-measured on 2026-09-04; the local profile therefore has no write boundary on
-Windows, as Claude Code has none there, and the brief says so. Until the
-human chooses one, two interim environment rules keep the one case they
-ruled out — an install into the machine's own Python — from happening:
-`PIP_REQUIRE_VIRTUALENV` and `npm_config_prefix`. They are named as interim
-because they are rules about two installers, not the boundary.
+macOS and Linux). On native Windows that boundary is a write-restricted
+token, the way DeepSeek Harness does it (`app/tools/shell_windows.py`): the
+operating system refuses a write anywhere the workspace's ACL does not allow,
+whatever the command — a `pip install` into the machine's Python included,
+which is the case the human ruled out on 2026-09-04. No rule about any
+installer. Elsewhere (a Linux box running the local profile) there is no
+boundary yet, and the brief says so.
 
 A non-zero exit is a result, not a failure (`docs/v2_tool_system.md`, "Failure
 is not the same as an unwanted result"). The failures are the runner's own: the
@@ -48,6 +43,11 @@ from pathlib import Path
 from typing import Protocol
 
 from .base import Tool, ToolError
+
+try:  # the write boundary exists on Windows only; see shell_windows.py
+    from . import shell_windows
+except ImportError:  # pragma: no cover - not Windows, or pywin32 missing
+    shell_windows = None  # type: ignore[assignment]
 
 # The family's own codes.
 COMMAND_TIMEOUT = "shell.timeout"
@@ -81,20 +81,56 @@ def venv_python(workspace: Path) -> Path:
     return venv_bin(workspace) / ("python.exe" if sys.platform == "win32" else "python")
 
 
+# CPython on Windows gives a directory made with mode 0o700 — which is what
+# `tempfile.mkdtemp` asks for, and through it pip's build and download
+# directories — an explicit owner-only ACL (SYSTEM, Administrators, OWNER
+# RIGHTS) in place of the inherited one. Under the write-restricted token that
+# directory is unusable, and `tempfile` then tries thousands of names before
+# giving up, which read as a hang (P, 2026-09-04: three `pip install` at 120 s
+# each). The token's owner cannot be changed to an identity the ACL admits,
+# and admitting OWNER RIGHTS to the restricting list opens every file the
+# person owns (measured). So the workspace's own Python, and only it, gets
+# this `sitecustomize`: a 0o700 directory is made like any other and inherits
+# the workspace's ACL. One interpreter behaviour, accommodated where that
+# interpreter lives; nothing else is patched.
+SITECUSTOMIZE = """\
+# Written by the assistant's command runner (app/tools/shell.py): under the
+# write boundary a directory made with mode 0o700 would get an owner-only ACL
+# the command itself cannot use. Made like any other directory instead.
+import os as _os
+import sys as _sys
+
+if _sys.platform == "win32":
+    _mkdir = _os.mkdir
+
+    def mkdir(path, mode=0o777, *, dir_fd=None):
+        if mode == 0o700:
+            mode = 0o777
+        return _mkdir(path, mode, dir_fd=dir_fd)
+
+    _os.mkdir = mkdir
+"""
+
+
 def ensure_venv(workspace: Path) -> bool:
     """The workspace's virtual environment, made on first use. Returns whether it was made now."""
 
     (workspace / TMP / "appdata").mkdir(parents=True, exist_ok=True)
     (workspace / TMP / "local").mkdir(parents=True, exist_ok=True)
-    if venv_python(workspace).exists():
-        return False
-    subprocess.run(
-        [sys.executable, "-m", "venv", str(workspace / VENV)],
-        check=True,
-        capture_output=True,
-        timeout=120,
-    )
-    return True
+    made = False
+    if not venv_python(workspace).exists():
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(workspace / VENV)],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+        made = True
+    if sys.platform == "win32":
+        site = workspace / VENV / "Lib" / "site-packages" / "sitecustomize.py"
+        if not site.exists():
+            site.write_text(SITECUSTOMIZE, encoding="utf-8")
+    return made
 
 
 @dataclass(frozen=True)
@@ -135,17 +171,28 @@ def command_environment(workspace: Path, source: dict[str, str] | None = None) -
     # The workspace's Python first: `python` and `pip` are the project's.
     env["PATH"] = os.pathsep.join([str(venv_bin(workspace)), *filter(None, [env.get("PATH", "")])])
     env["VIRTUAL_ENV"] = str(workspace / VENV)
-    # Interim, see the module docstring: pip refuses any interpreter that is
-    # not a virtual environment, and a global npm install goes to the
-    # workspace. Two installers, not a boundary; the human chooses the boundary.
-    env["PIP_REQUIRE_VIRTUALENV"] = "1"
-    env["npm_config_prefix"] = str(workspace / ".npm-global")
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["NO_COLOR"] = "1"
     env.setdefault("LANG", "C.UTF-8")
     return env
+
+
+def decoded(raw: bytes) -> str:
+    """A command's bytes as text: UTF-8 when it is, else the console's own code page.
+
+    `cmd` and the tools it ships speak the OEM code page (cp866 here), Python
+    and node speak UTF-8; reading everything as UTF-8 turned a Russian
+    "python3 is not recognized" into mojibake the model could not act on
+    (P, 2026-09-04).
+    """
+
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        codec = "oem" if sys.platform == "win32" else "utf-8"
+        return raw.decode(codec, errors="replace")
 
 
 def bounded(text: str, limit: int = MAX_OUTPUT_CHARS, tail: int = TAIL_CHARS) -> tuple[str, bool]:
@@ -190,20 +237,31 @@ class LocalRunner:
     def __init__(self) -> None:
         system = platform.system() or "this machine"
         shell = "cmd" if sys.platform == "win32" else "sh"
-        # Honest about what is not there: a command here can change the machine
-        # outside the workspace, and the model should know that before it
-        # writes one.
-        self.where = (
-            f"on this machine ({system}), through {shell}; there is no write boundary "
-            "here, so keep every change inside your workspace"
+        self.bounded = sys.platform == "win32" and shell_windows is not None
+        # Honest either way: the model should know whether a command can change
+        # the machine before it writes one.
+        boundary = (
+            "; a command can write only inside your workspace, the operating system "
+            "refuses everything else"
+            if self.bounded
+            else "; there is no write boundary here, so keep every change inside your "
+            "workspace"
         )
+        self.where = f"on this machine ({system}), through {shell}{boundary}"
+        self._runs = 0
 
     def _start(self, command: str, cwd: Path):
+        env = command_environment(cwd)
+        if self.bounded:
+            shell_windows.grant_workspace(cwd)
+            self._runs += 1
+            output = cwd / TMP / f"run-{os.getpid()}-{self._runs}.out"
+            return shell_windows.RestrictedProcess(command, cwd, env, output)
         return subprocess.Popen(  # noqa: S602 - the command is the point
             command,
             shell=True,
             cwd=str(cwd),
-            env=command_environment(cwd),
+            env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -227,11 +285,17 @@ class LocalRunner:
                 f"the command could not be started: {getattr(error, 'strerror', None) or error}",
                 code=COMMAND_NOT_STARTED,
             ) from error
+        except Exception as error:  # noqa: BLE001 - a pywin32 error is not an OSError
+            # Never silently unbounded: a boundary that could not be made is a
+            # command that did not run.
+            raise ToolError(
+                f"the command could not be started: {error}", code=COMMAND_NOT_STARTED
+            ) from error
         try:
             raw, _ = await asyncio.to_thread(process.communicate, None, timeout)
         except subprocess.TimeoutExpired as error:
             _kill_tree(process)
-            partial = (error.output or b"").decode("utf-8", errors="replace")
+            partial = decoded(error.output or b"")
             tail, _ = bounded(partial, TAIL_CHARS, TAIL_CHARS // 2)
             raise ToolError(
                 f"the command did not finish within {timeout:g} seconds and was killed",
@@ -243,7 +307,7 @@ class LocalRunner:
             # outlive the turn that asked for it.
             _kill_tree(process)
             raise
-        output, cut = bounded((raw or b"").decode("utf-8", errors="replace"))
+        output, cut = bounded(decoded(raw or b""))
         return Finished(
             exit_code=process.returncode,
             output=output,

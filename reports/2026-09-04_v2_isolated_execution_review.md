@@ -266,50 +266,70 @@ Built the same day on the human's start signal, in the tree, not deployed
 - Not in 5b, by the approved shape: background processes, the deployed
   runner, the Chainlit `/mode` (Chainlit has no `/plan` either).
 
-## 10. The write boundary on native Windows, tried 2026-09-04
+## 10. The write boundary on native Windows, 2026-09-04
 
 The human read the two installer rules (`PIP_REQUIRE_VIRTUALENV`,
 `npm_config_prefix`) as a crutch and asked for the references' property
 instead: a command writes only inside the workspace, whatever it is. On
 macOS and Linux the references get it from Seatbelt and bubblewrap; Codex on
-native Windows from a dedicated low-privilege user (with admin setup) or an
-"unelevated ACL-based" fallback. The obvious unelevated mechanism is a
-**write-restricted token** (`CreateRestrictedToken(WRITE_RESTRICTED)` with
-`RESTRICTED` as the restricting SID, the workspace granted to it by ACL).
+native Windows from a dedicated low-privilege user or an "unelevated
+ACL-based" fallback; **DeepSeek Harness** (`packages/sandbox/sandbox-windows-acl`,
+read the same day when the human asked what it does) from a
+**write-restricted token** with the workspace granted by ACL — with the
+documented partial case that Everyone must stay in the restricting list, so
+a place Everyone may write to stays writable, and that hard links alias a
+file across the boundary.
 
-Built and measured: `CreateProcessAsUser` with such a token starts `cmd`
-without a console but every process that loads more than `cmd` fails at
-initialization with `STATUS_DLL_INIT_FAILED` (0xC0000142) — with `RESTRICTED`
-alone, with the logon SID, with Users and Everyone added, on the default
-desktop, on a private desktop whose DACL admits `RESTRICTED`, and after
-granting `RESTRICTED` on `winsta0` and the default desktop. This is the
-limitation Chromium documents: a locked-down token cannot be the token a
-process starts with, because startup needs objects it cannot touch; Chromium
-starts with a second, initial token and drops it after loading, which an
-arbitrary command cannot do. The code was removed rather than kept as
-scaffolding.
+The first attempt here failed: every process beyond `cmd` died at
+initialization (`STATUS_DLL_INIT_FAILED`), and the report said so and listed
+a second user, WSL2 or no boundary as what remained. Reading DeepSeek's
+`token.ts` and README and then probing this machine step by step found the
+four things that make it work, none in the API reference, all now in the
+docstring of `app/tools/shell_windows.py`: the logon SID and Everyone in the
+restricting list (DeepSeek's note); **no `LUA_TOKEN`**, which DeepSeek sets
+and which on this machine turns Administrators deny-only and locks the
+command out of a workspace it owns through that group; the token's
+**default DACL** extended to the restricting identities, or a grandchild
+(everything `cmd` starts) fails the same way; and the command **inheriting
+a console** rather than getting its own, with the output in a file in the
+workspace's temp rather than a pipe — a new console fails at
+initialization, `cmd` without any console hands its children dead standard
+handles even unrestricted, and a pipe carries no ACL the restricted
+grandchild could pass. The agent process allocates a hidden console once
+when it has none. `pywin32` (already in the lock through a dependency) is
+declared for Windows in the `app` group.
 
-What remains possible on this machine, each with its price:
+One more thing the first live rerun found: three `pip install` hanging to
+their 120 s deadline. `tempfile.mkdtemp` — pip's build and download
+directories — asks `os.mkdir` for mode 0o700, and CPython on Windows gives
+such a directory an explicit owner-only ACL (SYSTEM, Administrators, OWNER
+RIGHTS) in place of the inherited one; the restricted command cannot use it,
+and `tempfile` tries thousands of names before giving up. The token's owner
+cannot be changed to an identity that ACL admits (`ERROR_INVALID_OWNER`),
+and admitting OWNER RIGHTS to the restricting list opens every file the
+person owns — measured: a file outside the workspace written, its ACL
+changed. So the workspace's own venv, and only it, carries a
+`sitecustomize.py` that makes a 0o700 directory like any other; nothing
+else is patched, and node, git and the shell are untouched. Said plainly:
+an accommodation of one interpreter behaviour, in the place that
+interpreter lives, so the boundary can stay a boundary on every write.
 
-- **A — a dedicated low-privilege local user**, Codex's own Windows route:
-  created once with administrator rights, granted read on the repository
-  and modify on the workspace, commands started with
-  `CreateProcessWithLogonW`. A real boundary from the OS; the cost is the
-  one-time admin setup and that user's password held in the local secret.
-- **B — WSL2 with bubblewrap**, the references' Linux route: the boundary
-  Claude Code and Codex use on WSL2, no daemon; the cost is WSL2 and the
-  toolchain living there, which the human set aside earlier.
-- **C — no boundary locally, the person is it**, Claude Code's state on
-  native Windows: `careful` mode asks before every command, `full` trusts;
-  the interim installer rules stay or go as the human says.
-- **D — AppContainer**: the supported lowbox token; starts fine, but denies
-  *reads* everywhere `ALL APPLICATION PACKAGES` is not granted, which
-  includes the repository and every toolchain under the user's profile.
-  Every read would need an ACL grant; brittle.
+Measured, `tests/test_run_command.py`: a write inside the workspace and in
+a directory that existed before the grant succeeds; a write beside the
+workspace, into the base Python's directory and into the person's profile
+is refused by the OS with `PermissionError`; `git --version` and a `python`
+started by `cmd` both reach the output; the kill at the deadline and on
+cancellation still hold; a temporary directory and a temporary file are
+made and used inside the workspace; a real `pip install reportlab` lands
+in the workspace venv in ten seconds. The two installer rules are gone.
+Live: O passed (18.6 s), Q passed (5.8 s); P made the PDF under the boundary (`pip install reportlab` in 6.5 s into the workspace venv, the script run) and then failed its look-and-send checks on the model's side — it did not trust a successful command with no output, tried `python3` (not on Windows), re-ran the same script until the repeat guard stopped it, and answered without `read_document` or `send_file` (ISS-0039). The first rerun before the accommodation had P hang three times on `pip install` (120 s each), which is what found the 0o700 case.
+The whole suite after all of it: 1051 passed, 27 skipped.
+
+What stays partial, as in DeepSeek: a directory Everyone may write to
+(`C:\Users\Public`) is writable; a hard link is one file on both sides.
+Reading and the network are untouched, by design. On a non-Windows local
+profile there is still no boundary and the brief says so.
 
 Left as built: the workspace venv as the project environment (not a crutch:
 every reference runs commands in the project's environment), temp and
-profile directories inside the workspace, the brief saying plainly that
-there is no write boundary here. The interim rules stay until the human
-chooses, because removing them reopens the one case they ruled out.
-
+profile directories inside the workspace.

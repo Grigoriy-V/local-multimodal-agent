@@ -288,12 +288,15 @@ a `Runner` with one method, chosen by the profile and owned by the
 the workspace, with the environment reduced to what a shell needs, `HOME` in
 the workspace, and nothing of the agent's own environment passed on; the
 deployed runner (5a) is a container beside the renderer that holds no secret.
-The environment makes the workspace the place an install lands rather than
-asking the model to remember it: the workspace's `.venv` (made on first use)
-is first on `PATH`, `PIP_REQUIRE_VIRTUALENV` makes pip refuse any other
-interpreter, `npm_config_prefix` points global npm installs into the
-workspace (ISS-0038). The brief says where commands run, in the runner's own
-words, and that this is what survives between turns. `DECISIONS.md` 2026-09-04.
+The workspace's `.venv` (made on first use) is first on `PATH`, so `python`
+and `pip` are the project's. On Windows the command runs under a
+write-restricted token (`app/tools/shell_windows.py`): the operating system
+refuses every write outside the workspace and its temp, a `pip install` into
+the machine's Python included (ISS-0038); reading and the network are
+untouched, and a place Everyone may write to stays writable, as in DeepSeek
+Harness. The brief says where commands run and whether that boundary holds,
+in the runner's own words, and that the workspace is what survives between
+turns. `DECISIONS.md` 2026-09-04.
 
 **Two modes.** A tool declares `mutates` when it changes the workspace
 (`write_file`, `edit_file`, `run_command`). In `full`, the default, that

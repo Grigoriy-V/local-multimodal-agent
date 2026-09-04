@@ -304,14 +304,90 @@ def test_python_and_pip_are_the_workspaces_own_environment(workspace: Path) -> N
     assert env["TEMP"] == str(workspace / ".tmp") and env["LOCALAPPDATA"].startswith(str(workspace))
 
 
-def test_the_interim_rules_keep_an_install_out_of_the_machines_python(workspace: Path) -> None:
-    """Interim until the human chooses a boundary (shell.py docstring)."""
-
-    env = command_environment(workspace, {"PATH": "/usr/bin"})
-
-    assert env["PIP_REQUIRE_VIRTUALENV"] == "1"
-    assert env["npm_config_prefix"] == str(workspace / ".npm-global")
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="the write boundary is Windows-only")
 
 
-def test_the_brief_says_there_is_no_boundary_here() -> None:
-    assert "no write boundary" in LocalRunner().where
+@windows_only
+def test_a_command_can_write_inside_the_workspace_and_nowhere_else(workspace: Path, tmp_path: Path) -> None:
+    """The human's rule, 2026-09-04: the operating system refuses a write outside."""
+
+    (workspace / "existing").mkdir()  # made before the grant: inheritance must reach it
+    outside = tmp_path / "outside.txt"
+    script = (
+        "import sys, pathlib\n"
+        "pathlib.Path('inside.txt').write_text('ok')\n"
+        "pathlib.Path('existing/deeper.txt').write_text('ok')\n"
+        "pathlib.Path('.tmp/scratch.txt').write_text('ok')\n"
+        "for label, target in [('outside', %r), ('base python', str(pathlib.Path(sys.base_prefix, 'agent-leak.txt'))), ('profile', %r)]:\n"
+        "    try:\n"
+        "        pathlib.Path(target).write_text('leak'); print(label, 'WRITTEN')\n"
+        "    except PermissionError:\n"
+        "        print(label, 'refused')\n"
+    ) % (str(outside), str(Path.home() / "agent-leak.txt"))
+    (workspace / "probe.py").write_text(script, encoding="utf-8")
+
+    finished = run(LocalRunner().run("python probe.py", workspace, 120))
+
+    assert finished.exit_code == 0, finished.output
+    assert (workspace / "inside.txt").read_text() == "ok"
+    assert (workspace / "existing" / "deeper.txt").read_text() == "ok"
+    assert "outside refused" in finished.output
+    assert "base python refused" in finished.output
+    assert "profile refused" in finished.output
+    assert "WRITTEN" not in finished.output
+    assert not outside.exists()
+
+
+@windows_only
+def test_what_the_command_starts_still_reaches_the_output(workspace: Path) -> None:
+    """A grandchild's stdout was the thing that got lost; see shell_windows.py."""
+
+    finished = run(LocalRunner().run("git --version & python -c \"print('grandchild ok')\"", workspace, 120))
+
+    assert finished.exit_code == 0, finished.output
+    assert "git version" in finished.output and "grandchild ok" in finished.output
+
+
+@windows_only
+def test_a_temporary_directory_can_be_made_and_used_under_the_boundary(workspace: Path) -> None:
+    """CPython's owner-only 0o700 directories, accommodated in the workspace's venv (shell.py)."""
+
+    finished = run(
+        LocalRunner().run(
+            "python -c \"import tempfile, pathlib; tempfile.TMP_MAX = 3; d = tempfile.mkdtemp(); "
+            "pathlib.Path(d, 'f').write_text('x'); f = tempfile.NamedTemporaryFile(delete=False); "
+            "f.write(b'y'); f.close(); print('temp ok', d.startswith(str(pathlib.Path.cwd())))\"",
+            workspace,
+            60,
+        )
+    )
+
+    assert finished.exit_code == 0, finished.output
+    assert "temp ok True" in finished.output
+
+
+@windows_only
+def test_the_brief_says_the_boundary_holds_here() -> None:
+    runner = LocalRunner()
+
+    assert runner.bounded
+    assert "only inside your workspace" in runner.where
+
+
+def test_output_in_the_consoles_code_page_is_read_as_text() -> None:
+    """`cmd` speaks the OEM code page; Python speaks UTF-8; both must read (P, 2026-09-04)."""
+
+    from app.tools.shell import decoded
+
+    assert decoded("привет".encode("utf-8")) == "привет"
+    if sys.platform == "win32":
+        assert decoded("не является".encode("oem")) == "не является"
+    assert "\ufffd" in decoded(b"\xff\xfe\xfd\x80 mixed \xff") or sys.platform == "win32"
+
+
+@windows_only
+def test_what_cmd_says_in_russian_reaches_the_model_readable(workspace: Path) -> None:
+    finished = run(LocalRunner().run("python3 --version", workspace, 60))
+
+    assert finished.exit_code != 0
+    assert "python3" in finished.output and "\ufffd" not in finished.output
