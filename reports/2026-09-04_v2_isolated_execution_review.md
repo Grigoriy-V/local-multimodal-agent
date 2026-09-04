@@ -529,3 +529,32 @@ tokens on every request. Not yet measured: the instrument is P again and
 `tools/prompt_scenarios.py` with the previous prompt as the variant; the
 deployed profile sees it after the next deploy.
 
+**P in Russian with the working method, 2026-09-04** (run `3b3c86d8`,
+thread `498a0aa2`, fresh thread, the block deployed). The same loop: `pip
+install fpdf2` first (already installed — **55.5 s** for pip to say so, in
+a fresh container against a venv on the Volume; 5.4 s warm), then
+`python3 -m venv .venv && pip install` again, then six rewrites of the
+script — the first run **50.7 s** (the venv's files read from the Volume for
+the first time), the rest 2.4–3.5 s — and the human stopped it at 220 s.
+One rewrite registered the bold face, which was the fix the error named,
+but in the main body after `add_page()`, whose `header()` needs it first;
+the model never saw the order. It did not run `pip list`, `ls` or
+`fc-list`, and never opened a result, because no run produced one.
+
+Measured, then: on this case the block changed nothing visible — one
+observation, the same request, the same library, the same six rewrites.
+What the block asks for is a habit this model does not have and one
+paragraph does not give it; a stronger model, or a skill that carries the
+knowledge (how a document is made and checked here), are the levers left,
+and the human's call. Recorded rather than concluded: `prompt_scenarios`
+with both prompts is the instrument for a claim either way.
+
+Two harness numbers from the same run, both the Volume's: a no-op `pip
+install` at 55 s cold and the first import of a Volume venv at 50 s. Modal
+documents the cause — a Volume is made for large files, not thousands of
+small ones, which is what a site-packages is. Options, unbuilt: the common
+document and data libraries in `command_image` beside the base tools, so a
+venv is the exception rather than the first step (a human's list, and a
+rebuild per change); or accept the cost as the price of an install that
+survives.
+
