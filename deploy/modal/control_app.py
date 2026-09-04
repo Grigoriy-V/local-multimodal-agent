@@ -62,6 +62,9 @@ def _with_source(image: modal.Image) -> modal.Image:
     return (
         image.add_local_dir("app", "/root/project/app", copy=True)
         .add_local_dir("ui", "/root/project/ui", copy=True)
+        # The live scenario runner, so `scenarios` below can drive the agent
+        # here the way `loop_live` drives it on a person's machine.
+        .add_local_dir("scripts", "/root/project/scripts", copy=True)
         .add_local_file(
             "deploy/modal/control_app.py", "/root/project/control_app.py", copy=True
         )
@@ -509,6 +512,73 @@ async def self_test(include_model: bool = False, include_credit: bool = False) -
         return await agent.selftest(f"self-test-{owner}", costs)
     finally:
         await agent.aclose()
+
+
+@app.function(
+    image=agent_image,
+    secrets=[control_secret],
+    volumes={WORKSPACE_ROOT: workspaces},
+    cpu=1.0,
+    memory=2048,
+    min_containers=0,
+    max_containers=1,
+    scaledown_window=2,
+    # Every scenario is a turn of up to 300 s; the after-deploy three and a
+    # handful of letters fit well inside this.
+    timeout=1800,
+    include_source=False,
+)
+async def scenarios(letters: str = "ABG") -> tuple[str, int]:
+    """Run `scripts/loop_live.py`'s scenarios here, in the worker's own environment.
+
+    The same image, secrets, Volume and command runner the worker has, so what
+    passes here is what passes for a person — the local run answers a different
+    question (the human's point, 2026-09-04). A probe user's workspace on the
+    Volume, the deployed telemetry with ids of this invocation's own. Returns
+    the printed report and the number of failed checks. Every turn wakes the
+    GPU: a product-runtime worker, permission each time.
+    """
+
+    import contextlib
+    import io
+    import uuid
+
+    from app.agent.runtime import create_agent
+    from app.agent.stop import MemoryStopRequests
+    from app.config import AgentSettings
+    from app.telemetry import open_telemetry
+    from scripts.loop_live import run_scenarios
+    from ui.telegram.adapter import DELIVERY
+
+    _settings()
+    agent_settings = AgentSettings()
+    telemetry = open_telemetry(agent_settings)
+    stops = MemoryStopRequests()
+
+    def factory():
+        return create_agent(
+            agent_settings=agent_settings,
+            user_id="loop-live-check",
+            delivery=DELIVERY,
+            telemetry=telemetry,
+            stops=stops,
+            runner=ModalRunner(),
+        )
+
+    out = io.StringIO()
+    await workspaces.reload.aio()
+    try:
+        with contextlib.redirect_stdout(out):
+            failed = await run_scenarios(
+                frozenset(letters.upper()),
+                factory(),
+                telemetry,
+                factory,
+                prefix=f"deployed-{uuid.uuid4().hex[:8]}-",
+            )
+    finally:
+        await workspaces.commit.aio()
+    return out.getvalue(), failed
 
 
 @app.function(

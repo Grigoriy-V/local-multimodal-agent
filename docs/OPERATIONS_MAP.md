@@ -270,7 +270,7 @@ in Telegram, which is free, and the live check below, which wakes the GPU and
 needs the human's permission for that run:
 
 ```text
-.venv\Scripts\python.exe -m scripts.loop_live --after-deploy
+.venv\Scripts\python.exe -m scripts.loop_live --deployed --after-deploy
 ```
 
 It runs two quick answers (A, B) so a change to the loop has not broken the
@@ -399,6 +399,22 @@ Cold start is measured with `scripts/measure_command_cold_start.py`, which
 invokes the deployed Function twice (one cold, one warm) and prints the
 wall time beside the command's own; running it starts a container and needs
 permission.
+
+#### `scenarios`
+
+Runs `scripts/loop_live.py`'s scenarios inside the worker's own environment
+(image, secrets, Volume, `ModalRunner`), for a probe user `loop-live-check`,
+writing the deployed telemetry under ids `deployed-<8 hex>-<sequence>`.
+Driven from a person's machine:
+
+```text
+.venv\Scripts\python.exe -m scripts.loop_live --deployed A B G
+.venv\Scripts\python.exe -m scripts.loop_live --deployed R S
+```
+
+Every turn wakes the GPU; permission each time. Since 2026-09-04 this is
+the after-deploy check of the deployed profile; the local run answers what
+the local profile does.
 
 #### `self_test`
 

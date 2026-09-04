@@ -912,3 +912,21 @@ now saying where a picture is looked at — and the next call was `read_file
 chart.png`, then `send_file`; south, 45. Five of five. Eight model calls,
 72 s, most of it the local venv install again.
 
+**The scenarios in the deployed worker, and the brief on looking, 2026-09-04,
+on the human's word.** Asked why the model carries a chart to
+`inspect_page`: because that was the one sentence in the brief that said
+"look", and it said "visual" and "screenshot". The observation paragraph
+is now one, generated from the toolbox, one clause per way — a page with
+`inspect_page`, a PDF with `view_pages`, a document's text with
+`read_document`, a picture with `read_file` — and the two sentences that
+held (look before you describe or hand over; never ask them to open it).
+And the human's other point: the agent we work with is the deployed one,
+and `loop_live` tested the local one. `scripts/loop_live.py` is now
+`run_scenarios(selected, agent, telemetry, agent_factory, prefix)` with
+`main()` around it, and `--deployed` sends the chosen letters to a
+`scenarios` Function in `deploy/modal/control_app.py` — the worker's
+image, secrets, Volume and `ModalRunner`, a probe user `loop-live-check`
+on the Volume, run ids `deployed-<8 hex>-<n>` in the deployed telemetry —
+and prints the same report. The after-deploy rule now reads
+`--deployed --after-deploy`. Not yet deployed or run.
+

@@ -190,15 +190,41 @@ def _mode_lines(tools: Toolbox) -> list[str]:
 
 
 def _observation_lines(tools: Toolbox) -> list[str]:
-    if "inspect_page" not in tools.names:
+    """How to look at what was made, one paragraph, one clause per way.
+
+    Generated from the toolbox so a grant without a way has no sentence about
+    it. Until 2026-09-04 only `inspect_page` had a sentence and it was the one
+    that said "look", so a chart was carried to the browser (R, live): the
+    model looks with whatever the brief calls looking.
+    """
+
+    ways = []
+    if "inspect_page" in tools.names:
+        ways.append(
+            "a page you made — an HTML file — with inspect_page, which opens it itself "
+            "and returns its structure with a ref on every control, its visible text, "
+            "console errors and a screenshot"
+        )
+    if "view_pages" in tools.names:
+        ways.append(
+            "a PDF with view_pages, which turns its pages into images for you and "
+            "sends nothing by itself"
+        )
+    if "read_document" in tools.names:
+        ways.append("a document's text with read_document")
+    if "read_file" in tools.names:
+        ways.append(
+            "a picture file — png, jpg, webp — with read_file, which shows it to you "
+            "as a picture"
+        )
+    if not ways:
         return []
     return [
-        "- inspect_page opens a local HTML file itself and returns its structure with a "
-        "ref on every control, its visible text, console errors and a screenshot. Safe "
-        "observation needs no permission and no "
-        "second turn from the person: when you have made or changed something visual, "
-        "look at it before you describe it, and never ask them to open it for you. If "
-        "looking failed, say that it failed rather than describing what you did not see."
+        "- Looking is yours to do; it needs no permission and no second turn from the "
+        "person. You look at " + "; ".join(ways) + ". When you have made or changed "
+        "something, look at it before you describe it or hand it over, and never ask "
+        "them to open it for you. If looking failed, say that it failed rather than "
+        "describing what you did not see."
     ]
 
 
@@ -303,16 +329,10 @@ def capability_brief(
         # front of you. What this must not say is that you cannot see it — an
         # earlier version did, and the assistant duly told a person it was a text
         # model that could not look at the PDF it had just read.
-        looking = (
-            " view_pages turns PDF pages into images for you to inspect and returns "
-            "their saved workspace paths; it sends nothing by itself."
-            if "view_pages" in tools.names
-            else ""
-        )
         lines.append(
             f"- The person can also send documents ({documents()}). They are saved in "
             "your workspace under the name the turn gives you, and you read them with "
-            f"read_document rather than receiving their text directly.{looking}"
+            "read_document rather than receiving their text directly."
         )
     web = [name for name in ("search_web", "fetch_page", "view_web_page") if name in tools.names]
     if web:

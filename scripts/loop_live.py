@@ -1,8 +1,18 @@
 """A live check of the one loop. Needs the model endpoint, so it wakes a GPU.
 
-    .venv\\Scripts\\python.exe -m scripts.loop_live                 all of A-G
+    .venv\\Scripts\\python.exe -m scripts.loop_live                 all of A-S, here
     .venv\\Scripts\\python.exe -m scripts.loop_live --after-deploy  A, B and G
     .venv\\Scripts\\python.exe -m scripts.loop_live G               one by letter
+    .venv\\Scripts\\python.exe -m scripts.loop_live --deployed R S  the same, in the
+                                                                deployed worker
+
+`--deployed` (2026-09-04, the human: the agent we work with is the deployed
+one, so that is the one to test) runs the chosen scenarios inside the
+deployed worker's own environment — its image, its secrets, its Volume, its
+command runner — through the `scenarios` Function of
+`deploy/modal/control_app.py`, in the workspace of a probe user of their
+own, and prints the same report. It is a product-runtime worker and every
+turn wakes the GPU: permission at the time, as here.
 
 Five things the offline suite can only fake, because each of them is about what
 a real model does with the loop rather than about what the loop does with a
@@ -124,7 +134,7 @@ class Turn:
         self.failures: list[tuple[str, ToolFailure]] = []
         self.tool_results: list[Message] = []
         self.approvals = 0
-        self.run_id = f"live-{sequence}"
+        self.run_id = f"{RUN_PREFIX}{sequence}"
         self._names: dict[str, str] = {}
 
     async def ask(self, thread_id: str, prompt: str) -> "Turn":
@@ -278,22 +288,28 @@ def chosen(argv: list[str]) -> frozenset[str]:
     return frozenset(letters) if letters else frozenset("ABCDEFGHIJKOPQRS")
 
 
-async def main() -> int:
-    selected = chosen(sys.argv[1:])
+# The run ids one invocation writes: `live-<sequence>` on this machine, in a
+# telemetry file of the run's own; deployed, a prefix of the invocation's own
+# so two runs into one database never share an id.
+RUN_PREFIX = "live-"
+
+
+async def run_scenarios(selected, agent, telemetry, agent_factory, prefix: str = "live-") -> int:
+    """Run the chosen scenarios against one agent and print the report.
+
+    `agent_factory` makes a fresh agent the way this one was made — J needs
+    one after it kills the first. Closes the agent and the telemetry at the
+    end. Returns the number of failed checks.
+    """
+
+    global RUN_PREFIX
+    RUN_PREFIX = prefix
 
     def wanted(letter: str) -> bool:
         return letter in selected
 
-    room = Path(tempfile.mkdtemp(prefix="loop-live-"))
-    settings = settings_in(room)
-    telemetry = open_telemetry(settings)
-    stops = MemoryStopRequests()
-    agent = create_agent(
-        agent_settings=settings, user_id=USER, telemetry=telemetry, stops=stops
-    )
     root = agent.capability_grant.root
     print(f"workspace {root}")
-    print(f"telemetry {settings.telemetry_database}")
     failed = 0
 
     try:
@@ -618,9 +634,7 @@ async def main() -> int:
             await asyncio.gather(work, return_exceptions=True)
             print("\n  (the turn was killed once the model asked for its first tool)")
             await agent.aclose()
-            agent = create_agent(
-                agent_settings=settings, user_id=USER, telemetry=telemetry, stops=stops
-            )
+            agent = agent_factory()
             left = await agent.unfinished("chat-j")
             j = await Turn(agent, telemetry, 111).take_up("chat-j")
             resumed = j.events("turn_resumed")
@@ -770,6 +784,39 @@ async def main() -> int:
         telemetry.close()
 
     print(f"\n{'all scenarios passed' if not failed else f'{failed} check(s) failed'}")
+    return failed
+
+
+def deployed(selected) -> int:
+    """The same scenarios, in the deployed worker, through its `scenarios` Function."""
+
+    import modal
+
+    function = modal.Function.from_name("assistant-control", "scenarios")
+    text, failed = function.remote("".join(sorted(selected)))
+    print(text)
+    print("Read any of them back with:  python tools/show_run.py --last 20   (the deployed database)")
+    return failed
+
+
+async def main() -> int:
+    argv = sys.argv[1:]
+    selected = chosen(argv)
+    if "--deployed" in argv:
+        return deployed(selected)
+
+    room = Path(tempfile.mkdtemp(prefix="loop-live-"))
+    settings = settings_in(room)
+    telemetry = open_telemetry(settings)
+    stops = MemoryStopRequests()
+
+    def factory():
+        return create_agent(
+            agent_settings=settings, user_id=USER, telemetry=telemetry, stops=stops
+        )
+
+    print(f"telemetry {settings.telemetry_database}")
+    failed = await run_scenarios(selected, factory(), telemetry, factory)
     print(
         "\nItem 3 baseline, 2026-08-29 (reports/2026-08-29_v2_gpu_baseline_measured.md,"
         " reports/2026-08-30_v2_step4_harness_preparation.md):\n"

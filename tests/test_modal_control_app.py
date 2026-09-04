@@ -448,3 +448,21 @@ def test_the_everyday_libraries_are_in_the_image_not_on_the_volume() -> None:
     assert '"pip",' in text and text.index('"pip",') < text.index('"reportlab",')
     for package in ("reportlab", "fpdf2", "python-docx", "openpyxl", "pandas", "matplotlib", "pypdf"):
         assert f'"{package}"' in text
+
+
+def test_the_scenarios_run_in_the_workers_own_environment() -> None:
+    """The human, 2026-09-04: the agent we work with is the deployed one, so
+    that is the one to test. Same image, secrets, Volume and runner as the
+    worker; a probe user of its own."""
+
+    keywords = _keywords_of("scenarios")
+    body = ast.get_source_segment(source(), _function("scenarios"))
+
+    assert _image_of("scenarios") == "agent_image"
+    assert keywords["secrets"] == "[control_secret]"
+    assert keywords["volumes"] == "{WORKSPACE_ROOT: workspaces}"
+    assert body is not None and "runner=ModalRunner()" in body
+    assert 'user_id="loop-live-check"' in body
+    assert "from scripts.loop_live import run_scenarios" in body
+    assert '.add_local_dir("scripts", "/root/project/scripts", copy=True)' in source()
+
