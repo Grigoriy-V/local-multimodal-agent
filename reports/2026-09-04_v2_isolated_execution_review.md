@@ -2,11 +2,10 @@
 
 **Date:** 2026-09-04
 **Agent:** Claude, direct session
-**Status:** analysis and a proposed shape. Step 5 was selected by the human
-on 2026-09-04 and split on their word into the deployed profile (5a, Modal)
-and the local one (5b). Nothing here is built; the shapes in §5 are options
-until the human approves them in words, and implementation is a separate
-start signal.
+**Status:** analysis, and a shape **approved by the human on 2026-09-04**
+(§5) after four rounds in the chat. Step 5 was selected the same day and
+split on their word into the deployed profile (5a, Modal) and the local one
+(5b). Nothing is built; implementation is a separate start signal.
 
 ## 1. What step 5 is
 
@@ -84,132 +83,137 @@ choice, not a security fact.
 5. **What the model is told**, and what a blocked or timed-out command
    reports back.
 
-## 5. Options
+## 5. The shape — approved 2026-09-04
 
-### 5a — Deployed (Modal)
+Reached in the chat with the human on 2026-09-04 in four rounds, each of
+which changed the answer; recorded here as approved, with the rounds kept so
+the next session sees why the earlier §3 reading was not enough.
 
-- **A — Modal Sandbox per person, by name (recommended).** One sandbox per
-  workspace scope, `name=<scope>`, created on the first command and found
-  again with `Sandbox.from_name` on every later one, from any worker
-  container. Image: the agent image's runtime layers without the repository
-  source, plus Python, Node and the usual build tools; **no secret**; the
-  `assistant-workspaces` Volume mounted at `/workspaces`, `workdir` the
-  person's directory. `idle_timeout` on the order of ten minutes, `timeout`
-  the 24 h ceiling, so a coding session keeps its installed packages and
-  running server across turns and dies quietly after. Cost: while alive
-  only, ~$0.12/h at 1 CPU / 2 GiB; an hour-long session is cents, and the
-  idle timeout bounds what a forgotten one costs. Network on in v1 (§4.4
-  above); `outbound_cidr_allowlist` is one parameter away if evidence asks
-  for it. Filesystem snapshots (an Image of the installed packages) are v2.
-  The one thing to verify live before building on it: **the Volume seen
-  from both sides.** The worker reloads before the turn and commits after;
-  a file the sandbox writes must be visible to `read_file` in the same turn
-  and to `send_file`, and a file `write_file` makes must be visible to the
-  next `exec`. Modal Volumes allow concurrent mounts and commit/reload
-  explicitly; the first live scenario is exactly this round trip, and if it
-  fails, the fallback is OpenClaw's: the file tools move inside the sandbox
-  for the deployed profile (they already take a root; a root that is a
-  sandbox path is the second implementation the tool-system doc
-  anticipated).
-- **B — The worker's own process, secret scrubbed.** Cheapest; nothing to
-  start. But the volume, the database socket and the network are the
-  worker's, and "no control-plane secret" holds only for environment
-  variables. Rejected: it is not the boundary the product contract names.
-- **C — A separate Function without secrets.** Cold per command, `pip
-  install` gone by the next call, no server survives. Rejected: it cannot
-  do what the step is for.
+**Round one** proposed the references' boundary as read: a Modal Sandbox
+deployed, WSL2 with `bubblewrap` locally. The human: neither Claude Code nor
+Codex installs WSL on Windows, and inside one folder with full access a
+fence does nothing. True — Claude Code on native Windows has no sandbox at
+all and says so; the fence is about what is *outside* the folder, and on a
+developer's own machine that job is done by the person. **Round two**, with
+the old wording ("isolation, not a confirmation prompt") set aside as
+written before the tool system: what the product needs is an environment
+that lives through a session; isolation is second and, on the human's
+machine, absent in every reference. **Round three**, the human's five
+points: idle three minutes, cold start measured, no boundary the agent has
+to understand, two modes with full access the default, base tools in the
+image. **Round four**, the human unsure about a Sandbox that loses what
+was installed: what is installed lives in the workspace on the Volume,
+where nothing loses it; what a container buys is secrets outside, a
+crashed command not killing the worker, and background processes — and a
+Function without secrets, the renderer's own pattern, buys the first two
+at a third of the price and with no new primitive.
 
-### 5b — Local (this machine)
+### What is decided
 
-- **A — WSL2, `bubblewrap` around the workspace (recommended).** Commands
-  run as `wsl -d Ubuntu -- bwrap …` with the person's workspace bound
-  read-write at a fixed path, `/tmp` private, the rest of the filesystem
-  read-only, an empty environment plus `PATH`, `HOME` inside the workspace,
-  and the network left on in v1 (`--unshare-net` is one flag when wanted).
-  The same primitive Claude Code and Codex use on WSL2, the toolchain is
-  the WSL one the human already works in, no daemon. Known cost: the
-  workspace lives on the Windows disk, so from WSL it is `/mnt/d/…` over
-  drvfs, and `npm install` there is slow. If that hurts, the local workspace
-  moves into the WSL filesystem, which is a configuration, not a design.
-  Honest fallback, as the references do it: when `bwrap` is missing the
-  tool runs the command in WSL without it, **and says so in the brief and
-  in the result**, never silently.
-- **B — The Windows host process.** No primitive to fence it; Codex's native
-  Windows sandbox is its own low-privilege user and ACLs, not something to
-  rebuild here. Acceptable only as the fallback above, not as the design.
-- **C — Docker Desktop.** A daemon, an image, a second copy of the
-  toolchain, for the same boundary A gives in a process. Not for v1.
+- **Where a command runs, deployed:** a Modal Function `run_command`
+  beside the renderer, built from the same image plus the tools below, the
+  `assistant-workspaces` Volume mounted, **no secret**, `scaledown_window`
+  180 s, timeout the executor's. Nothing installed into the container
+  survives it, by design; nothing needs to.
+- **Where a command runs, locally:** a process on this machine, `cwd` the
+  workspace, the environment reduced to `PATH` and what a shell needs, no
+  `.env` value in it. No WSL, no `bubblewrap`, no Docker. Claude Code on
+  the same machine runs the same way.
+- **What survives:** whatever is in the workspace. `HOME` is set inside the
+  workspace for commands, a venv there is the way to install Python
+  packages, `node_modules` land there on their own. The brief says so in
+  one sentence: the environment between turns may be fresh, install into
+  the workspace. The first command in a fresh container says "new
+  environment" in its result, so a missing package is not a surprise.
+- **Network:** on. Installing is the point; no secret is inside; what
+  could leave is the person's own workspace, which the model reads anyway.
+- **The tool:** one, `run_command(command, timeout_seconds=120)`, not
+  `replay_safe`. A fresh shell per command in the workspace; the result is
+  the exit code, the bounded output (the executor's head and tail), the
+  elapsed time. A timeout kills the process tree and reports `timeout`.
+  Python, `pip`, `node`, `git` are commands, not tools. Background
+  processes are v2 (they are what a Sandbox would be for).
+- **Two modes, per conversation:** `full` — everything inside the
+  workspace runs without a question, the default in both profiles — and
+  `careful`, where tools that change the workspace (`write_file`,
+  `edit_file`, delete, `run_command`) ask first through the existing
+  approval path. Claude Code's permission modes, generalized: a tool gains
+  a `mutates` flag, the toolbox's `requires_approval` reads the mode, a
+  chat command switches it. Third-party and infrastructure effects stay
+  gated in both modes as before.
+- **Base tools in the image:** python3 + pip + venv, node + npm, git, curl,
+  zip/unzip, tar, jq, ffmpeg, imagemagick, poppler-utils, pandoc. Not
+  LibreOffice, for its size. Locally, what the machine has; the brief
+  lists what is found.
+- **For the agent there is no boundary to understand.** Commands run in
+  its workspace, on the same files its other tools see. Deployed, the
+  Volume is reloaded before and committed after each command as the
+  worker already does per turn — and the first live line checks the
+  round trip: a file written by a command read by `read_file` in the same
+  turn, and one written by `write_file` seen by the next command.
 
-### Common to both: the tool and its contract
+### What was set aside, and why
 
-One tool, `run_command(command, timeout_seconds=120)`, not `replay_safe`,
-`delivers=False`. A fresh shell per command in the workspace; the result is
-the exit code and the bounded output (the executor's head and tail already
-do this), with the working directory and the elapsed time. A timeout kills
-the process tree and reports `timeout` through the existing code. A command
-blocked by the boundary reports what was refused (the path, or the network)
-the way Claude Code does, so the model can say so or do otherwise. No
-per-command consent inside the boundary (`DECISIONS.md` 2026-08-30); the
-tool is not in the approval-gated set. Background processes (a dev server
-the browser then looks at) are **v2**: they need a `process` handle and a
-lifetime tied to the sandbox, and `inspect_page` already serves workspace
-files without one. The brief gains one paragraph: where commands run, that
-the workspace is the only writable place, whether network is on, and — in
-the fallback — that there is no isolation.
-
-Behind the tool, one small protocol, `Runner.run(command, cwd, timeout) ->
-Finished(exit_code, output, cut)`, with `WslRunner` and `ModalSandboxRunner`
-chosen by profile in `create_agent`, the way `open_store` picks the store.
-Not a `BaseEnvironment` hierarchy: two implementations, one method.
+- **Modal Sandbox** — v2, when a background process (a dev server the
+  browser then looks at) or a filesystem snapshot is worth its price. A
+  second implementation of the same runner; nothing in v1 is shaped
+  against it.
+- **WSL2 + bubblewrap locally** — the references' boundary on Linux, not
+  what the human's daily tools do on this Windows machine; the person is
+  the boundary there, as in Claude Code.
+- **Running in the worker** — loses everything in 60 s anyway, and a child
+  of the worker reads the worker's secrets through `/proc` whatever its
+  environment says. With a Telegram token and the database URL at stake,
+  and the alternative costing cents, this is not where to save.
+- **"Isolation, not a confirmation prompt, is the boundary"** as a
+  universal — kept for the deployed profile, where nobody can be asked,
+  and there the boundary exists for persistence and secrets anyway;
+  replaced locally and in the modes by Claude Code's rule.
 
 ## 6. Acceptance: the suite is the instrument
 
 Offline (`tests/test_run_command.py`): a fake runner through the executor —
 exit code and output projected, a timeout reported with the code, output
-over the bound cut with head and tail, the tool absent from the approval
-set; `WslRunner` unit-tested on the command line it builds, not by running
-WSL.
+over the bound cut with head and tail; the modes: `careful` asks for a
+mutating tool and `full` does not, the gated set unchanged in both; the
+local runner on a real `python -c` and a real timeout on this machine.
 
 Live, local (5b), `scripts/loop_live.py`, one warm window, one permission:
 
 - **O** "write a script that prints the primes under 50 and run it" — a
   `write_file`, a `run_command`, the output in the answer.
-- **P** the PDF scenario from 4.3 — "make me a one-page PDF about X and send
-  it": `pip install` of a PDF library, a run, `view_pages` or `read_document`
-  on the result, `send_file`. Asserted on tools and outbound, not wording.
-- **Q** a command that sleeps past its timeout — `timeout` in the result and
-  the turn continuing.
-- **R** a command that writes outside the workspace — refused by the
-  boundary, the refusal in the result. Skipped, and said so, when `bwrap` is
-  absent.
+- **P** the PDF scenario from 4.3 — "make me a one-page PDF about X and
+  send it": an install into the workspace, a run, `view_pages` or
+  `read_document` on the result, `send_file`. Asserted on tools and
+  outbound, not wording.
+- **Q** a command that sleeps past its timeout — `timeout` in the result
+  and the turn continuing.
 
-Live, deployed (5a): the same O, P, Q through Telegram after the deploy,
-plus the after-deploy run; and before them the Volume round trip named in
-§5a A, as its own line. Every deployed command starts a Sandbox: a
-product-runtime worker and its own gate during development.
+Live, deployed (5a): the Volume round trip as its own line, then O, P, Q
+through Telegram after the deploy, then the after-deploy run. Every
+deployed command starts a container: a product-runtime worker and its own
+gate during development.
 
-Measured, into `reports/ml_work.jsonl`: sandbox creation latency cold and
-reattached, seconds alive per scenario, the cost per session at the chosen
-idle timeout.
+Measured, into `reports/ml_work.jsonl`: **cold start of the command
+container and the warm call**, seconds per scenario, the image size. The
+cold-start number is what decides whether 180 s idle is right and whether
+the image needs trimming; the human asked for it before anything is built
+on it.
 
 ## 7. Size, order, gates
 
-`app/tools/shell.py` (tool, `Runner`, `Finished`, `WslRunner`) ~150 lines;
-`ModalSandboxRunner` ~80 lines in `deploy/modal/` beside the renderer, since
-it is deployment-specific; wiring and brief ~40; tests ~150; scenarios ~80.
-No schema, no migration. A new Modal image for the sandbox; a model-app
-redeploy is not involved.
+`app/tools/shell.py` (tool, `Runner`, `Finished`, `LocalRunner`) ~150 lines;
+the deployed runner ~60 lines in `deploy/modal/control_app.py` beside the
+renderer, its image ~15; modes ~60 across `base.py`, the settings and the
+two adapters; brief ~15; tests ~180; scenarios ~60. No schema, no
+migration, no model-app change.
 
-Order proposed: **5b first**, because the tool, the contract, the offline
-tests and the live suite all run on this machine and cost nothing, then
-**5a** as the second runner plus the deploy. The alternative — 5a first,
-because the product is the deployed one — pays a Sandbox start for every
-iteration of the tool's own contract.
-
-Gates: the human's word on §5 (the shapes for 5a and 5b, network on, the
-order), then a separate start signal for each; the local live run; the
+Order: **5b first** — the tool, the contract, the modes, the offline tests
+and the live suite all run here — then **5a** as the second runner and the
+deploy. Gates: a separate start signal for each; the local live run; the
 deploy; the after-deploy run.
 
-## 8. What this document does not authorize
+## 8. What this document authorizes
 
-No implementation, no Sandbox, no GPU run, no deploy.
+Nothing. The shape is approved; implementation waits for its own start
+signal.

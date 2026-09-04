@@ -1181,3 +1181,48 @@ Consequences
 `verbatim_floor`, `cut_for` and `SUMMARY_ALLOWANCE` in
 `app/context/summary.py`; `fitted` in `app/agent/graph.py` loops;
 `keep_recent` is gone from policy, settings and the Telegram wording.
+
+## 2026-09-04 — Generated code runs where no secret is, and what it installs lives in the workspace
+
+Decision
+
+The assistant runs commands through one tool, `run_command`, a fresh shell
+per command in the person's workspace. Deployed, the command runs in a
+Modal Function beside the renderer: the same image plus base tools, the
+workspaces Volume mounted, no control-plane secret, scaled down after 180 s
+idle. Locally, it runs as a process on the person's machine in the
+workspace, with the environment reduced to what a shell needs. Nothing
+installed into a container is expected to survive it; what a person or the
+assistant installs goes into the workspace (`HOME` there, a venv there),
+where the Volume keeps it. Network is on. A conversation is in one of two
+modes: `full`, the default in both profiles, where everything inside the
+workspace runs without a question, and `careful`, where tools that change
+the workspace ask first through the existing approval path; effects beyond
+the workspace stay gated in both. A Modal Sandbox is v2, for background
+processes and snapshots.
+
+Why
+
+What a coding agent needs is an environment that lives through a session;
+the references agree, and their isolation is second to it — Claude Code on
+native Windows has none. Deployed, the worker itself cannot host commands:
+it scales to zero in 60 s, and any child of it can read its Telegram token
+and database URL through `/proc` whatever its own environment says. A
+Function without secrets, the pattern the renderer already uses, keeps the
+secrets out at a third of a Sandbox's price and with no new primitive;
+persistence is the same in both, because it comes from the workspace. On
+the person's own machine the person is the boundary, as in Claude Code, and
+the two modes are Claude Code's permission modes, general rather than
+written for a case. This supersedes the 2026-08-30 wording "isolation, not
+a confirmation prompt, is the boundary for arbitrary generated code" as a
+universal: it holds deployed, where nobody can be asked; locally the mode
+is the answer.
+
+Consequences
+
+`app/tools/shell.py` with a one-method `Runner` and two implementations
+chosen by profile; a `run_command` Function and its image in
+`deploy/modal/control_app.py`; a `mutates` flag on tools and a mode the
+toolbox's `requires_approval` reads; the brief says where commands run and
+that the environment between turns may be fresh. Cold start is measured
+before the deployed shape is built on. `reports/2026-09-04_v2_isolated_execution_review.md`.
