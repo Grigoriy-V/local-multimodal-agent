@@ -652,3 +652,23 @@ The container's share did not grow (7.9 s against 8.3 s before, 0.6 against
 0.7 warm); what grew is the command itself, because the probe now imports
 pandas and matplotlib, which cost 1.5–2.5 s wherever they are.
 
+**P in Russian on the new image, 2026-09-04** (run `a7d5c61c`, thread
+`66d217fc`): no venv made, a reasonable fpdf2 script with `add_font` from
+`/usr/share/fonts/truetype/dejavu/`, `ls` and `find` on the fonts on its
+own, and every run failed inside `.venv/lib/python3.12/site-packages/fpdf/`
+— the workspace's old `.venv`, first on the command's `PATH`, in which the
+English-tea turn had installed **fpdf 1.7.2 over fpdf2**: `set_font` at
+line 603, `RuntimeError: FPDF error`, `add_font` doing `pickle.load` are
+fpdf 1.7, and `pip install fpdf2` answered "already satisfied" because
+fpdf2's metadata was still there under fpdf 1.7's files. The image's fpdf2
+was never reached. Twelve steps, the turn's budget, an honest text answer.
+Why the first P of the day simply worked: a workspace with no venv,
+reportlab, Helvetica. Sorted: the harness's — the container's `PATH`
+prefers a `.venv` on the Volume silently, so the brief says fpdf2 is
+installed and `python3` finds fpdf 1.7, and the workspace now carries five
+venvs and a font directory from the day's experiments. Option: in the
+container, the environment is the image's and a venv in the workspace is
+used only when a command names it (the references' behaviour: nothing is
+activated for the developer); and the debris on the Volume is the human's
+to delete.
+
