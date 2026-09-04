@@ -736,3 +736,14 @@ two identical calls starts the count over; the same call unchanged three
 times is still refused. The model's part: after the refusal it sent the
 same line twice more and then the whole script as a `python3 -c` one-liner.
 
+**P in Russian after the ISS-0042 deploy, 2026-09-04** (run `0876a984`):
+every tool ran, nothing refused, nothing stubbed, the image's fpdf2 and
+fonts in place. The model's first three scripts were the same three as the
+previous run, word for word — the same prompt gives the same trajectory —
+and at the fourth step, instead of the `ls` it did last time, it wrote a
+text file and told the person a PDF with Cyrillic "requires external fonts
+in the system", with the brief's own sentence naming
+`/usr/share/fonts/truetype` (DejaVu, Liberation) in the same prompt and
+the traceback saying `FPDF.add_font() beforehand`. Sorted: the model's.
+Nothing in the harness touched this turn.
+
