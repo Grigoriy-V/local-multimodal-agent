@@ -4,9 +4,9 @@
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** 4.7, restart, resume and the scenario suite,
-approved 2026-09-04; built in the tree, its live run and deploy are the next
-gates (below).
+**Current approved step:** none. 4.7, restart, resume and the scenario
+suite, closed 2026-09-04 (below). Next in order is 4.8; selecting it is the
+human's word.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -283,16 +283,26 @@ What exists. How it was reached, and every number, is in the linked report.
      2026-09-04 (`reports/2026-09-04_v2_restart_resume_review.md`) and
      approved in that shape the same day.
 
-     **State, 2026-09-04:** built in the tree, not deployed. A turn a worker
-     died in is taken up from its checkpoint by the next claim: a dead
-     `tools` step is answered per call (reading tools run again, anything
-     else `interrupted`, "whether it ran is unknown"), `persist` is
-     idempotent, the lease is below the container's life, the same update is
-     re-invoked once, the fourth claim gives up and says so. Offline: five
-     resume tests, three adapter, one worker; 1026 passed. Live: scenarios J
-     (killed and taken up) and K (a fold between two steps) in
-     `scripts/loop_live.py`, not yet run; derived GPU seconds per scenario
-     beside the item 3 baseline. `DECISIONS.md` 2026-09-04.
+     **Done 2026-09-04, deployed.** A turn a worker died in is taken up
+     from its checkpoint by the next claim: a dead `tools` step is answered
+     per call (reading tools run again, anything else `interrupted`,
+     "whether it ran is unknown"), `persist` is idempotent, the lease is
+     below the container's life, the same update is re-invoked once, the
+     fourth claim gives up and says so. Offline: five resume tests, three
+     adapter, one worker; 1026 passed. Live the same day: **J** (the turn
+     killed once the model asked for its first tool, taken up by a fresh
+     agent: `turn_resumed`, the file there, the read not repeated, an
+     answer, 1.8 s) and **K** (twelve seeded messages on a 7.6k budget: the
+     fold fired between two steps and the turn finished, 12 s) passed;
+     every scenario line carries derived GPU seconds beside the item 3
+     baseline. Deployed (`97e75c7`), `self_test` ran on the new container,
+     after-deploy run: A and B passed, G 7 of 8 with the files and the
+     screenshot sent and one model-wording miss (a markdown image path
+     beside the real send; ISS-0003, for 4.9). Left for later: the dead
+     attempt's status and preview messages stay in the chat; whether Modal
+     retries a timeout is confirmed on the first real kill.
+     `reports/2026-09-04_v2_restart_resume_review.md`, `DECISIONS.md`
+     2026-09-04.
    - **4.8 `ask_user`** for a genuinely missing decision, not for permission.
      Was 4.5; moved behind the tool system it returns through, and behind the
      suite that can accept it.

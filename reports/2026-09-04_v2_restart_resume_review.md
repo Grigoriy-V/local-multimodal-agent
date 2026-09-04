@@ -258,3 +258,27 @@ After the human's "делай" on the recommended shape:
 Not built, as §4: the orphaned preview of the dead attempt; whether Modal
 retries a timeout is confirmed on the first real kill. Live J and K, the
 deploy and the after-deploy run are the next gates.
+
+## 8. Live, deployed, 2026-09-04
+
+- `loop_live K J` after two corrections to K's own setup (the budget 9k → 7.6k
+  so the second step crosses it; twelve seeded messages, since the newest
+  eight always stay verbatim and a fold needs something older): **K**
+  passed — `context_folded` between two steps, a model step after it,
+  the file written, an answer, 12.3 s, derived GPU ~23.5 s / $0.0072.
+  **J** passed — killed once the model asked for its first tool; the fresh
+  agent found the turn (`turn_resumed node=model`, nothing unknown: the
+  kill landed after the step's results were checkpointed), read the poem
+  rather than writing it again, answered in 1.8 s, ~13.7 s / $0.0042. The
+  in-`tools` kill, with a call left unknown, is covered offline
+  (`tests/test_turn_resume.py`); live it is a matter of where the cancel
+  lands.
+- Deployed `assistant-control` at `97e75c7`; `self_test` on the new
+  container; after-deploy: A (10.3 s), B (2.5 s) passed; G 65 s, 7 of 8,
+  files and screenshot sent, the one miss a markdown image path in the
+  wording (ISS-0003). Derived GPU for G ~77 s / $0.024, the same shape as
+  the 2026-09-03 runs.
+- The item 3 comparison: A and B at ~14.5 s derived each are the idle
+  window plus one short request, as the baseline's short turns were; G at
+  ~77 s is the multi-step shape the baseline had no example of. Nothing
+  regressed against the 2026-08-29 numbers; nothing was bounded.

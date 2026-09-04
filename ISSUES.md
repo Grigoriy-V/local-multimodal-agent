@@ -101,9 +101,9 @@ Rules that keep the file honest:
 
 ### ISS-0034 — a worker's lease outlives the container's own kill by five minutes
 
-- **Status:** fixed in the tree, 2026-09-04 — `LEASE_SECONDS` 590 against the
-  600 s timeout, and the turn is taken up from its checkpoint by the next
-  claim (4.7). Not yet deployed
+- **Status:** fixed, 2026-09-04 — `LEASE_SECONDS` 590 against the 600 s
+  timeout, and the turn is taken up from its checkpoint by the next claim
+  (4.7). Deployed the same day
 - **Seen:** 2026-09-03, code review (`reports/2026-09-03_v2_whole_code_review.md` §2.7); not yet seen live
 - **Costs:** when a worker container dies mid-turn, the conversation stays
   `running` with a live lease until 900 s after the claim, and every later
@@ -784,6 +784,10 @@ Rules that keep the file honest:
   image. One turn is not a rate; the status stays mitigated.
 - **Decided:** 2026-09-03, the human rejected a mechanical backstop in the
   adapter (delivering a markdown image the model wrote) as a crutch.
+- **Also:** 2026-09-04, after-deploy run G (`live-70`): the files and the
+  screenshot were sent by `send_file`, and the answer still carried a
+  markdown image path beside them. The send is right; the wording is the
+  4.9 question.
 - **Evidence:** `reports/2026-08-30_v2_prompt_assembly.md`
 
 ### ISS-0002 — a picture someone sends is never kept
