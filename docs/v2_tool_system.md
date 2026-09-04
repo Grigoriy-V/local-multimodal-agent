@@ -276,6 +276,29 @@ tool over local, Docker, SSH, Modal) and DeepSeek's `ctx.fs` seam (one contract,
 step, and this step lays no groundwork for them beyond the typed outcome they
 would return through.
 
+## Shell: one tool, a runner behind it (5b, 2026-09-04)
+
+`run_command(command, timeout_seconds=120)` runs one shell command in the
+workspace and returns the exit code, the elapsed time and the output, cut in
+the middle above 16k characters with both ends kept. A non-zero exit is a
+result. The family's codes: `shell.timeout` (killed at its deadline, the
+tail of what it printed as detail) and `shell.not_started`. Where it runs is
+a `Runner` with one method, chosen by the profile and owned by the
+`CapabilityRegistry`: `LocalRunner` is a process on the person's machine in
+the workspace, with the environment reduced to what a shell needs, `HOME` in
+the workspace, and nothing of the agent's own environment passed on; the
+deployed runner (5a) is a container beside the renderer that holds no secret.
+The brief says where commands run, in the runner's own words, and that what
+is installed should go into the workspace because the environment between
+turns may be fresh. `DECISIONS.md` 2026-09-04.
+
+**Two modes.** A tool declares `mutates` when it changes the workspace
+(`write_file`, `edit_file`, `run_command`). In `full`, the default, that
+changes nothing. In `careful` (`/mode careful`, a marker in the workspace
+read by the next toolbox) the toolbox's `requires_approval` is true for them
+too, so they go through the same approval path as an outbound effect. Nothing
+else knows the mode exists.
+
 ## Filesystem
 
 The current tools keep their names and arguments. What changes:

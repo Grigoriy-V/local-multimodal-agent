@@ -27,6 +27,7 @@ from app.agent.graph import (
     interrupted,
     latest_text,
 )
+from app.agent.mode import careful_enabled
 from app.agent.stop import NO_STOPS, StopRequests
 from app.agent.stopping import STOP_ON_ANSWER, TurnStopping
 from app.agent.todo import FinishesItsOwnList, planning_enabled
@@ -318,6 +319,10 @@ class Agent:
                 # every brief line about it are simply absent.
                 *(todo_tools() if planning_enabled(self.workspace) else ()),
             ],
+            # `careful` mode: the tools that change the workspace ask first.
+            # Read here, per toolbox, so `/mode` takes effect from the next
+            # message like `/plan` does.
+            ask_for_changes=careful_enabled(self.workspace),
         )
 
     def capabilities(self, thread_id: str) -> str:
@@ -370,7 +375,12 @@ class Agent:
             # denies abilities it has and invents tools it does not. What it is
             # deliberately not told is where the workspace is: there is one, and
             # naming it taught the model to build paths into it.
-            prompt = system_message(toolbox, self.delivery, self.system_prompt)
+            prompt = system_message(
+                toolbox,
+                self.delivery,
+                self.system_prompt,
+                where_commands_run=self.capability_registry.runner.where,
+            )
             self._graphs[thread_id] = build_agent(
                 self.backend,
                 toolbox,

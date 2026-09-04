@@ -82,14 +82,14 @@ class _WithBoom:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
 
-    def toolbox(self, grant: Any, extra: Any = ()) -> Toolbox:
+    def toolbox(self, grant: Any, extra: Any = (), **options: Any) -> Toolbox:
         dies = Tool(
             name="boom",
             description="dies",
             parameters={"type": "object", "properties": {}},
             run=boom,
         )
-        return self.inner.toolbox(grant, [*extra, dies])
+        return self.inner.toolbox(grant, [*extra, dies], **options)
 
 
 def three_calls() -> Completion:

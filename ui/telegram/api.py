@@ -300,6 +300,7 @@ PRODUCT_COMMANDS = (
     BotCommand("can", "What I can see, hear, send and change"),
     BotCommand("agents", "Your standing instructions for how I work"),
     BotCommand("plan", "Turn my task list on or off"),
+    BotCommand("mode", "Work freely in the workspace, or ask before every change"),
     BotCommand("context", "How much of this chat I carry, and how much I may"),
     BotCommand("compact", "Fold the older part of this chat into a summary now"),
     BotCommand("stop", "Stop the task running in this chat"),

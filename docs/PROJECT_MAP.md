@@ -260,6 +260,15 @@ A tool whose result is a workspace item says in the result how it reaches
 the person, as the call to make (`handover` in `app/tools/base.py`); the
 decision stays the model's. `DECISIONS.md` 2026-09-03.
 
+Commands run through one tool, `run_command`, behind a one-method `Runner`
+the registry owns and the profile chooses (`app/tools/shell.py`). Locally it
+is a process in the person's workspace with the agent's own environment
+withheld; deployed it is a container beside the renderer with no secret
+(5a). What a command installs lives in the workspace, which is what survives
+between turns in both profiles. A conversation runs in `full` mode, where
+everything inside the workspace is autonomous, or `careful`, where the tools
+that change it ask first (`app/agent/mode.py`). `DECISIONS.md` 2026-09-04.
+
 A call whose arguments could not be read as a JSON object still reaches the
 loop, with the text kept on `ToolCall.raw_arguments`, and is refused as one
 `bad_arguments` result with the tool's signature; the request is not failed.
@@ -405,8 +414,8 @@ It owns transport translation, not agent policy:
 - maps Telegram account identity to canonical application user id;
 - finds/creates the current application thread;
 - downloads uploads and passes them through app admission;
-- dispatches `/new`, `/chats`, `/can`, `/check`, `/stop`, `/plan`, `/context`,
-  `/compact` and help commands;
+- dispatches `/new`, `/chats`, `/can`, `/check`, `/stop`, `/plan`, `/mode`,
+  `/context`, `/compact` and help commands;
 - passes ordinary messages to the `Agent`, with the update id as the turn's
   sequence so a later `/stop` can be told from an earlier one;
 - renders the consent question, the transient tool status and the step it

@@ -149,6 +149,40 @@ def _workspace_lines(tools: Toolbox) -> list[str]:
     return lines
 
 
+def _shell_lines(tools: Toolbox, where: str | None) -> list[str]:
+    """That commands run, where, and what survives between turns.
+
+    Written from the toolbox, so a grant without the tool has no sentence
+    about running things. `where` is the runner's own account of itself — the
+    shell a command line is written for is not something to guess.
+    """
+
+    if "run_command" not in tools.names:
+        return []
+    place = where or "in your workspace"
+    return [
+        f"- run_command runs a shell command {place}, in your workspace, and gives "
+        "you the exit code and the output. Use it to run, test and check what you "
+        "make, and to install what that needs. The environment between turns may be "
+        "fresh, but the workspace is kept: install Python packages into a virtual "
+        "environment inside the workspace (python -m venv .venv, then that venv's "
+        "pip and python), and node packages in the workspace, so they are there next "
+        "time. A command cannot ask you anything: give it its answers on the command "
+        "line.",
+    ]
+
+
+def _mode_lines(tools: Toolbox) -> list[str]:
+    if not tools.ask_for_changes:
+        return []
+    changing = ", ".join(name for name in tools.names if tools.requires_approval(name))
+    return [
+        "- The person has asked to approve every change: "
+        f"{changing or 'nothing'} wait for their yes before running. Ask for what the "
+        "work needs and go on when it is answered; a refusal is an answer too.",
+    ]
+
+
 def _observation_lines(tools: Toolbox) -> list[str]:
     if "inspect_page" not in tools.names:
         return []
@@ -229,7 +263,9 @@ def _delivery_sentence(tools: Toolbox, delivery: Delivery) -> str:
     )
 
 
-def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
+def capability_brief(
+    tools: Toolbox, delivery: Delivery = CHAT_DELIVERY, where_commands_run: str | None = None
+) -> str:
     """The part of the system prompt that must never be written from memory.
 
     Every line here is produced from something that is actually wired: the
@@ -249,6 +285,8 @@ def capability_brief(tools: Toolbox, delivery: Delivery = CHAT_DELIVERY) -> str:
         f"- {tool_inventory(tools)}",
         f"- {_work_sentence(tools)}",
         *_workspace_lines(tools),
+        *_shell_lines(tools, where_commands_run),
+        *_mode_lines(tools),
         f"- The person can send you text and these media types: {inputs}. Anything "
         "else is refused before you see it.",
         f"- {_delivery_sentence(tools, delivery)}",
@@ -330,6 +368,7 @@ def system_message(
     tools: Toolbox,
     delivery: Delivery = CHAT_DELIVERY,
     core: str = DEFAULT_SYSTEM_PROMPT,
+    where_commands_run: str | None = None,
 ) -> str:
     """The whole system layer: the stable core, then what is wired up.
 
@@ -340,7 +379,7 @@ def system_message(
     turn's context is built.
     """
 
-    return f"{core}\n\n{capability_brief(tools, delivery)}"
+    return f"{core}\n\n{capability_brief(tools, delivery, where_commands_run)}"
 
 
 def capability_report(

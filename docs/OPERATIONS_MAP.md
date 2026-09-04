@@ -558,6 +558,22 @@ ui/telegram/adapter.py -> /plan dispatch
 app/agent/todo.py      -> PLAN_SWITCH, planning_enabled, set_planning
 ```
 
+### `/mode`
+
+`/mode` says whether changes to the workspace ask first; `/mode careful` and
+`/mode full` set it from the next message. Full is the default: everything
+inside the workspace — reading, writing, running a command — is autonomous,
+and only effects beyond it ask. Careful makes `write_file`, `edit_file` and
+`run_command` wait for the same yes/no buttons. The switch is the marker
+`.agent/careful.on` in the person's workspace, read when the next toolbox is
+built, like `/plan`. Answered without the model. `DECISIONS.md` 2026-09-04.
+
+```text
+ui/telegram/adapter.py -> /mode dispatch
+app/agent/mode.py      -> CAREFUL_SWITCH, careful_enabled, set_mode
+app/tools/base.py      -> Tool.mutates, Toolbox.ask_for_changes
+```
+
 ### `/context` and `/compact`
 
 `/context` says what the next request in this chat is made of, estimated by

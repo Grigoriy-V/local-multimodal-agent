@@ -53,6 +53,7 @@ def test_full_grant_exposes_general_browser_and_filesystem_tools(workspace: Path
         "send_file",
         "fetch_page",
         "view_web_page",
+        "run_command",
     )
 
 

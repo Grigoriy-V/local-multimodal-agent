@@ -51,6 +51,30 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0038 — a package is installed into the machine's own Python rather than the workspace
+
+- **Status:** open
+- **Seen:** 2026-09-04, `scripts/loop_live.py` P, run `live-140`, the first
+  live turn with `run_command`: asked for a PDF, the model ran
+  `pip install reportlab` as its first command, and it landed in
+  `c:\python314\lib\site-packages` — the person's global Python — with
+  the brief saying in the same prompt to install into a virtual environment
+  inside the workspace.
+- **Costs:** locally, a change to the person's machine outside the workspace,
+  which is the one place the agent is told is its own. Deployed (5a), the
+  same command installs into a container that is gone in three minutes, so
+  the next turn's `import` fails and the install is paid again.
+- **Reproduce:** P.
+- **Cause:** the model's choice against the brief's sentence, on one turn;
+  and nothing in the environment makes the workspace the place an install
+  lands. The environment already makes it the home (`HOME`, `USERPROFILE`
+  in `command_environment`).
+- **Evidence:** `reports/2026-09-04_v2_isolated_execution_review.md` §9
+- **Related:** roadmap 5a, 5b; `DECISIONS.md` 2026-09-04 ("what it installs
+  lives in the workspace")
+
+---
+
 ### ISS-0037 — the failure message sent to the person carries the endpoint URL and the server's body
 
 - **Status:** open

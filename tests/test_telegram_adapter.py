@@ -1100,6 +1100,39 @@ async def test_plan_alone_says_which_way_it_is(
     assert needs_model(Incoming(CHAT, ALLOWED, "/plan on")) is False
 
 
+async def test_mode_careful_makes_a_change_wait_for_a_yes(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    """Roadmap 5b: the two modes, switched from the chat, read by the next toolbox."""
+
+    backend = ScriptedBackend(
+        calls("write_file", path="a.txt", content="one"), says("done"), says("ok")
+    )
+    adapter = build(telegram, settings, tmp_path, backend)
+    agent = adapter.agent(canonical_user_id(ALLOWED))
+    thread = current_thread(agent.store, canonical_user_id(ALLOWED))
+
+    await adapter.handle_update(text_update("/mode"))
+    assert telegram.sent[-1].startswith("Mode: full (the default)")
+    assert needs_model(Incoming(CHAT, ALLOWED, "/mode careful")) is False
+
+    await adapter.handle_update(text_update("/mode careful"))
+    assert "Careful mode" in telegram.sent[-1]
+    assert (tmp_path / "workspace" / ".agent" / "careful.on").is_file()
+    assert agent.toolbox(thread).requires_approval("write_file")
+    assert agent.toolbox(thread).requires_approval("run_command")
+    assert not agent.toolbox(thread).requires_approval("read_file")
+
+    await adapter.handle_update(text_update("write a.txt"))
+    assert await agent.pending(thread) is not None, "the write waits for a yes"
+    assert not (tmp_path / "workspace" / "a.txt").exists()
+
+    await adapter.handle_update(text_update("/mode full"))
+    assert "Full mode" in telegram.sent[-1]
+    assert not (tmp_path / "workspace" / ".agent" / "careful.on").exists()
+    assert not agent.toolbox(thread).requires_approval("write_file")
+
+
 async def test_agents_set_writes_the_workspace_file_itself(
     telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
 ) -> None:
@@ -1352,7 +1385,7 @@ def test_the_native_menu_is_the_product_and_not_the_diagnostics() -> None:
 
     offered = [entry.command for entry in PRODUCT_COMMANDS]
 
-    assert offered == ["new", "chats", "can", "agents", "plan", "context", "compact", "stop", "help"]
+    assert offered == ["new", "chats", "can", "agents", "plan", "mode", "context", "compact", "stop", "help"]
     assert "check" not in offered
     assert all(entry.description and entry.description[0].isupper() for entry in PRODUCT_COMMANDS)
     assert len(BOT_DESCRIPTION) <= 512
@@ -1395,6 +1428,7 @@ async def test_publishing_the_profile_sends_exactly_the_product_menu(
         "can",
         "agents",
         "plan",
+        "mode",
         "context",
         "compact",
         "stop",

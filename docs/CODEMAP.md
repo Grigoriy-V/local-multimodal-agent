@@ -80,6 +80,8 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change document parsing/rendering | `app/documents.py` | `read_sections`, `render_pages`, `media_type_for` |
 | Change document model tools | `app/tools/documents.py` | `read_document`, `view_pages`, `document_tools` |
 | Change explicit file delivery | `app/tools/presentation.py` | `send_file`, `presentation_tools`, `outbound=True` |
+| Run a command, or change where commands run | `app/tools/shell.py`, `deploy/modal/control_app.py` (deployed runner, 5a) | `run_command`, `Runner`, `Finished`, `LocalRunner`, `command_environment`, `shell.timeout`, `tests/test_run_command.py` |
+| Change what asks first: the two modes | `app/agent/mode.py`, `app/tools/base.py` | `set_mode`, `careful_enabled`, `Tool.mutates`, `Toolbox.ask_for_changes`, `/mode` in `ui/telegram/adapter.py` |
 | Change local HTML inspection or what it reports | `app/tools/browser.py` | `inspect_page`, `page_report`, `observe`, `browser_tools` |
 | Change the browser session, its snapshot or an action | `app/tools/chromium.py` | `BrowserSession`, `open_browser`, `format_snapshot`, `_SNAPSHOT`, `tests/test_browser_session.py` |
 | Change Chromium/CDP internals | `app/tools/chromium.py` | browser launch, `CdpSession`, request policy |
@@ -106,7 +108,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Append/search work journals | `tools/work_log.py` | `reports/agent_tasks.jsonl`, `reports/ml_work.jsonl` |
 | Diagnose local installation | `scripts/doctor.py` | diagnostics |
 | Measure model endpoint wake | `scripts/measure_endpoint_wake.py` | wake measurement |
-| Run the live loop acceptance (wakes the GPU) | `scripts/loop_live.py` | scenarios A–K, `--after-deploy` (A, B, G), `Turn`, `take_up`, PASS/FAIL per check, derived GPU per run, exit code |
+| Run the live loop acceptance (wakes the GPU) | `scripts/loop_live.py` | scenarios A–K and O, P, Q, `--after-deploy` (A, B, G), `Turn`, `take_up`, PASS/FAIL per check, derived GPU per run, exit code |
 | Change what happens to a turn a dead worker left | `app/agent/runtime.py`, `ui/telegram/adapter.py`, `ui/telegram/webhook.py` | `Agent.unfinished`, `Agent.resume_interrupted_events`, `Tool.replay_safe`, `same_request`, `LEASE_SECONDS`, `MAX_ATTEMPTS` |
 | Run broad smoke/live legacy checks | `scripts/smoke_test.py`, `scripts/stage3_live.py`, `scripts/v1_live.py` | historical stage runners |
 | Migrate local workspace data | `scripts/migrate_workspace.py` | migration logic |
@@ -220,6 +222,7 @@ execution.py     pre_execute / execute / post_execute lifecycle, bounds, sanitiz
 filesystem.py    list/read/write/edit workspace files
 documents.py     read_document / view_pages
 presentation.py  send_file (explicit outbound action)
+shell.py         run_command over a Runner: LocalRunner (a process in the workspace); the deployed runner is 5a
 browser.py       inspect_page for local/self-contained HTML (observation only)
 chromium.py      Chrome/Edge launch, CDP session, BrowserSession with snapshot/refs/actions
 web.py           search_web / fetch_page / view_web_page wrappers

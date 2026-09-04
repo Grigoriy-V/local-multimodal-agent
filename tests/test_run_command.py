@@ -1,0 +1,288 @@
+"""`run_command` and the two modes: roadmap 5b, `DECISIONS.md` 2026-09-04.
+
+The local runner is exercised for real on this machine — a process in a
+temporary workspace — because what it withholds and what it kills are the
+contract. A fake runner covers the tool's projection through the executor.
+No model, no network.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+from app.agent.mode import CAREFUL_SWITCH, careful_enabled, current_mode, set_mode
+from app.capabilities import capability_brief, capability_report, needs_approval
+from app.memory import LOCAL_USER_ID, SqliteStore
+from app.models import ToolCall
+from app.tools import (
+    DEFAULT_CAPABILITIES,
+    SHELL_RUN,
+    CapabilityRegistry,
+    Finished,
+    LocalRunner,
+    ToolError,
+    ToolExecutor,
+    Toolbox,
+    shell_tools,
+)
+from app.tools.shell import (
+    COMMAND_TIMEOUT,
+    MAX_OUTPUT_CHARS,
+    MAX_TIMEOUT,
+    bounded,
+    command_environment,
+    describe,
+)
+
+PY = f'"{sys.executable}"'
+
+
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    room = tmp_path / "workspace"
+    room.mkdir()
+    return room
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+# --- the local runner, for real ---------------------------------------------------
+
+
+def test_a_command_runs_in_the_workspace_and_its_output_comes_back(workspace: Path) -> None:
+    finished = run(LocalRunner().run(f"{PY} -c \"import os; print(os.getcwd())\"", workspace, 30))
+
+    assert finished.exit_code == 0
+    assert Path(finished.output.strip()).resolve() == workspace.resolve()
+    assert not finished.cut and not finished.fresh
+
+
+def test_a_non_zero_exit_is_a_result_not_a_failure(workspace: Path) -> None:
+    finished = run(LocalRunner().run(f"{PY} -c \"import sys; print('bad'); sys.exit(3)\"", workspace, 30))
+
+    assert finished.exit_code == 3
+    assert "bad" in finished.output
+    assert "exit code: 3" in describe(finished)
+
+
+def test_the_agents_own_environment_is_withheld(workspace: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TELEGRAM_TOKEN", "secret-value")
+    monkeypatch.setenv("MODEL_API_KEY", "secret-too")
+
+    finished = run(
+        LocalRunner().run(
+            f"{PY} -c \"import os; print(os.environ.get('TELEGRAM_TOKEN'), "
+            "os.environ.get('MODEL_API_KEY'), os.path.expanduser('~'))\"",
+            workspace,
+            30,
+        )
+    )
+
+    assert finished.output.split()[:2] == ["None", "None"]
+    assert Path(finished.output.split()[-1]).resolve() == workspace.resolve()
+
+
+def test_the_environment_is_what_a_shell_needs_and_home_is_the_workspace(workspace: Path) -> None:
+    env = command_environment(
+        workspace, {"PATH": "/bin", "TELEGRAM_TOKEN": "x", "AGENT_DATABASE_URL": "y", "SYSTEMROOT": "C:\\W"}
+    )
+
+    assert env["PATH"] == "/bin" and env["SYSTEMROOT"] == "C:\\W"
+    assert "TELEGRAM_TOKEN" not in env and "AGENT_DATABASE_URL" not in env
+    assert env["HOME"] == str(workspace) == env["USERPROFILE"]
+
+
+def test_a_command_past_its_timeout_is_killed_and_reported(workspace: Path) -> None:
+    with pytest.raises(ToolError) as caught:
+        run(LocalRunner().run(f"{PY} -c \"import time; print('started', flush=True); time.sleep(60)\"", workspace, 1))
+
+    assert caught.value.code == COMMAND_TIMEOUT
+    assert "1 seconds" in str(caught.value)
+
+
+def test_a_cancelled_turn_kills_the_command(workspace: Path) -> None:
+    marker = workspace / "still-running"
+
+    async def scenario() -> None:
+        task = asyncio.create_task(
+            LocalRunner().run(
+                f"{PY} -c \"import time, pathlib; time.sleep(3); pathlib.Path('still-running').write_text('x')\"",
+                workspace,
+                30,
+            )
+        )
+        await asyncio.sleep(0.5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    run(scenario())
+    # The process was killed before it could write; give a survivor time to prove us wrong.
+    import time
+
+    time.sleep(3.5)
+    assert not marker.exists()
+
+
+def test_long_output_is_cut_in_the_middle_keeping_both_ends() -> None:
+    text = "".join(f"line {i}\n" for i in range(20_000))
+
+    kept, cut = bounded(text)
+
+    assert cut and len(kept) < MAX_OUTPUT_CHARS + 200
+    assert kept.startswith("line 0\n") and kept.rstrip().endswith("line 19999")
+    assert "characters left out" in kept
+
+
+def test_a_command_that_cannot_start_is_a_typed_failure(workspace: Path, monkeypatch) -> None:
+    import subprocess
+
+    def boom(*args, **kwargs):
+        raise OSError(2, "No such file or directory")
+
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    with pytest.raises(ToolError) as caught:
+        run(LocalRunner().run("anything", workspace, 5))
+
+    assert caught.value.code == "shell.not_started"
+
+
+# --- the tool through the executor, with a fake runner --------------------------------
+
+
+class Scripted:
+    where = "in a test"
+
+    def __init__(self, finished: Finished | Exception) -> None:
+        self.finished = finished
+        self.calls: list[tuple[str, Path, float]] = []
+
+    async def run(self, command: str, cwd: Path, timeout: float) -> Finished:
+        self.calls.append((command, cwd, timeout))
+        if isinstance(self.finished, Exception):
+            raise self.finished
+        return self.finished
+
+
+def executed(tools: Toolbox, name: str, **arguments):
+    executor = ToolExecutor(tools)
+    call = ToolCall(id="c1", name=name, arguments=arguments)
+    prepared = executor.pre_execute(call)
+    return run(executor.execute(prepared)), prepared
+
+
+def test_the_model_reads_the_exit_code_and_output(workspace: Path) -> None:
+    runner = Scripted(Finished(exit_code=0, output="hello\n", cut=False, seconds=0.2))
+    tools = Toolbox(shell_tools(workspace, runner))
+
+    outcome, _ = executed(tools, "run_command", command="echo hello")
+
+    assert outcome.failure is None
+    text = outcome.content[0].text
+    assert "exit code: 0" in text and "hello" in text
+    assert runner.calls[0][0] == "echo hello" and runner.calls[0][1] == workspace.resolve()
+    assert runner.calls[0][2] == 120.0
+
+
+def test_a_fresh_environment_is_said_and_the_timeout_is_clamped(workspace: Path) -> None:
+    runner = Scripted(Finished(exit_code=0, output="", cut=False, seconds=0.1, fresh=True))
+    tools = Toolbox(shell_tools(workspace, runner))
+
+    outcome, _ = executed(tools, "run_command", command="ls", timeout_seconds=10_000)
+
+    assert "new environment" in outcome.content[0].text
+    assert "(no output)" in outcome.content[0].text
+    assert runner.calls[0][2] == float(MAX_TIMEOUT)
+
+
+def test_the_runners_failure_reaches_the_model_typed(workspace: Path) -> None:
+    runner = Scripted(ToolError("the command did not finish within 3 seconds and was killed", code=COMMAND_TIMEOUT, detail="partial"))
+    tools = Toolbox(shell_tools(workspace, runner))
+
+    outcome, _ = executed(tools, "run_command", command="sleep 60", timeout_seconds=3)
+
+    assert outcome.failure is not None
+    assert outcome.failure.code == COMMAND_TIMEOUT
+    assert outcome.failure.detail == "partial"
+
+
+def test_run_command_is_declared_as_it_is(workspace: Path) -> None:
+    (tool,) = shell_tools(workspace, Scripted(Finished(0, "", False, 0.0)))
+
+    assert tool.mutates and not tool.replay_safe and not tool.requires_approval
+    assert tool.timeout_seconds is not None and tool.timeout_seconds > MAX_TIMEOUT
+
+
+# --- the registry and the brief ---------------------------------------------------
+
+
+def test_the_default_grant_carries_the_shell_and_the_registry_owns_the_runner(workspace: Path) -> None:
+    registry = CapabilityRegistry(workspace)
+    tools = registry.toolbox(registry.grant())
+
+    assert SHELL_RUN in DEFAULT_CAPABILITIES
+    assert "run_command" in tools.names
+    assert isinstance(registry.runner, LocalRunner)
+    assert needs_approval(tools) == ()
+
+
+def test_the_brief_says_where_commands_run_and_what_survives(workspace: Path) -> None:
+    registry = CapabilityRegistry(workspace)
+    tools = registry.toolbox(registry.grant())
+
+    brief = capability_brief(tools, where_commands_run=registry.runner.where)
+
+    assert "run_command runs a shell command on this machine" in brief
+    assert "virtual" in brief and "workspace" in brief
+    without = registry.toolbox(registry.grant(capabilities=[name for name in DEFAULT_CAPABILITIES if name != SHELL_RUN]))
+    assert "run_command" not in capability_brief(without)
+
+
+# --- the two modes ---------------------------------------------------------------------
+
+
+def test_careful_mode_makes_the_changing_tools_ask(workspace: Path) -> None:
+    registry = CapabilityRegistry(workspace)
+    full = registry.toolbox(registry.grant())
+    careful = registry.toolbox(registry.grant(), ask_for_changes=True)
+
+    assert needs_approval(full) == ()
+    assert set(needs_approval(careful)) == {"write_file", "edit_file", "run_command"}
+    assert not careful.requires_approval("read_file")
+    assert not careful.requires_approval("send_file")
+    assert "approve every change" in capability_brief(careful)
+    assert "approve every change" not in capability_brief(full)
+    assert "Ask first: write_file, edit_file, run_command" in capability_report(careful)
+
+
+def test_the_mode_is_a_marker_in_the_workspace(workspace: Path) -> None:
+    assert current_mode(workspace) == "full" and not careful_enabled(workspace)
+
+    set_mode(workspace, "careful")
+    assert (workspace / CAREFUL_SWITCH).is_file()
+    assert current_mode(workspace) == "careful"
+
+    set_mode(workspace, "full")
+    assert not careful_enabled(workspace)
+    with pytest.raises(ValueError):
+        set_mode(workspace, "reckless")
+
+
+def test_the_agent_reads_the_mode_when_it_builds_a_toolbox(workspace: Path) -> None:
+    from app.agent.runtime import Agent
+    from tests.fakes import ScriptedBackend
+
+    with SqliteStore() as store:
+        agent = Agent(ScriptedBackend(), store, workspace, user_id=LOCAL_USER_ID)
+        assert not agent.toolbox("t").requires_approval("write_file")
+        set_mode(agent.workspace, "careful")
+        assert agent.toolbox("t").requires_approval("write_file")
+        assert agent.toolbox("t").requires_approval("run_command")
+        assert not agent.toolbox("t").requires_approval("list_files")

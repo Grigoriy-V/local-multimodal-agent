@@ -96,6 +96,11 @@ class Tool:
     changes, sends or remembers is not, and the model is told the outcome is
     unknown instead (the `interrupted` result). Declared here, once, like
     `requires_approval`, rather than guessed at the moment of recovery.
+
+    `mutates` says the tool changes the workspace. In the default mode that
+    changes nothing: work inside the workspace is autonomous. In `careful`
+    mode (`app/agent/mode.py`) the toolbox asks for these too, so a person can
+    watch every change go by without the tools knowing which mode they are in.
     """
 
     name: str
@@ -105,6 +110,7 @@ class Tool:
     requires_approval: bool = False
     timeout_seconds: float | None = None
     replay_safe: bool = False
+    mutates: bool = False
     # A tool that only hands something already made to the person. It costs no
     # model time and its result is the outcome of the turn, so a turn that has
     # spent its budget still runs it: the ceiling bounds work, not delivery.
@@ -227,8 +233,10 @@ def coerce_arguments(arguments: dict[str, Any], schema: dict[str, Any]) -> dict[
 class Toolbox:
     """The tools one agent may use, and how a call is matched against them."""
 
-    def __init__(self, tools: Iterable[Tool] = ()) -> None:
+    def __init__(self, tools: Iterable[Tool] = (), ask_for_changes: bool = False) -> None:
         self._tools = {tool.name: tool for tool in tools}
+        # `careful` mode: a tool that changes the workspace asks first.
+        self.ask_for_changes = ask_for_changes
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -269,7 +277,9 @@ class Toolbox:
         """
 
         tool = self._tools.get(name)
-        return tool is not None and tool.requires_approval
+        if tool is None:
+            return False
+        return tool.requires_approval or (self.ask_for_changes and tool.mutates)
 
     def coerce(self, call: ToolCall) -> ToolCall:
         """The call with its arguments brought to the declared types."""

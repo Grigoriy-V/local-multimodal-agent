@@ -217,3 +217,49 @@ deploy; the after-deploy run.
 
 Nothing. The shape is approved; implementation waits for its own start
 signal.
+
+## 9. 5b built, 2026-09-04
+
+Built the same day on the human's start signal, in the tree, not deployed
+(5b is the local profile; nothing here reaches the deployment until 5a).
+
+- `app/tools/shell.py`: `run_command` over a one-method `Runner`;
+  `LocalRunner` — a process in the workspace through the platform shell,
+  the environment reduced by `command_environment` (what a shell needs,
+  `HOME` and `USERPROFILE` in the workspace, `PYTHONUTF8`), a new process
+  group, killed with its tree at the deadline (`taskkill /T` on Windows,
+  `killpg` elsewhere) and on cancellation; output cut in the middle above
+  16k characters; codes `shell.timeout`, `shell.not_started`. The
+  capability `shell.run` is in the default grant; the registry owns the
+  runner. The brief says where commands run in the runner's own words and
+  to install into the workspace.
+- The two modes: `Tool.mutates` on `write_file`, `edit_file`, `run_command`;
+  `Toolbox.ask_for_changes` read by `requires_approval`; `app/agent/mode.py`
+  with the marker `.agent/careful.on`; `Agent.toolbox` reads it; `/mode`,
+  `/mode full`, `/mode careful` in Telegram, in the menu; "Running a
+  command…" as the activity label.
+- Offline: `tests/test_run_command.py` (17: the local runner for real —
+  cwd, exit code, the withheld environment, the kill at the deadline, the
+  kill on cancellation, the cut, a start failure; the projection through
+  the executor with a fake runner; the grant, the brief, the modes, the
+  marker, the agent reading it) and one Telegram test of `/mode`;
+  the whole suite 1044 passed, 27 skipped.
+- Live, this machine, one warm window: **O** passed (write_file,
+  run_command twice, the primes in the answer, 16.4 s, ~20 s derived GPU);
+  **P** passed (`pip install reportlab`, a script written and run,
+  `read_document` on the PDF, `send_file`, 13.2 s, ~25 s derived) — the 4.3
+  acceptance that waited for generic execution, met without a PDF-specific
+  workflow; **Q** passed (`shell.timeout` at 3 s, the model said so, 5.1 s).
+- One observation from P, recorded as ISS-0038: the install went to the
+  machine's global Python, not a workspace venv, against the brief's
+  sentence in the same prompt. Two levers, for the human to choose between
+  or defer: measure it (a sentence is the instructions lever, and one turn
+  is not a rate), or make it structural the way `HOME` already is — an
+  environment in which an install lands in the workspace (`PYTHONUSERBASE`
+  and `PIP_USER`, `npm_config_prefix`), which is a general property of
+  the runner rather than a rule about pip, but has a known snag:
+  `PIP_USER` breaks `pip` inside a venv, so it would need care or a
+  different mechanism. Not built.
+- Not in 5b, by the approved shape: background processes, the deployed
+  runner, the Chainlit `/mode` (Chainlit has no `/plan` either).
+

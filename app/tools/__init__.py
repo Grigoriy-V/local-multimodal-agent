@@ -21,6 +21,7 @@ from app.tools.capabilities import (
     FILESYSTEM_READ,
     FILESYSTEM_WRITE,
     PRESENT_FILES,
+    SHELL_RUN,
     WEB_FETCH,
     WEB_SEARCH,
     WEB_VIEW,
@@ -34,6 +35,7 @@ from app.tools.filesystem import filesystem_tools
 from app.tools.history import history_tools
 from app.tools.memory import memory_tools
 from app.tools.presentation import presentation_tools, send_file
+from app.tools.shell import Finished, LocalRunner, Runner, shell_tools
 from app.tools.todo import todo_tools
 from app.tools.web import web_fetch_tools, web_search_tools, web_tools, web_view_tools
 
@@ -52,11 +54,16 @@ __all__ = [
     "FILESYSTEM_READ",
     "FILESYSTEM_WRITE",
     "PRESENT_FILES",
+    "SHELL_RUN",
     "PreparedToolCall",
     "WEB_FETCH",
     "WEB_SEARCH",
     "WEB_VIEW",
     "Capability",
+    "Finished",
+    "LocalRunner",
+    "Runner",
+    "shell_tools",
     "CapabilityGrant",
     "CapabilityRegistry",
     "Tool",

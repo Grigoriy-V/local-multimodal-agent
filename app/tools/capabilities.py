@@ -11,6 +11,7 @@ from app.tools.browser import browser_tools
 from app.tools.documents import document_tools
 from app.tools.filesystem import filesystem_tools
 from app.tools.presentation import presentation_tools
+from app.tools.shell import LocalRunner, Runner, shell_tools
 from app.tools.web import web_fetch_tools, web_search_tools, web_view_tools
 
 FILESYSTEM_READ = "filesystem.read"
@@ -25,6 +26,9 @@ PRESENT_FILES = "presentation.files"
 WEB_SEARCH = "web.search"
 WEB_FETCH = "web.fetch"
 WEB_VIEW = "web.view"
+# Running a command in the workspace. Where it runs is the registry's `runner`,
+# chosen by the profile; the grant only says whether the tool is there.
+SHELL_RUN = "shell.run"
 DEFAULT_CAPABILITIES = (
     FILESYSTEM_READ,
     FILESYSTEM_WRITE,
@@ -34,6 +38,7 @@ DEFAULT_CAPABILITIES = (
     WEB_SEARCH,
     WEB_FETCH,
     WEB_VIEW,
+    SHELL_RUN,
 )
 
 
@@ -71,10 +76,12 @@ class CapabilityRegistry:
         self,
         workspace: Path,
         capabilities: Iterable[Capability] | None = None,
+        runner: Runner | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve()
         if not self.workspace.is_dir():
             raise ValueError(f"the workspace {workspace} is not a directory")
+        self.runner: Runner = runner if runner is not None else LocalRunner()
         configured = (
             capabilities
             if capabilities is not None
@@ -87,6 +94,7 @@ class CapabilityRegistry:
                 Capability(WEB_SEARCH, web_search_tools),
                 Capability(WEB_FETCH, web_fetch_tools),
                 Capability(WEB_VIEW, web_view_tools),
+                Capability(SHELL_RUN, lambda root: shell_tools(root, self.runner)),
             )
         )
         self._capabilities = {capability.name: capability for capability in configured}
@@ -117,7 +125,10 @@ class CapabilityRegistry:
         return CapabilityGrant(allowed_root, requested)
 
     def toolbox(
-        self, grant: CapabilityGrant, extra_tools: Iterable[Tool] = ()
+        self,
+        grant: CapabilityGrant,
+        extra_tools: Iterable[Tool] = (),
+        ask_for_changes: bool = False,
     ) -> Toolbox:
         checked = self.grant(grant.root, grant.capabilities)
         tools: list[Tool] = []
@@ -128,4 +139,4 @@ class CapabilityRegistry:
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
             raise ValueError(f"duplicate tool names: {', '.join(duplicates)}")
-        return Toolbox(tools)
+        return Toolbox(tools, ask_for_changes=ask_for_changes)

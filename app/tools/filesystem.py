@@ -341,6 +341,7 @@ def filesystem_tools(root: Path) -> list[Tool]:
                 "additionalProperties": False,
             },
             run=lambda path, content: _write_file(resolved, path, content),
+            mutates=True,
         ),
         Tool(
             name="edit_file",
@@ -374,5 +375,6 @@ def filesystem_tools(root: Path) -> list[Tool]:
             run=lambda path, old_text, new_text: _edit_file(
                 resolved, path, old_text, new_text
             ),
+            mutates=True,
         ),
     ]

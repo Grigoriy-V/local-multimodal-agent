@@ -27,6 +27,12 @@ scripted answer:
                                       checkpoint; nothing is redone unasked
     K  a fold in the middle of a turn the conversation is folded between two
                                       steps and the turn still finishes
+    O  a script written and run       write_file, run_command, the output in
+                                      the answer
+    P  a PDF made and handed over     an install into the workspace, a run, a
+                                      look at the document, send_file
+    Q  a command past its timeout     shell.timeout reaches the model and the
+                                      turn goes on
 
 Each scenario is checked, not only printed: a line starting with PASS or FAIL
 says whether what happened is what the scenario expects, and the exit code is
@@ -46,7 +52,8 @@ person tested live all day on 2026-09-03, in the plan-off shape that is the
 default, with the numbers a plan-on run can be compared against. H and I are
 the live half of 4.6b: the way back to what a summary or a stub stands for.
 J and K are the live half of 4.7: restart, resume, and a turn across a
-compaction, asserted on harness events. Every scenario line also carries the
+compaction, asserted on harness events. O, P and Q are the live half of 5b:
+a command run on this machine, in the workspace, through the one tool. Every scenario line also carries the
 derived GPU-active seconds and cost of its run, the item 3 estimate
 (`app/telemetry/cost.py`), so a run can be read beside the 2026-08-29
 baseline printed at the end. Every run of it costs GPU time and needs
@@ -259,8 +266,8 @@ def chosen(argv: list[str]) -> frozenset[str]:
 
     if "--after-deploy" in argv:
         return frozenset(AFTER_DEPLOY)
-    letters = {arg.upper() for arg in argv if len(arg) == 1 and arg.upper() in "ABCDEFGHIJK"}
-    return frozenset(letters) if letters else frozenset("ABCDEFGHIJK")
+    letters = {arg.upper() for arg in argv if len(arg) == 1 and arg.upper() in "ABCDEFGHIJKOPQ"}
+    return frozenset(letters) if letters else frozenset("ABCDEFGHIJKOPQ")
 
 
 async def main() -> int:
@@ -625,6 +632,68 @@ async def main() -> int:
             )
             if resumed:
                 print(f"  resumed     {resumed[0]}")
+        if wanted("O"):
+            # O — the first command. The check is the loop and the tool: a file
+            # written, a command run on this machine, and what it printed read
+            # back into the answer.
+            o = await Turn(agent, telemetry, 130).ask(
+                "chat-o",
+                "In my workspace, write primes.py that prints the prime numbers below "
+                "50 on one line, run it with run_command, and tell me exactly what it "
+                "printed.",
+            )
+            failed += o.report(
+                "O a script written and run",
+                {
+                    "write_file then run_command": "write_file" in o.tools
+                    and "run_command" in o.tools,
+                    "no tool failed": not o.failures,
+                    "the output reached the answer": "47" in o.answer,
+                },
+            )
+
+        if wanted("P"):
+            # P — the 4.3 acceptance that waited for this step: a PDF made with
+            # whatever the model installs, looked at, and handed over. Asserted
+            # on tools and outbound parts, never on wording.
+            p = await Turn(agent, telemetry, 140).ask(
+                "chat-p",
+                "Make me a one-page PDF called apples.pdf about three kinds of apples, "
+                "check that the PDF really contains that text, and send it to me.",
+            )
+            pdfs = list(root.glob("**/apples.pdf"))
+            failed += p.report(
+                "P a PDF made, checked, handed over",
+                {
+                    "run_command ran": "run_command" in p.tools,
+                    "apples.pdf exists": bool(pdfs),
+                    "the document was looked at": bool(
+                        {"read_document", "view_pages"} & set(p.tools)
+                    ),
+                    "send_file ran": "send_file" in p.tools,
+                    "an answer was given": bool(p.answer),
+                },
+            )
+
+        if wanted("Q"):
+            # Q — a command that does not finish. The tool's own timeout kills
+            # it, the typed failure reaches the model, and the turn goes on.
+            q = await Turn(agent, telemetry, 150).ask(
+                "chat-q",
+                "Run this exact command with run_command and timeout_seconds=3, then "
+                "tell me what happened: python -c \"import time; time.sleep(60)\"",
+            )
+            codes = [why.code for _, why in q.failures]
+            failed += q.report(
+                "Q a command past its timeout",
+                {
+                    "run_command ran": "run_command" in q.tools,
+                    "shell.timeout reached the loop": "shell.timeout" in codes,
+                    "the model answered after it": bool(q.answer),
+                    "it did not wait a minute": q.seconds < 45,
+                },
+            )
+
     finally:
         await agent.aclose()
         telemetry.close()

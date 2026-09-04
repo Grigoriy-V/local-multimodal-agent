@@ -61,12 +61,14 @@ MODEL_FREE_COMMANDS = frozenset(
 INSTRUCTION_COMMANDS = frozenset({"/agents", "/agent"})
 # `/plan on` and `/plan off` write a marker file and answer from it.
 PLAN_COMMANDS = frozenset({"/plan"})
+# `/mode full` and `/mode careful` write a marker file and answer from it.
+MODE_COMMANDS = frozenset({"/mode"})
 # `/context` reports from the store and an estimate; `/context small` writes a
 # marker. `/compact` is deliberately not here: it calls the summarizer, so the
 # GPU may as well start waking at the front door.
 CONTEXT_COMMANDS = frozenset({"/context"})
 MODEL_FREE_WITH_ARGUMENTS = tuple(
-    sorted(INSTRUCTION_COMMANDS | PLAN_COMMANDS | CONTEXT_COMMANDS)
+    sorted(INSTRUCTION_COMMANDS | PLAN_COMMANDS | MODE_COMMANDS | CONTEXT_COMMANDS)
 )
 
 # Buttons that are answered from storage. A settled status button describes

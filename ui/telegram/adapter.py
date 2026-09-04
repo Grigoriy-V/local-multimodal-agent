@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.runtime import Agent, AnswerWithdrawn, AssistantDelta, create_agent
+from app.agent.mode import MODES, current_mode, set_mode
 from app.agent.todo import PLAN_SWITCH, planning_enabled, set_planning
 from app.context.choice import CONTEXT_CHOICE, SIZES, set_context_choice
 from app.agent.stop import MemoryStopRequests, PostgresStopRequests, StopRequests
@@ -62,6 +63,7 @@ from ui.telegram.wire import (
     CHATS_CLOSE,
     CONTEXT_COMMANDS,
     INSTRUCTION_COMMANDS,
+    MODE_COMMANDS,
     PLAN_COMMANDS,
     SETTLED_CALLBACK_PREFIX,
     Incoming,
@@ -146,6 +148,7 @@ TOOL_ACTIVITY = {
     "write_file": "Writing file…",
     "edit_file": "Editing file…",
     "send_file": "Sending file…",
+    "run_command": "Running a command…",
     "todo_write": "Planning…",
     "remember_fact": "Saving to memory…",
     "search_memory": "Searching memory…",
@@ -737,6 +740,9 @@ class TelegramAdapter:
         if head.lower() in PLAN_COMMANDS:
             await self._on_plan(agent, incoming.chat_id, argument.strip().lower())
             return
+        if head.lower() in MODE_COMMANDS:
+            await self._on_mode(agent, incoming.chat_id, argument.strip().lower())
+            return
         if head.lower() in CONTEXT_COMMANDS:
             await self._on_context(
                 agent, current_thread(store, user_id), incoming.chat_id, argument.strip().lower()
@@ -924,6 +930,37 @@ class TelegramAdapter:
             chat_id,
             f"Planning is {state}. /plan on gives me a task list and the planning "
             "tool from the next message on; /plan off takes them away.",
+        )
+
+    async def _on_mode(self, agent: Agent, chat_id: int, argument: str) -> None:
+        """Show or set whether changes to the workspace ask first.
+
+        The same marker mechanism as `/plan`: read when the next toolbox is
+        built, so it takes effect from the next message in every interface.
+        """
+
+        workspace = agent.workspace
+        if argument in MODES:
+            set_mode(workspace, argument)
+            agent.rewire()
+            await self.client.send_message(
+                chat_id,
+                "Careful mode from your next message: writing or changing a file and "
+                "running a command wait for your yes, with the same buttons as before. "
+                "/mode full turns it off."
+                if argument == "careful"
+                else "Full mode from your next message: everything inside your workspace "
+                "runs without asking, and only effects beyond it ask. That is the "
+                "default; /mode careful makes changes ask first.",
+            )
+            return
+        mode = current_mode(workspace)
+        await self.client.send_message(
+            chat_id,
+            f"Mode: {mode}{' (the default)' if mode == 'full' else ''}. In full mode "
+            "everything inside your workspace runs without asking; in careful mode a "
+            "change to a file or a command waits for your yes. /mode full or /mode "
+            "careful sets it from the next message.",
         )
 
     async def _on_context(

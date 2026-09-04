@@ -7,7 +7,8 @@
 **Current approved step:** 5, isolated execution, selected by the human
 2026-09-04 with item 4 closed as a whole and split into 5a (deployed) and
 5b (local). Reviewed against the references and the shape approved the same
-day; 5b is next and implementation is a separate start signal.
+day; 5b built and passed live the same day; 5a is next and its start is a
+separate signal.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -187,10 +188,16 @@ What exists. How it was reached, and every number, is in the linked report.
    conversation, `full` (default) and `careful`; cold start measured
    before anything is built on it. Order: 5b, then 5a.
 
-   - **5b Local (this machine) — next.** A process in the workspace with a
-     reduced environment; the tool, the modes, the offline tests and the
-     live scenarios O, P, Q.
-   - **5a Deployed (Modal).** A `run_command` Function beside the renderer:
+   - **5b Local (this machine) — done 2026-09-04.** `run_command` over a
+     one-method `Runner`; a process in the workspace with the agent's own
+     environment withheld, killed with its tree at the deadline; the two
+     modes and `/mode`; the brief says where commands run. Offline: 17
+     tests and one adapter test. Live the same day: O (a script written and
+     run), P (the PDF made, checked and sent — the 4.3 acceptance), Q (a
+     command killed at its timeout) passed. One observation, ISS-0038: the
+     first install went to the machine's Python, not the workspace.
+     `reports/2026-09-04_v2_isolated_execution_review.md` §9.
+   - **5a Deployed (Modal) — next.** A `run_command` Function beside the renderer:
      same image plus base tools, the workspaces Volume, no secret, 180 s
      scaledown; the Volume round trip, O, P, Q through Telegram, the
      after-deploy run, the cold-start number.
