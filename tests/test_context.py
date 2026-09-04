@@ -635,3 +635,24 @@ async def test_the_count_trigger_is_a_fallback_past_sixty_messages(store: Sqlite
     assert await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy()) is None
     store.append("t1", exchange(11), LOCAL_USER_ID)
     assert await fold_older_messages(EchoBackend(), store, "t1", ContextPolicy()) is not None
+
+
+def test_the_working_method_is_general_and_part_of_the_core() -> None:
+    """The human's ask, 2026-09-04: a block that makes any model work as an agent.
+
+    It is a method — find out before assuming, check the result, fix the named
+    cause, claim only what was seen — and it must stay one: no tool name, no
+    file type, no library, or it becomes a list of past cases.
+    """
+
+    import re
+
+    from app.context.window import WORKING_METHOD
+
+    assert WORKING_METHOD in DEFAULT_SYSTEM_PROMPT
+    for phrase in ("before you assume", "look at it", "names its cause", "Never claim"):
+        assert phrase in WORKING_METHOD
+    assert not re.findall(r"[a-z]+_[a-z_]+", WORKING_METHOD)
+    for case in ("PDF", "font", "pip", "reportlab", "fpdf"):
+        assert case not in WORKING_METHOD
+

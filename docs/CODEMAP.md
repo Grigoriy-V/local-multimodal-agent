@@ -46,7 +46,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change model-agnostic message types | `app/models/base.py` | `Message`, `ContentPart`, `ToolCall`, `ModelBackend` |
 | Change OpenAI/vLLM request translation | `app/models/openai_compatible.py` | `OpenAICompatibleBackend`, `build_messages`, `parse_completion` |
 | Reproduce or fix the served Gemma 4 tool parser | `tools/gemma4_parser.py` | `vendored_args`, `fixed_args`, `extract_calls`, `parse_arguments`, `CorruptArguments`, `tests/test_gemma4_parser.py` |
-| Change the stable prompt core (names no tool) | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT` |
+| Change the stable prompt core (names no tool) | `app/context/window.py` | `DEFAULT_SYSTEM_PROMPT`, `WORKING_METHOD` (how an agent works, whatever the model) |
 | Change prompt layer order / context replay | `app/context/window.py` | `build_prelude`, `facts_layer`, `Context`, `ContextPolicy` |
 | Change what is shortened on the model-visible surface | `app/context/window.py` | `Context.surface`, `Surface`, `shortened`, `within_media_budget` |
 | Change the person's context size choice | `app/context/choice.py`, `app/agent/runtime.py` | `context_choice`, `set_context_choice`, `Agent.budget`, `Agent.context_report`, `Agent.compact` |

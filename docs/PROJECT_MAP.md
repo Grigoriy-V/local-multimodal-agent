@@ -312,7 +312,7 @@ Since 2026-08-30 the system layer is built from parts ordered by how rarely
 each changes, which is also the order a served prefix cache needs:
 
 ```text
-stable core            app/context/window.py    DEFAULT_SYSTEM_PROMPT, names no tool
+stable core            app/context/window.py    DEFAULT_SYSTEM_PROMPT, names no tool; ends with WORKING_METHOD, the method any model is asked to work by
 capability guidance    app/capabilities.py      generated from the wired toolbox
 tool schemas           the toolbox              sent beside the messages
 standing instructions  app/instructions.py      AGENTS.md, one per person

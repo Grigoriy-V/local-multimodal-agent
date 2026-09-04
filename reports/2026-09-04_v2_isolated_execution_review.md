@@ -516,3 +516,16 @@ sentence that an installed library is listed by `pip list`; and the
 observation that fpdf2's traceback names the fix and the model did not
 apply it, which is a question about the model, not about the tool.
 
+**The working method, 2026-09-04.** Asked why the agent does not find out
+what is there and check what it made, the answer was: the model's habit,
+not the harness's mechanism — Claude Code and Codex get it from training
+and from a system prompt that says so. On the human's word a block was
+added to the stable prompt core (`WORKING_METHOD`, `app/context/window.py`):
+find out with a tool before assuming, prefer what is there over installing,
+check each result and open what was produced before handing it over, fix
+the cause an error names rather than starting over, claim only what was
+seen. A method, tested to name no tool, file type or library. About 130
+tokens on every request. Not yet measured: the instrument is P again and
+`tools/prompt_scenarios.py` with the previous prompt as the variant; the
+deployed profile sees it after the next deploy.
+

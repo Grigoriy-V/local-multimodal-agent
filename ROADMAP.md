@@ -200,8 +200,12 @@ What exists. How it was reached, and every number, is in the linked report.
    served the next turn; O and Q passed through Telegram, P handed over a
    PDF of black squares without looking (ISS-0040, the model's) because the
    image had no Cyrillic font (the harness's, fixed: DejaVu and Liberation
-   in `BASE_TOOLS`). **Next, each its own gate:** redeploy with the fonts,
-   P again, the after-deploy run. Until 2026-09-04 this was 5a;
+   in `BASE_TOOLS`, redeployed). P in Russian then looped six times on
+   fpdf2's API without opening the result and was stopped: the model's;
+   on the human's word the prompt core gained `WORKING_METHOD`, how an
+   agent works whatever the model (report §12), unmeasured. **Next, each
+   its own gate:** deploy, P again, `tools/prompt_scenarios.py` against
+   the previous prompt, the after-deploy run. Until 2026-09-04 this was 5a;
    the local half was 5b and is item 7 now, on the human's word: local work
    on files is a stage of its own, not a sub-step of the sandbox.
 
