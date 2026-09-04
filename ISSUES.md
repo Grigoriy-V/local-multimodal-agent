@@ -51,6 +51,29 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0043 — in the deployed container, `pip` is not `python3`'s pip
+
+- **Status:** fixed in the tree, 2026-09-04 — `pip` installed into the
+  image's uv venv beside the libraries, so `pip`, `python3 -m pip` and
+  `python3` are one interpreter; the cold-start probe checks `pip show` sees
+  what `python3` imports. Not yet deployed
+- **Seen:** 2026-09-04, deployed, thread `e8c54e07`: asked to check, the
+  model ran `pip show fpdf2` → "Package(s) not found", `pip list` → pip, uv,
+  wheel and nothing else, then `python3 -c "import reportlab"` → 5.0.1. It
+  concluded, reasonably, that it "cannot install libraries", and the brief
+  had told it nine packages were there.
+- **Costs:** a model that checks — the thing asked of it all day — is told
+  the wrong answer by the environment; a `pip install` would land in an
+  interpreter `python3` never uses.
+- **Reproduce:** `pip list` and `python3 -m pip list` in `run_command`.
+- **Cause:** `uv_sync` makes the image's Python a uv venv (`/.uv/.venv`),
+  first on `PATH` for `python3` but carrying no `pip`; `pip` then resolves
+  to the base interpreter's `/usr/local/bin/pip`.
+- **Evidence:** `reports/2026-09-04_v2_isolated_execution_review.md` §12
+- **Related:** ISS-0038 (the same question locally), step 5
+
+---
+
 ### ISS-0042 — a command is refused as "already done" after the file it runs was rewritten
 
 - **Status:** fixed in the tree, 2026-09-04 — `succeeded_before` starts its

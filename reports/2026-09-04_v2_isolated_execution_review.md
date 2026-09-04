@@ -756,3 +756,23 @@ missing here" is checked with a command before it is said — DeepSeek's
 placement (beside the tool, not in the persona), about every command and
 no particular failure. To be measured with P.
 
+**P in Russian with the tool's own line, 2026-09-04** (thread `e8c54e07`,
+run `3a37dccb` and three more turns). The human's reading: not a win, a
+shift. The first turn: the same three scripts as every run today, then —
+new — `pandoc tea.md -o чай.pdf` ("pdflatex not found": pandoc is in the
+image without a PDF engine, a half-tool to fix or drop), `ls` and `find`
+on the fonts on its own, and the budget reached with a Markdown handed
+over. Asked "why can't you install them, ask the tool, read how": `pip
+show fpdf2` → not found, `pip list` → pip, uv, wheel — **the environment
+lied** (ISS-0043: `pip` on the command's `PATH` is the base interpreter's,
+`python3` the uv venv's) — then `python3 -c "import reportlab"` → 5.0.1,
+and the model said so and asked to go on. "Делай": `find` DejaVu,
+reportlab with `TTFont` registered, `python3 make_tea_pdf.py` exit 0,
+`send_file чай.pdf`. Delivered, in Russian, no look (ISS-0040). Its own
+account of why not at once is a story; what the log says is that the two
+steps it needed — check what is there, register the font the traceback
+asked for — it took only when pushed, and that the check it did make was
+answered wrongly by the harness. Also seen: 16–20 s for single commands
+(`find`, `pandoc`, the first run) in a warm container — to be measured
+apart from the model before it is called the Volume's commit and reload.
+

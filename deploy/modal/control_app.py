@@ -127,6 +127,12 @@ BASE_TOOLS = (
 # (`/.uv/.venv`) that carries no `pip` module; a `pip_install` layer fails on
 # it (measured on the first build, 2026-09-04).
 BASE_PACKAGES = (
+    # `pip` itself, into the image's uv venv: without it `pip` on the command's
+    # PATH was the base interpreter's, so `pip list` showed three packages
+    # while `python3` had them all, and a `pip install` would have landed
+    # where `python3` never looks (thread `e8c54e07`, 2026-09-04; ISS-0043).
+    # One interpreter behind `python3`, `pip` and `python3 -m pip`.
+    "pip",
     "reportlab",
     "fpdf2",
     "python-docx",

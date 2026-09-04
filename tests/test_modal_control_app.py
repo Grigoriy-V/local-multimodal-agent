@@ -444,5 +444,8 @@ def test_the_everyday_libraries_are_in_the_image_not_on_the_volume() -> None:
     text = source()
 
     assert ".uv_pip_install(*BASE_PACKAGES)" in text
+    # `pip` in the same venv as `python3`, or `pip list` lies (ISS-0043).
+    assert '    "pip",
+' in text
     for package in ("reportlab", "fpdf2", "python-docx", "openpyxl", "pandas", "matplotlib", "pypdf"):
         assert f'"{package}"' in text

@@ -29,7 +29,9 @@ WORKSPACE = "cold-start-probe"
 COMMAND = (
     "echo probe && python3 --version && node --version && git --version && "
     "python3 -c \"import reportlab, fpdf, docx, openpyxl, pandas, matplotlib, PIL, pypdf, markdown; "
-    "print('packages ok')\""
+    "print('packages ok')\" && "
+    # One interpreter: `pip` must see what `python3` imports (ISS-0043).
+    "pip show reportlab | head -n 1 && python3 -m pip --version && pip --version"
 )
 
 
