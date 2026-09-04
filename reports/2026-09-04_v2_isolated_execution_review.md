@@ -493,3 +493,26 @@ did — the second PDF was readable, in English, the human notes — by
 dropping the Russian text rather than registering a font it did not know
 it had; with the fonts named in `where`, that is the next P's question.
 
+**P in Russian after the font deploy, 2026-09-04** (runs `8fd21453`,
+`510fe752`, thread `cd74d869`). The first message, in the old thread, got a
+`send_file` of a `tea_info.pdf` that had not been made — `fs.not_found`
+came back and the model answered in text. In a fresh thread: `pip install
+fpdf2` into the workspace venv, **97 s** (fonttools, 5.4 MB, hundreds of
+files written to the Volume; reportlab had taken 23.7 s earlier — a venv on
+a Modal Volume pays per file, a measured cost of the shape, not a defect),
+then six rewrites of the script through `cat << EOF`, each failing on
+fpdf2's own API (a bold style never registered, deprecated arguments), each
+about 3 s to run and 10–20 s to generate, until the human stopped the turn
+at 200 s; `turn_stopped` landed cleanly and the seventh command was not
+run. The font was there: the script tested for
+`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf` and registered it — the
+errors were about the bold variant it had not registered. Sorted by the
+rule: the harness did what it was built to do — the round trip, the fonts,
+the stop, the errors reaching the model verbatim; the rest is the model's,
+measured by P: it chose a library it does not know well over the one
+already installed, and debugged by rewriting the whole file. Two options
+for the model's side, both to be measured and neither built: a brief
+sentence that an installed library is listed by `pip list`; and the
+observation that fpdf2's traceback names the fix and the model did not
+apply it, which is a question about the model, not about the tool.
+
