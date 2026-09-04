@@ -1150,3 +1150,34 @@ Consequences
 the Modal timeout and kept below it; `retries=1` on the worker function.
 Not decided here: clearing the dead attempt's status and preview messages in
 the chat (their ids died with the process), and tool deadlines (ISS-0033).
+
+## 2026-09-04 — What stays verbatim is the last two exchanges, and a fold takes only what has to go
+
+Decision
+
+The part of a conversation that always stays verbatim is the last two
+exchanges — a person's message and everything the assistant did up to the
+next one — not the newest eight messages. Inside one long tool-using turn,
+with no earlier exchange to keep, it is the newest two assistant steps. A
+fold by size folds the oldest exchanges one at a time until the overshoot
+plus room for the summary is freed, and no more; a fold by count or by
+`/compact` folds everything older than the floor. The floor is a
+`ContextPolicy` field, `keep_turns`, with `AGENT_KEEP_TURNS`.
+
+Why
+
+Eight messages was two short sentences in one conversation and half a
+window of tool results in another, and it was also the only measure of how
+much a size-triggered fold took: all or nothing. The human called it a
+crutch on 2026-09-04 and it was one: the principle — the model needs the
+exchange it is answering and the one before it verbatim, the references all
+keep a tail of recent turns — was carried by a number in the wrong unit.
+Folding one exchange at a time keeps more exact wording and asks the
+summarizer for less at a time; it costs one fold more when the estimate
+falls short, which `fitted` bounds at three.
+
+Consequences
+
+`verbatim_floor`, `cut_for` and `SUMMARY_ALLOWANCE` in
+`app/context/summary.py`; `fitted` in `app/agent/graph.py` loops;
+`keep_recent` is gone from policy, settings and the Telegram wording.

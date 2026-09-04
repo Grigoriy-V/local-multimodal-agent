@@ -68,6 +68,63 @@ async def summarize(
     return completion.text.strip()
 
 
+# What a fold has to free beyond the overshoot itself: room for the summary
+# that replaces the folded text, which grows with what it covers (at most
+# `WORDS_CEILING` words, roughly this many tokens).
+SUMMARY_ALLOWANCE = 800
+
+# Inside one long tool-using exchange there is no earlier exchange to keep,
+# so the floor is the newest steps instead: the result the model is reading
+# and the one before it, the same two `keep_results` carries verbatim.
+KEEP_STEPS = 2
+
+
+def verbatim_floor(messages: Sequence[Message], keep_turns: int) -> int:
+    """Where the part that always stays verbatim begins.
+
+    The start of the `keep_turns`-th newest exchange, an exchange being a
+    person's message and everything up to the next one. With fewer whole
+    exchanges than that — one long tool turn — the floor is the start of the
+    newest `KEEP_STEPS` assistant steps instead, so a turn of thirty calls
+    can still be folded down to what the model is working on (2026-09-03:
+    a 26-message turn could not be folded at all). Zero means nothing is
+    older than the floor.
+    """
+
+    turns = [index for index, message in enumerate(messages) if message.role == "user"]
+    if len(turns) >= keep_turns:
+        return turns[-keep_turns]
+    steps = [index for index, message in enumerate(messages) if message.role == "assistant"]
+    if len(steps) >= KEEP_STEPS:
+        return steps[-KEEP_STEPS]
+    return 0
+
+
+def cut_for(
+    backend: ModelBackend,
+    messages: Sequence[Message],
+    floor: int,
+    needed: int,
+    first_position: int,
+) -> int:
+    """The earliest exchange boundary at or below `floor` whose folding frees `needed` tokens.
+
+    Oldest first, one exchange at a time, on the surface the model actually
+    carries (old results are stubs there): a request a little over budget
+    folds one exchange, not the whole conversation. The floor is the answer
+    when nothing short of it is enough.
+    """
+
+    boundaries = [
+        index for index, message in enumerate(messages) if message.role == "user" and 0 < index < floor
+    ]
+    for boundary in boundaries:
+        surface, _ = shortened(messages[:boundary], keep=0, stored=boundary, base=first_position)
+        if backend.estimate_tokens(surface) >= needed:
+            return boundary
+    return floor
+
+
 async def fold_older_messages(
     backend: ModelBackend,
     store: ConversationStore,
@@ -76,8 +133,15 @@ async def fold_older_messages(
     used_tokens: int | None = None,
     force: bool = False,
     reason: str | None = None,
+    excess: int | None = None,
 ) -> str | None:
-    """Summarize everything past the verbatim window. Returns the new summary.
+    """Summarize older exchanges, as many as have to go. Returns the new summary.
+
+    `excess` is how far over budget the request is, when the caller knows
+    (`fitted`, from its estimate); with `used_tokens` it is derived. A fold
+    by size folds the oldest exchanges until that much is freed and no more;
+    a fold by count or on request (`/compact`) folds everything older than
+    the verbatim floor.
 
     Two things can trigger a fold: a request that grew past
     `max_input_tokens`, or — as the fallback for a server that does not say
@@ -107,8 +171,16 @@ async def fold_older_messages(
     )
     if len(pending) <= policy.summarize_after and not oversized and not force:
         return None
+    if excess is None and oversized:
+        excess = used_tokens - policy.max_input_tokens  # type: ignore[operator]
 
-    cut = turn_boundary(pending, len(pending) - policy.keep_recent)
+    floor = verbatim_floor(pending, policy.keep_turns)
+    cut = (
+        cut_for(backend, pending, floor, excess + SUMMARY_ALLOWANCE, through)
+        if excess is not None and excess > 0
+        else floor
+    )
+    cut = turn_boundary(pending, cut)
     if cut <= 0 or cut >= len(pending):
         return None
 

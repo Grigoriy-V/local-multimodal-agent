@@ -542,8 +542,8 @@ async def main() -> int:
             # goes on. The checks are the fold event inside the turn, the
             # work done, and an answer — the roadmap's "continues correctly
             # across a compaction", on events.
-            # Twelve stored messages, because the newest eight always stay
-            # verbatim: a fold needs something older than that to fold.
+            # Twelve stored messages: the last two exchanges always stay
+            # verbatim, and a fold needs something older than that to fold.
             seeded = []
             for batch, street in enumerate(("elm", "oak", "ash", "fir", "yew", "bay")):
                 notes = " ".join(

@@ -994,13 +994,13 @@ class TelegramAdapter:
         """Fold the older part of this conversation now. One summarizer call."""
 
         folded = await agent.compact(thread_id)
-        keep = agent.policy.keep_recent
         await self.client.send_message(
             chat_id,
-            f"Folded {folded} older messages into the summary; the newest {keep} stay verbatim."
+            f"Folded {folded} older messages into the summary; "
+            f"{exchanges(agent.policy.keep_turns)} stay verbatim."
             if folded
-            else f"Nothing to fold: the newest {keep} messages always stay verbatim, and "
-            "that is all there is past the summary.",
+            else f"Nothing to fold: {exchanges(agent.policy.keep_turns)} always stay "
+            "verbatim, and that is all there is past the summary.",
         )
 
     async def _show_conversations(
@@ -1128,12 +1128,11 @@ class TelegramAdapter:
         _, now = agent.store.summary(thread_id)
         if now <= covered:
             return
-        keep = agent.policy.keep_recent
         await self.client.send_message(
             chat_id,
             f"Folded {now - covered} older messages into the summary, because this "
-            f"conversation grew past its size; the newest {keep} stay verbatim, and the "
-            "exact words stay reachable with search_history.",
+            f"conversation grew past its size; {exchanges(agent.policy.keep_turns)} stay "
+            "verbatim, and the exact words stay reachable with search_history.",
         )
 
     async def _deliver(
@@ -1364,3 +1363,9 @@ def same_request(left: Message | None, incoming: Message) -> bool:
     return "".join(part.text or "" for part in left.content) == "".join(
         part.text or "" for part in incoming.content
     )
+
+
+def exchanges(keep_turns: int) -> str:
+    """The verbatim floor in a person's words: exchanges, not messages."""
+
+    return "the last exchange" if keep_turns == 1 else f"the last {keep_turns} exchanges"

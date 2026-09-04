@@ -754,27 +754,45 @@ def build_agent(
         estimated = backend.estimate_tokens(state.context.prompt(turn)) + schema_tokens
         if estimated <= policy.max_input_tokens:
             return state.context
-        try:
-            folded = await fold_older_messages(
-                backend, store, state.thread_id, policy, force=True
+        # As many exchanges as have to go, oldest first; a second fold only
+        # when the first, sized on an estimate, fell short. Three is a bound
+        # on a summarizer that frees less than it should, not a plan.
+        context = state.context
+        now = estimated
+        folds = 0
+        for _ in range(3):
+            try:
+                folded = await fold_older_messages(
+                    backend,
+                    store,
+                    state.thread_id,
+                    policy,
+                    force=True,
+                    excess=now - policy.max_input_tokens,
+                )
+            except BackendError as error:
+                # A summarizer that could not answer is not a reason to lose
+                # the step: the request goes as it is, and the overflow path
+                # below answers if it does not fit (ISS-0029).
+                trace.event("context_fold_failed", where="fitted", error_type=type(error).__name__)
+                break
+            if folded is None:
+                # Nothing left to fold: the size is the current turn, not the
+                # history behind it. Send it and let the overflow path answer.
+                break
+            folds += 1
+            context = assemble_context(state)
+            now = backend.estimate_tokens(context.prompt(turn)) + schema_tokens
+            if now <= policy.max_input_tokens:
+                break
+        if folds:
+            trace.event(
+                "context_folded",
+                estimated=estimated,
+                budget=policy.max_input_tokens,
+                now=now,
+                folds=folds,
             )
-        except BackendError as error:
-            # A summarizer that could not answer is not a reason to lose the
-            # step: the request goes as it is, and the overflow path below
-            # answers if it does not fit (ISS-0029).
-            trace.event("context_fold_failed", where="fitted", error_type=type(error).__name__)
-            return state.context
-        if folded is None:
-            # Nothing left to fold: the size is the current turn, not the
-            # history behind it. Send it and let the overflow path answer.
-            return state.context
-        context = assemble_context(state)
-        trace.event(
-            "context_folded",
-            estimated=estimated,
-            budget=policy.max_input_tokens,
-            now=backend.estimate_tokens(context.prompt(turn)) + schema_tokens,
-        )
         return context
 
     async def asked_to_stop(state: AgentState) -> bool:

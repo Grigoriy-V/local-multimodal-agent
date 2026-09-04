@@ -169,7 +169,8 @@ class AgentSettings(BaseSettings):
     # should be the safe answer, and pointing the agent at real work is then a
     # deliberate act rather than the consequence of where it was started.
     workspace: str = "workspace"
-    keep_recent: int = 8
+    # How many of the newest exchanges always stay verbatim (`keep_turns`).
+    keep_turns: int = 2
     # How many messages past the summary before the conversation folds on
     # count alone. The size trigger, from the model's own window, is the one
     # that decides on any server that reports one; this bounds the rest.

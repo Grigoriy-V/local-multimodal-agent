@@ -206,7 +206,7 @@ What exists. How it was reached, and every number, is in the linked report.
      Live: `scripts/loop_live.py` F passed 2026-09-03; deployed the same
      day and `/check` 9/9 on that container. `reports/2026-09-03_v2_browser_session.md`,
      `docs/v2_tool_system.md`, `ISSUES.md` ISS-0008.
-   - **4.6a Context engine — done 2026-09-03.** Context preparation before every model step rather
+   - **4.6a Context engine — done 2026-09-03; the verbatim floor refined 2026-09-04.** Context preparation before every model step rather
      than folding after a turn: measure the surface, shorten old tool results
      first, summarize only if that was not enough, and record what was done
      durably. Cache-friendly assembly lands here, since it is the same
@@ -247,6 +247,11 @@ What exists. How it was reached, and every number, is in the linked report.
      whole by design. One measurement is carried, not owed: `cached_tokens`
      is read on the first warm turn after the model-app redeploy that brings
      the flag. `reports/2026-09-03_v2_context_engine_review.md`.
+     **2026-09-04, on the human's word:** `keep_recent = 8` messages became
+     `keep_turns = 2` exchanges, and a fold by size folds the oldest
+     exchanges one at a time until enough is freed rather than everything
+     older than the floor; `fitted` folds again, at most twice more, when
+     the first fold fell short. `DECISIONS.md` 2026-09-04.
    - **4.6b Exact recovery from archived history — done 2026-09-03.** A search over what was
      actually said, returning real messages and tool results rather than another
      summary, so a detail a summary lost is recoverable. Full-text in both

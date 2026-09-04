@@ -372,12 +372,12 @@ async def test_a_long_tool_turn_can_still_be_folded(store: SqliteStore) -> None:
     store.append("t1", messages, LOCAL_USER_ID)
 
     folded = await fold_older_messages(
-        EchoBackend(), store, "t1", ContextPolicy(keep_recent=8), force=True
+        EchoBackend(), store, "t1", ContextPolicy(keep_turns=2), force=True
     )
 
     assert folded == "they talked about files"
     _, through = store.summary("t1")
-    assert through == 17, "cut moved forward to the next assistant message"
+    assert through == 21, "the newest two steps stay: one exchange has no earlier one to keep"
     assert store.messages("t1", after=through - 1)[0].role == "assistant"
 
 
@@ -421,14 +421,14 @@ async def test_a_long_thread_is_folded_and_the_summary_records_its_reach(
 
 
 async def test_folding_leaves_the_recent_window_verbatim(store: SqliteStore) -> None:
-    policy = ContextPolicy(keep_recent=8, summarize_after=16)
+    policy = ContextPolicy(keep_turns=2, summarize_after=16)
     store.append("t1", exchange(12), LOCAL_USER_ID)
 
     await fold_older_messages(EchoBackend(), store, "t1", policy)
 
     _, through = store.summary("t1")
     remaining = store.messages("t1", after=through - 1)
-    assert len(remaining) >= policy.keep_recent
+    assert sum(1 for m in remaining if m.role == "user") == policy.keep_turns
     assert remaining[0].role == "user"
 
 
@@ -464,7 +464,7 @@ async def test_folding_twice_carries_the_earlier_summary_forward(store: SqliteSt
 async def test_a_short_thread_that_filled_the_request_is_folded(store: SqliteStore) -> None:
     """Eight turns of text and eight turns of images are the same message count."""
 
-    policy = ContextPolicy(keep_recent=4, summarize_after=100, max_input_tokens=1000)
+    policy = ContextPolicy(keep_turns=2, summarize_after=100, max_input_tokens=1000)
     store.append("t1", exchange(6), LOCAL_USER_ID)
 
     result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=1200)
@@ -474,7 +474,7 @@ async def test_a_short_thread_that_filled_the_request_is_folded(store: SqliteSto
 
 
 async def test_a_request_within_the_budget_leaves_the_thread_alone(store: SqliteStore) -> None:
-    policy = ContextPolicy(keep_recent=4, summarize_after=100, max_input_tokens=1000)
+    policy = ContextPolicy(keep_turns=2, summarize_after=100, max_input_tokens=1000)
     store.append("t1", exchange(6), LOCAL_USER_ID)
 
     result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=400)
@@ -492,7 +492,7 @@ async def test_an_oversized_thread_shorter_than_the_window_is_left_alone(
     and the fold must decline rather than cut at a negative position.
     """
 
-    policy = ContextPolicy(keep_recent=8, summarize_after=100, max_input_tokens=100)
+    policy = ContextPolicy(keep_turns=2, summarize_after=100, max_input_tokens=100)
     store.append("t1", exchange(1), LOCAL_USER_ID)
 
     result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=5000)
@@ -508,7 +508,7 @@ async def test_an_oversized_thread_folded_to_nothing_stops_folding(store: Sqlite
     request overshoots, so the trigger fires on a `pending` that is empty.
     """
 
-    policy = ContextPolicy(keep_recent=2, summarize_after=100, max_input_tokens=100)
+    policy = ContextPolicy(keep_turns=1, summarize_after=100, max_input_tokens=100)
     store.append("t1", exchange(4), LOCAL_USER_ID)
     await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=5000)
     _, through = store.summary("t1")
@@ -522,7 +522,7 @@ async def test_an_oversized_thread_folded_to_nothing_stops_folding(store: Sqlite
 async def test_without_a_known_limit_only_the_message_count_folds(store: SqliteStore) -> None:
     """A model that does not state its context length is not guessed at."""
 
-    policy = ContextPolicy(keep_recent=4, summarize_after=100)
+    policy = ContextPolicy(keep_turns=2, summarize_after=100)
     store.append("t1", exchange(6), LOCAL_USER_ID)
 
     result = await fold_older_messages(EchoBackend(), store, "t1", policy, used_tokens=999_999)
@@ -597,7 +597,7 @@ async def test_the_summarizer_reads_stubs_not_whole_results(store: SqliteStore) 
         LOCAL_USER_ID,
     )
 
-    await fold_older_messages(backend, store, "t1", ContextPolicy(keep_recent=4, summarize_after=8))
+    await fold_older_messages(backend, store, "t1", ContextPolicy(keep_turns=2, summarize_after=8))
 
     [request] = backend.requests
     body = request[-1].content[0].text

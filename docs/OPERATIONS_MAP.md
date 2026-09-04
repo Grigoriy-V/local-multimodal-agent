@@ -579,7 +579,7 @@ the model, so it is not a model-free command.
 
 A fold that happens on its own during a turn is announced after the answer
 (since 2026-09-03, asked for by the human): how many messages were folded,
-that the newest `keep_recent` stay verbatim, and that the exact words stay
+that the last `keep_turns` exchanges stay verbatim, and that the exact words stay
 reachable with `search_history`. The adapter detects it from the summary's
 covered position before and after the turn.
 

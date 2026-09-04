@@ -1061,9 +1061,9 @@ async def test_a_fold_during_a_turn_is_announced(
     await adapter.handle_update(text_update("message 8", update_id=9))
 
     assert telegram.sent[-1] == (
-        "Folded 10 older messages into the summary, because this conversation grew past "
-        "its size; the newest 8 stay verbatim, and the exact words stay reachable with "
-        "search_history."
+        "Folded 14 older messages into the summary, because this conversation grew past "
+        "its size; the last 2 exchanges stay verbatim, and the exact words stay reachable "
+        "with search_history."
     )
     assert telegram.sent[-2].startswith("a summary of what was sa"), "the answer comes first"
 
@@ -1078,11 +1078,11 @@ async def test_compact_folds_the_older_part_now(
 
     await adapter.handle_update(text_update("/compact", update_id=20))
 
-    assert telegram.sent[-1].startswith("Folded 4 older messages")
+    assert telegram.sent[-1].startswith("Folded 8 older messages")
     store = SqliteStore(str(tmp_path / "memory.sqlite3"))
     summary, through = store.summary(current_thread(store, canonical_user_id(ALLOWED)))
     assert summary == "a summary of what was said"
-    assert through == 4
+    assert through == 8
 
     await adapter.handle_update(text_update("/compact", update_id=21))
 

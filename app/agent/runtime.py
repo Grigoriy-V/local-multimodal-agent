@@ -749,7 +749,7 @@ def create_agent(
 
     agent_settings = agent_settings or AgentSettings()
     policy = ContextPolicy(
-        keep_recent=agent_settings.keep_recent,
+        keep_turns=agent_settings.keep_turns,
         summarize_after=agent_settings.summarize_after,
         retrieved_facts=agent_settings.retrieved_facts,
         keep_results=agent_settings.keep_results,

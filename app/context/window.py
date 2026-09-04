@@ -61,7 +61,14 @@ class ContextPolicy:
     counts bound the request.
     """
 
-    keep_recent: int = 8
+    # How many of the newest exchanges — a person's message and everything
+    # the assistant did up to the next one — always stay verbatim. A floor,
+    # not a trigger: folding is decided by size, and how much is folded by
+    # how much has to go. Two is the exchange being answered and the one it
+    # follows. Until 2026-09-04 this was `keep_recent = 8` messages, a count
+    # that was two short sentences in one conversation and half a window of
+    # tool results in another.
+    keep_turns: int = 2
     # The message count past which the conversation folds whatever its size.
     # A fallback for a model that does not report its window, not the rule:
     # the size trigger is exact and fires first on any server that reports
