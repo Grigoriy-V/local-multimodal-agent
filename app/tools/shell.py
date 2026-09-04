@@ -7,17 +7,26 @@ workspace with a reduced environment (`LocalRunner`); deployed it will be a
 container beside the renderer that holds no secret. The tool, the result the
 model reads and the codes are the same in both.
 
-What a command gets: the workspace as its working directory and its home, and
-an environment reduced to what a shell needs. Nothing from the process that
-started the agent — no `.env` value, no token — is passed on. What survives a
-command is whatever it wrote into the workspace, so the environment makes the
-workspace the place things land rather than asking the model to remember it:
-`python` and `pip` are the workspace's own virtual environment (made on first
-use, first on `PATH`), `pip` refuses to install anywhere else
-(`PIP_REQUIRE_VIRTUALENV`), and a global `npm` install goes to the workspace
-too (`npm_config_prefix`). On 2026-09-04 the first live install went into the
-person's own Python against the brief's sentence; the human's rule is that
-this must not be possible, and an environment is what makes it impossible.
+What a command gets: the workspace as its working directory, its home and its
+temp, an environment reduced to what a shell needs, and the workspace's own
+virtual environment as `python` and `pip` — the project's environment,
+activated, as it would be in a developer's own shell. Nothing from the process
+that started the agent — no `.env` value, no token — is passed on.
+
+What a command may change is, by the references' one shared property, the
+workspace and nothing else (Codex's writable roots, Claude Code's sandbox on
+macOS and Linux). On native Windows there is no operating-system primitive
+for that boundary short of a second user account or WSL2: a write-restricted
+token (`CreateRestrictedToken`, the obvious route) cannot start an arbitrary
+process at all — initialization fails with `STATUS_DLL_INIT_FAILED` whatever
+the restricting SIDs and desktop, which is why Chromium starts its sandboxed
+processes with a second, initial token and drops it after startup. Tried and
+measured on 2026-09-04; the local profile therefore has no write boundary on
+Windows, as Claude Code has none there, and the brief says so. Until the
+human chooses one, two interim environment rules keep the one case they
+ruled out — an install into the machine's own Python — from happening:
+`PIP_REQUIRE_VIRTUALENV` and `npm_config_prefix`. They are named as interim
+because they are rules about two installers, not the boundary.
 
 A non-zero exit is a result, not a failure (`docs/v2_tool_system.md`, "Failure
 is not the same as an unwanted result"). The failures are the runner's own: the
@@ -57,10 +66,11 @@ TAIL_CHARS = 4_000
 # start on Windows; `TEMP`/`TMP` so tools that write temporary files work.
 _PASSED = ("PATH", "SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL")
 
-# The workspace's own Python and node homes. Relative to the workspace, so the
-# same layout is on a person's disk and on the deployed Volume.
+# The workspace's own Python, and where a command's temp and profile files go.
+# Relative to the workspace, so the same layout is on a person's disk and on
+# the deployed Volume.
 VENV = ".venv"
-NPM_HOME = ".npm-global"
+TMP = ".tmp"
 
 
 def venv_bin(workspace: Path) -> Path:
@@ -74,6 +84,8 @@ def venv_python(workspace: Path) -> Path:
 def ensure_venv(workspace: Path) -> bool:
     """The workspace's virtual environment, made on first use. Returns whether it was made now."""
 
+    (workspace / TMP / "appdata").mkdir(parents=True, exist_ok=True)
+    (workspace / TMP / "local").mkdir(parents=True, exist_ok=True)
     if venv_python(workspace).exists():
         return False
     subprocess.run(
@@ -114,16 +126,20 @@ def command_environment(workspace: Path, source: dict[str, str] | None = None) -
     env = {name: source[name] for name in _PASSED if name in source}
     env["HOME"] = str(workspace)
     env["USERPROFILE"] = str(workspace)
-    # The workspace's Python first, so `python` and `pip` are its own; pip
-    # refuses any interpreter that is not a virtual environment, so the
-    # machine's Python cannot be installed into from here at all.
-    npm_bin = workspace / NPM_HOME / ("" if sys.platform == "win32" else "bin")
-    env["PATH"] = os.pathsep.join(
-        [str(venv_bin(workspace)), str(npm_bin), *filter(None, [env.get("PATH", "")])]
-    )
+    # A command's temp and profile directories inside the workspace, so what
+    # tools write "for the user" lands where a command may write.
+    tmp = workspace / TMP
+    env["TEMP"] = env["TMP"] = env["TMPDIR"] = str(tmp)
+    env["APPDATA"] = str(tmp / "appdata")
+    env["LOCALAPPDATA"] = str(tmp / "local")
+    # The workspace's Python first: `python` and `pip` are the project's.
+    env["PATH"] = os.pathsep.join([str(venv_bin(workspace)), *filter(None, [env.get("PATH", "")])])
     env["VIRTUAL_ENV"] = str(workspace / VENV)
+    # Interim, see the module docstring: pip refuses any interpreter that is
+    # not a virtual environment, and a global npm install goes to the
+    # workspace. Two installers, not a boundary; the human chooses the boundary.
     env["PIP_REQUIRE_VIRTUALENV"] = "1"
-    env["npm_config_prefix"] = str(workspace / NPM_HOME)
+    env["npm_config_prefix"] = str(workspace / ".npm-global")
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -174,7 +190,26 @@ class LocalRunner:
     def __init__(self) -> None:
         system = platform.system() or "this machine"
         shell = "cmd" if sys.platform == "win32" else "sh"
-        self.where = f"on this machine ({system}), through {shell}"
+        # Honest about what is not there: a command here can change the machine
+        # outside the workspace, and the model should know that before it
+        # writes one.
+        self.where = (
+            f"on this machine ({system}), through {shell}; there is no write boundary "
+            "here, so keep every change inside your workspace"
+        )
+
+    def _start(self, command: str, cwd: Path):
+        return subprocess.Popen(  # noqa: S602 - the command is the point
+            command,
+            shell=True,
+            cwd=str(cwd),
+            env=command_environment(cwd),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=sys.platform != "win32",
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
+        )
 
     async def run(self, command: str, cwd: Path, timeout: float) -> Finished:
         started = time.monotonic()
@@ -186,22 +221,10 @@ class LocalRunner:
                 code=COMMAND_NOT_STARTED,
             ) from error
         try:
-            process = subprocess.Popen(  # noqa: S602 - the command is the point
-                command,
-                shell=True,
-                cwd=str(cwd),
-                env=command_environment(cwd),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                start_new_session=sys.platform != "win32",
-                creationflags=(
-                    subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-                ),
-            )
-        except OSError as error:
+            process = await asyncio.to_thread(self._start, command, cwd)
+        except (OSError, subprocess.SubprocessError) as error:
             raise ToolError(
-                f"the command could not be started: {error.strerror or error}",
+                f"the command could not be started: {getattr(error, 'strerror', None) or error}",
                 code=COMMAND_NOT_STARTED,
             ) from error
         try:

@@ -266,3 +266,50 @@ Built the same day on the human's start signal, in the tree, not deployed
 - Not in 5b, by the approved shape: background processes, the deployed
   runner, the Chainlit `/mode` (Chainlit has no `/plan` either).
 
+## 10. The write boundary on native Windows, tried 2026-09-04
+
+The human read the two installer rules (`PIP_REQUIRE_VIRTUALENV`,
+`npm_config_prefix`) as a crutch and asked for the references' property
+instead: a command writes only inside the workspace, whatever it is. On
+macOS and Linux the references get it from Seatbelt and bubblewrap; Codex on
+native Windows from a dedicated low-privilege user (with admin setup) or an
+"unelevated ACL-based" fallback. The obvious unelevated mechanism is a
+**write-restricted token** (`CreateRestrictedToken(WRITE_RESTRICTED)` with
+`RESTRICTED` as the restricting SID, the workspace granted to it by ACL).
+
+Built and measured: `CreateProcessAsUser` with such a token starts `cmd`
+without a console but every process that loads more than `cmd` fails at
+initialization with `STATUS_DLL_INIT_FAILED` (0xC0000142) — with `RESTRICTED`
+alone, with the logon SID, with Users and Everyone added, on the default
+desktop, on a private desktop whose DACL admits `RESTRICTED`, and after
+granting `RESTRICTED` on `winsta0` and the default desktop. This is the
+limitation Chromium documents: a locked-down token cannot be the token a
+process starts with, because startup needs objects it cannot touch; Chromium
+starts with a second, initial token and drops it after loading, which an
+arbitrary command cannot do. The code was removed rather than kept as
+scaffolding.
+
+What remains possible on this machine, each with its price:
+
+- **A — a dedicated low-privilege local user**, Codex's own Windows route:
+  created once with administrator rights, granted read on the repository
+  and modify on the workspace, commands started with
+  `CreateProcessWithLogonW`. A real boundary from the OS; the cost is the
+  one-time admin setup and that user's password held in the local secret.
+- **B — WSL2 with bubblewrap**, the references' Linux route: the boundary
+  Claude Code and Codex use on WSL2, no daemon; the cost is WSL2 and the
+  toolchain living there, which the human set aside earlier.
+- **C — no boundary locally, the person is it**, Claude Code's state on
+  native Windows: `careful` mode asks before every command, `full` trusts;
+  the interim installer rules stay or go as the human says.
+- **D — AppContainer**: the supported lowbox token; starts fine, but denies
+  *reads* everywhere `ALL APPLICATION PACKAGES` is not granted, which
+  includes the repository and every toolchain under the user's profile.
+  Every read would need an ACL grant; brittle.
+
+Left as built: the workspace venv as the project environment (not a crutch:
+every reference runs commands in the project's environment), temp and
+profile directories inside the workspace, the brief saying plainly that
+there is no write boundary here. The interim rules stay until the human
+chooses, because removing them reopens the one case they ruled out.
+

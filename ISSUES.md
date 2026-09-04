@@ -53,15 +53,19 @@ Rules that keep the file honest:
 
 ### ISS-0038 — a package is installed into the machine's own Python rather than the workspace
 
-- **Status:** fixed, 2026-09-04, on the human's rule that this must not be
-  possible — structurally, not by a sentence: the command environment makes
-  the workspace's own virtual environment (made on first use) the `python`
-  and `pip` on `PATH`, `PIP_REQUIRE_VIRTUALENV` makes pip refuse any other
-  interpreter, and `npm_config_prefix` sends a global npm install into the
-  workspace (`command_environment`, `ensure_venv` in `app/tools/shell.py`).
-  P re-run the same day: `pip install reportlab` landed in the workspace's
-  `.venv` (cp312 wheels, the agent's own interpreter's version, not the
-  machine's 3.14). Not yet deployed (5a)
+- **Status:** mitigated, 2026-09-04, awaiting the human's choice of boundary.
+  The workspace's own virtual environment (made on first use) is the
+  `python` and `pip` a command sees, and P re-run the same day put
+  `reportlab` into it. Two interim environment rules keep the case out:
+  `PIP_REQUIRE_VIRTUALENV` and `npm_config_prefix`. The human named them
+  a crutch, rightly — rules about two installers, not the references' one
+  property (a command writes only inside the workspace). That property
+  was then attempted the way Codex's unelevated Windows sandbox suggests,
+  a write-restricted token, and it cannot start an arbitrary process on
+  Windows at all (`STATUS_DLL_INIT_FAILED` with every restricting-SID set
+  and desktop tried); the attempt and the remaining options are in
+  `reports/2026-09-04_v2_isolated_execution_review.md` §10. Deployed (5a)
+  the container is the boundary and none of this applies
 - **Seen:** 2026-09-04, `scripts/loop_live.py` P, run `live-140`, the first
   live turn with `run_command`: asked for a PDF, the model ran
   `pip install reportlab` as its first command, and it landed in

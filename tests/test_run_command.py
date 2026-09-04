@@ -301,5 +301,17 @@ def test_python_and_pip_are_the_workspaces_own_environment(workspace: Path) -> N
 
     env = command_environment(workspace, {"PATH": "/usr/bin"})
     assert env["PATH"].split(os.pathsep)[0] == str(workspace / VENV / ("Scripts" if sys.platform == "win32" else "bin"))
+    assert env["TEMP"] == str(workspace / ".tmp") and env["LOCALAPPDATA"].startswith(str(workspace))
+
+
+def test_the_interim_rules_keep_an_install_out_of_the_machines_python(workspace: Path) -> None:
+    """Interim until the human chooses a boundary (shell.py docstring)."""
+
+    env = command_environment(workspace, {"PATH": "/usr/bin"})
+
     assert env["PIP_REQUIRE_VIRTUALENV"] == "1"
     assert env["npm_config_prefix"] == str(workspace / ".npm-global")
+
+
+def test_the_brief_says_there_is_no_boundary_here() -> None:
+    assert "no write boundary" in LocalRunner().where
