@@ -584,3 +584,16 @@ remedies and tool-boundary policies (a path root, a `mutates` flag, the
 write boundary) are the same kind of thing; what we do not have is a
 per-tool sentence at the tool and an observation rule at the file seam.
 
+**The harness's part in the loop, found 2026-09-04** when the human refused
+"the model cannot" and asked for the harness: `stubbed` climbs 1→5 through
+the run. The surface keeps two results verbatim and stubs the rest, and a
+command's `exit code: 1` is a result, not a failure, so from the fourth
+attempt on the model saw its earlier scripts whole and their tracebacks as
+`[…; shortened, call the tool again for the full result]` — and attempt
+four repeated attempt one. ISS-0041. The mirror of ISS-0022, where
+shortening the model's *own* words made it rewrite every file: shortening
+what the tools *said back* within the turn makes it repeat every mistake.
+The rule's own reason — "the model has already said what it made of them"
+— holds for a previous turn and not for the one in progress; and the stub
+tells a command to run again.
+

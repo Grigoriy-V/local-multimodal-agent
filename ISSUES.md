@@ -51,6 +51,37 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0041 — within one turn, the errors a command met are shortened away while the model is still fixing them
+
+- **Status:** open — harness, observed
+- **Seen:** 2026-09-04, deployed, runs `510fe752` and `3b3c86d8` (P in
+  Russian): six rewrites of one script, each answered by a traceback with
+  `exit code: 1`. `context_prepared` shows `stubbed` climbing 1, 2, 3, 4, 5
+  across the steps: the surface keeps the newest `keep_results` (two) tool
+  results verbatim and shows the older ones as stubs, and a non-zero exit is
+  a **result**, not a failure, so the "failures are kept" rule did not hold
+  it. By the fourth attempt the model saw its own three earlier scripts in
+  full and their tracebacks as `[run_command cat << 'EOF' …: 900
+  characters; shortened, call the tool again for the full result]`, and it
+  repeated the first attempt's error exactly (attempt 4 = attempt 1). The
+  stub's own wording, "call the tool again", for a command is "run the
+  failing script again".
+- **Costs:** a debugging loop that cannot see what it already tried; the
+  turn's budget spent, the person stopping it by hand (twice today).
+- **Reproduce:** any turn with more than two commands whose output matters
+  to the next command — a build, a test run, a script under repair.
+- **Cause:** the shortening rule (`shortened` in `app/context/window.py`,
+  `DECISIONS.md` 2026-09-03) counts results across history and the current
+  turn alike; its stated reason — "the model has already said what it made
+  of them" — is true of a previous turn and false in the middle of this
+  one. A failure is kept because "it is why the model did what it did
+  next"; a command's non-zero exit is the same thing and is not kept.
+- **Evidence:** `reports/2026-09-04_v2_isolated_execution_review.md` §12
+- **Related:** ISS-0022 (the model's own words, shortened, made it rewrite
+  every file — the mirror of this), ISS-0040; roadmap 5
+
+---
+
 ### ISS-0040 — a document is handed over without a look at it
 
 - **Status:** open — model behaviour, measured
