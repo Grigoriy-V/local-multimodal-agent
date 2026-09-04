@@ -641,3 +641,14 @@ the cold start with the larger image and the packages importable through
 the command's `python3` (`scripts/measure_command_cold_start.py` now
 imports all nine), and P in Russian on this image.
 
+Measured on the new image, two invocations:
+
+| run | waited | command | container | inside |
+|---|---|---|---|---|
+| cold | 10.61 s | 2.75 s | 7.86 s | all nine packages import through the command's `python3` |
+| warm | 2.18 s | 1.60 s | 0.58 s | same |
+
+The container's share did not grow (7.9 s against 8.3 s before, 0.6 against
+0.7 warm); what grew is the command itself, because the probe now imports
+pandas and matplotlib, which cost 1.5–2.5 s wherever they are.
+
