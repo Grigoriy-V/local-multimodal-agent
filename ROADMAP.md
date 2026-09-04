@@ -5,8 +5,9 @@
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** none. 4.7, restart, resume and the scenario
-suite, closed 2026-09-04 (below). Next in order is 4.8; selecting it is the
-human's word.
+suite, closed 2026-09-04 (below). Next in order is 4.9, reviewed the same
+day; selecting it is the human's word. 4.8 (`ask_user`) moved to Not started
+on the human's word, 2026-09-04.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -308,16 +309,16 @@ What exists. How it was reached, and every number, is in the linked report.
      retries a timeout is confirmed on the first real kill.
      `reports/2026-09-04_v2_restart_resume_review.md`, `DECISIONS.md`
      2026-09-04.
-   - **4.8 `ask_user`** for a genuinely missing decision, not for permission.
-     Was 4.5; moved behind the tool system it returns through, and behind the
-     suite that can accept it.
    - **4.9 Saying only what was observed.** The assistant describes artifacts
      and sources it did not open. Was 4.5.5. Deliberately last, because three
      rounds of prompt wording settled nothing, because the browser capability
      is what lets a generated page be exercised, and because the scenario
      suite is the only way to accept a change in what the model does. Includes
      the residual acceptance 4.3 did not demonstrate. `ISSUES.md` ISS-0004,
-     `reports/2026-08-30_v2_prompt_assembly.md`.
+     `reports/2026-08-30_v2_prompt_assembly.md`. Reviewed against the
+     references 2026-09-04, options and a recommended shape in
+     `reports/2026-09-04_v2_observed_claims_review.md`; **not approved, not
+     started.**
 
 5. **Isolated execution.** A sandbox backend behind the 4.2 seam: shell, Python
    and package installation in a restricted workspace holding no control-plane
@@ -352,6 +353,10 @@ an observed defect is described in `ISSUES.md`, not here.
   opening and how coarse its items are, and a turn ending on an item the model
   does not want to close. `reports/2026-08-31_v2_todo_live_failure.md`.
 - **Let a plan be corrected by the person**, who can currently only read it.
+- **`ask_user`** for a genuinely missing decision, not for permission. Was
+  4.8 until 2026-09-04; a feature rather than architecture, so it waits for
+  the base harness. It returns through the same interrupt seam consent
+  uses.
 - **Hand over what was made.** Delivery is `send_file` and the model reaches for
   a Markdown link instead. `ISSUES.md` ISS-0003.
 - **Latency to the first visible word**, to give 4.1 a "before" number.
