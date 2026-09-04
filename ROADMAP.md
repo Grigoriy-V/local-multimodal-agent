@@ -5,8 +5,10 @@
 **Project status:** Version 1.5 closed; Version 2 in progress
 
 **Current approved step:** 5, isolated execution, selected by the human
-2026-09-04 with item 4 closed as a whole. First the review against the
-references and a plan; implementation is a separate start signal.
+2026-09-04 with item 4 closed as a whole and split into 5a (deployed) and
+5b (local). Reviewed against the references the same day; the shapes and
+the order await the human's word, and implementation is a separate start
+signal.
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -174,14 +176,21 @@ What exists. How it was reached, and every number, is in the linked report.
 5. **Isolated execution — current, selected 2026-09-04.** An execution
    backend behind the 4.2 seam: shell, Python and package installation in a
    workspace holding no control-plane secret. Isolation, not a confirmation
-   prompt, is the boundary for arbitrary generated code. What the boundary is
-   in each profile — an OS sandbox around a workspace as Claude Code and Codex
-   do, a container, or the worker's own process with its secrets withheld —
-   is the review's first question, open for both profiles. Every run
-   is a product-runtime worker and a separate human gate. The natural-request
-   PDF scenario is accepted only after this capability exists: create the PDF,
-   inspect the real document and explicitly deliver it, without a PDF-specific
-   workflow.
+   prompt, is the boundary for arbitrary generated code. Every deployed run
+   is a product-runtime worker and a separate human gate during development.
+   The natural-request PDF scenario is accepted only after this capability
+   exists: create the PDF, inspect the real document and explicitly deliver
+   it, without a PDF-specific workflow. Split on the human's word 2026-09-04
+   into the two profiles; reviewed against the references the same day,
+   shapes and order proposed in
+   `reports/2026-09-04_v2_isolated_execution_review.md`, **not approved,
+   not started**.
+
+   - **5a Deployed (Modal).** Where generated code runs in the product and
+     what its boundary is; one filesystem with the file tools; lifetime and
+     cost per session.
+   - **5b Local (this machine).** The same tool and contract on the human's
+     own machine, where the offline tests and the live suite run.
 
 6. **Optimization after the agent is observable.** Adaptive scaledown through
    `autoscale.py`. Prefix caching is confirmed active and needs no work before
