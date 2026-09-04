@@ -284,7 +284,7 @@ The file defines three image shapes:
 control_image  -> dependencies + source; no Chromium
 agent_image    -> Chromium/fonts + source; deployed agent worker
 render_image   -> Chromium/fonts + source; isolated page renderer
-command_image  -> dependencies + BASE_TOOLS (DejaVu/Liberation fonts, node, git, ffmpeg, imagemagick, poppler, pandoc, ...) + source; where a command runs
+command_image  -> dependencies + BASE_TOOLS (DejaVu/Liberation fonts, node, git, ffmpeg, imagemagick, poppler, pandoc, ...) + BASE_PACKAGES (reportlab, fpdf2, python-docx, openpyxl, pandas, matplotlib, Pillow, pypdf, markdown) + source; where a command runs
 ```
 
 Heavy dependencies/browser are layered below copied source so source-only changes can reuse earlier image layers.
@@ -390,7 +390,8 @@ The worker calls it through `ModalRunner` (`.remote.aio`), committing the
 Volume before and reloading after; the Function reloads before the command
 and commits after. Python is the image's 3.12; a venv the model makes in the
 workspace is on the Volume and survives, an install into the container does
-not. A venv on the Volume is bound to the image's Python version: a deploy
+not; the everyday document and data libraries (`BASE_PACKAGES`) are in the
+image, because a venv on the Volume pays per file (55 s for a no-op install). A venv on the Volume is bound to the image's Python version: a deploy
 that changes it leaves the model making a new one. Every invocation starts a
 container: a product-runtime worker during development.
 

@@ -117,11 +117,29 @@ BASE_TOOLS = (
     "pandoc",
 )
 
-# Where a command runs: the same layers as the worker, the base tools on top,
-# no browser. Like the renderer it is defined by what it is not given below:
-# no secret. The Volume it does get, because the workspace is the one thing a
-# command and the worker have to agree on.
-command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS))
+# The libraries a person's everyday documents and data need, in the image
+# rather than in a venv on the Volume (the human's list, 2026-09-04). Measured
+# reason: a venv on a Modal Volume pays per file — a no-op `pip install` took
+# 55 s cold and the first import of fonttools 50 s — and the venv itself was
+# the first step of every turn, made again and again. With these here, a venv
+# in the workspace is the exception a project needs, not the way in.
+BASE_PACKAGES = (
+    "reportlab",
+    "fpdf2",
+    "python-docx",
+    "openpyxl",
+    "pandas",
+    "matplotlib",
+    "pillow",
+    "pypdf",
+    "markdown",
+)
+
+# Where a command runs: the same layers as the worker, the base tools and
+# packages on top, no browser. Like the renderer it is defined by what it is
+# not given below: no secret. The Volume it does get, because the workspace is
+# the one thing a command and the worker have to agree on.
+command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS).pip_install(*BASE_PACKAGES))
 
 # Where the workspace stops dying with the container. A container's filesystem
 # is gone the moment it scales down, so a file the assistant wrote in one
@@ -246,18 +264,21 @@ class ModalRunner:
     from the command is there for `read_file`, in the same turn.
     """
 
+    # Facts about the place, and no commands: a recipe in the brief was run
+    # verbatim as the first command of every turn (thread `30ed956f`,
+    # 2026-09-04), venv or no venv. What is there is said; what to do with it
+    # is the model's.
     where = (
         "in a Linux container of its own, through sh, with no secret in it and "
-        "your workspace mounted. Installed there: python3 with pip and venv, node "
-        "and npm, git, curl, zip, unzip, tar, jq, ffmpeg, imagemagick, poppler "
-        "(pdftotext, pdftoppm), pandoc, and TrueType fonts with Cyrillic under "
-        "/usr/share/fonts/truetype (DejaVu, Liberation) for documents and images. "
-        "The container is disposable: what a "
-        "command installs into it — apt, a pip install into the system python — "
-        "is gone by the next turn, and what it writes in the workspace stays. So "
-        "install Python packages into a venv in the workspace (`python3 -m venv "
-        ".venv && .venv/bin/pip install ...`); once `.venv` exists, `python` and "
-        "`pip` are its own. Node packages land in the workspace on their own. The "
+        "your workspace mounted. Installed there: python3 with pip and venv and "
+        "the packages reportlab, fpdf2, python-docx, openpyxl, pandas, matplotlib, "
+        "Pillow, pypdf, markdown; node and npm; git, curl, zip, unzip, tar, jq, "
+        "ffmpeg, imagemagick, poppler (pdftotext, pdftoppm), pandoc; TrueType fonts "
+        "with Cyrillic under /usr/share/fonts/truetype (DejaVu, Liberation). The "
+        "container is disposable: what a command installs into it is gone by the "
+        "next turn, and what it writes in the workspace stays. A `.venv` directory "
+        "in the workspace, when there is one, is the `python` and `pip` a command "
+        "gets, and it survives; node packages in the workspace survive too. The "
         "result says `new environment` when the container is fresh"
     )
 

@@ -26,7 +26,11 @@ import modal
 APP = "assistant-control"
 FUNCTION = "run_command"
 WORKSPACE = "cold-start-probe"
-COMMAND = "echo probe && python3 --version && node --version && git --version"
+COMMAND = (
+    "echo probe && python3 --version && node --version && git --version && "
+    "python3 -c \"import reportlab, fpdf, docx, openpyxl, pandas, matplotlib, PIL, pypdf, markdown; "
+    "print('packages ok')\""
+)
 
 
 def main() -> int:

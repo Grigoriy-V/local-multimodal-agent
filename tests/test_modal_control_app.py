@@ -374,7 +374,7 @@ def test_a_command_runs_where_no_secret_is() -> None:
 def test_the_command_image_carries_the_base_tools_and_no_browser() -> None:
     text = source()
 
-    assert "command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS))" in text
+    assert "command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS).pip_install(*BASE_PACKAGES))" in text
     for tool in ("nodejs", "npm", "git", "ffmpeg", "imagemagick", "poppler-utils", "pandoc", "jq"):
         assert f'"{tool}"' in text
     # A document made without a Cyrillic font is black squares (P, live, 2026-09-04).
@@ -432,3 +432,17 @@ def test_the_deployed_runner_tells_the_model_what_survives() -> None:
     assert "no secret" in where
     assert "disposable" in where
     assert "venv" in where and "workspace stays" in where
+    # Facts, not a recipe: a command line in the brief was run verbatim as the
+    # first command of every turn (2026-09-04).
+    assert "&&" not in where and "pip install" not in where
+
+
+def test_the_everyday_libraries_are_in_the_image_not_on_the_volume() -> None:
+    """A venv on a Modal Volume pays per file: 55 s for a no-op install, 50 s
+    for a first import, and the venv was the first step of every turn."""
+
+    text = source()
+
+    assert ".pip_install(*BASE_PACKAGES)" in text
+    for package in ("reportlab", "fpdf2", "python-docx", "openpyxl", "pandas", "matplotlib", "pypdf"):
+        assert f'"{package}"' in text
