@@ -882,3 +882,11 @@ a defect: the roadmap's, as "a file the model reads is shown in its own
 kind" (`read_file` returning an image part for an image). Not run yet:
 every run wakes the GPU.
 
+
+
+**Built 2026-09-04, on the human's word:** `read_file` shows an image file
+(png, jpg, jpeg, webp — the types the chat accepts from a person) as an
+image part with one line naming it, instead of decoding it as text; the
+tool's description and the workspace brief say so; R now checks that the
+chart was looked at before it was sent. `tests/test_read_image.py`.
+\n

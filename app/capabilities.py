@@ -137,7 +137,8 @@ def _workspace_lines(tools: Toolbox) -> list[str]:
         "is in that one place, so refer to a file by its plain name — castle.html, "
         "notes/plan.md — and never build a path to it. Nothing outside it exists for "
         "you. If the person writes a full path themselves, use it exactly as they "
-        "wrote it.",
+        "wrote it. Reading a picture file shows it to you as a picture: look at what "
+        "you made before you hand it over.",
     ]
     if {"write_file", "edit_file"} & set(tools.names):
         lines.append(

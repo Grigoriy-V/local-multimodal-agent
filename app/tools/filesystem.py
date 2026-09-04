@@ -23,6 +23,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from app.models import ContentPart
 from app.tools.base import BAD_ARGUMENTS, Tool, ToolError, handover
 from app.tools.paging import page
 
@@ -122,14 +123,39 @@ def _list_files(root: Path, path: str = ".") -> str:
     return listing
 
 
-def _read_file(root: Path, path: str, offset: int = 0) -> str:
+# A file the model reads is shown in its own kind: text as text, a picture
+# as a picture. Until 2026-09-04 a PNG came back as replacement characters,
+# so a chart the model had just made was the one thing it could not look at
+# (the human's ask, after scenario R exposed it). The same types the chat
+# accepts from a person (`app/attachments.py`), by suffix.
+IMAGE_SUFFIXES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+
+def _read_file(root: Path, path: str, offset: int = 0) -> str | list[ContentPart]:
     target = _existing_file(root, path)
+    media_type = IMAGE_SUFFIXES.get(target.suffix.lower())
     try:
-        text = target.read_text(encoding="utf-8", errors="replace")
+        if media_type:
+            data = target.read_bytes()
+        else:
+            text = target.read_text(encoding="utf-8", errors="replace")
     except OSError as error:
         raise ToolError(
             f"path {path!r} could not be read", code=IO, detail=_detail(error)
         ) from error
+    if media_type:
+        return [
+            ContentPart(
+                kind="text",
+                text=f"{target.name}: an image ({media_type}, {len(data)} bytes), shown to you below.",
+            ),
+            ContentPart(kind="image", data=data, media_type=media_type),
+        ]
     return page(text, offset, MAX_CHARS, f"read_file {path!r} again with offset={{offset}}")
 
 
@@ -287,9 +313,10 @@ def filesystem_tools(root: Path) -> list[Tool]:
             name="read_file",
             replay_safe=True,
             description=(
-                "Read a UTF-8 text file inside the allowed workspace root. Accepts either "
-                "an absolute path inside that root or a path relative to it. A long file "
-                "comes in pages: the end of a page says which offset to ask for next."
+                "Read a file inside the allowed workspace root: a text file as text, an "
+                "image (png, jpg, webp) as a picture you can look at. Accepts either an "
+                "absolute path inside that root or a path relative to it. A long text "
+                "file comes in pages: the end of a page says which offset to ask for next."
             ),
             parameters={
                 "type": "object",

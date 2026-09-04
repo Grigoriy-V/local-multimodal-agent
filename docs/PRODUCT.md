@@ -82,7 +82,7 @@ Failures and uncertainty should remain visible to the agent so it can recover or
 
 Evidence used by the agent is not automatically something the user should receive.
 
-`read_document`, `view_pages`, `inspect_page`, `fetch_page`, and `view_web_page` are observation paths. The agent may use them privately while solving a request.
+`read_document`, `view_pages`, `inspect_page`, `fetch_page`, `view_web_page`, and `read_file` on an image are observation paths. The agent may use them privately while solving a request.
 
 `send_file` is the explicit current presentation capability. A UI transports explicitly outbound content; it does not decide which internal screenshots, page renders, or intermediate files should become chat messages.
 

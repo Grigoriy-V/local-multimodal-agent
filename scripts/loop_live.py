@@ -705,10 +705,9 @@ async def main() -> int:
         if wanted("R"):
             # R — data into a picture. The second shape work with commands
             # takes: a file that is there, summed with whatever the model
-            # runs, and a chart the person asked for. The checks are the
-            # files and the number, not the library. (The model has no tool
-            # yet to look at a PNG it made — recorded 2026-09-04 — so no
-            # check asks for a look here.)
+            # runs, and a chart the person asked for, looked at and handed
+            # over. The checks are the files, the look and the number, not
+            # the library.
             (root / "sales.csv").write_text(
                 "region,amount\nnorth,10\nsouth,25\nnorth,20\neast,15\nsouth,20\n",
                 encoding="utf-8",
@@ -717,14 +716,16 @@ async def main() -> int:
                 "chat-r",
                 "In my workspace there is sales.csv with the columns region and amount. "
                 "Using run_command, compute the total amount per region, save a bar "
-                "chart of those totals as chart.png in my workspace, send me the chart, "
-                "and tell me which region has the largest total and what it is.",
+                "chart of those totals as chart.png in my workspace, look at the chart "
+                "to check it, send it to me, and tell me which region has the largest "
+                "total and what it is.",
             )
             failed += r.report(
                 "R data turned into a picture",
                 {
                     "run_command ran": "run_command" in r.tools,
                     "chart.png exists": (root / "chart.png").is_file(),
+                    "the chart was looked at": "chart.png" in r.read_from("read_file"),
                     "send_file ran": "send_file" in r.tools,
                     "the answer names the largest total": "45" in r.answer,
                 },
