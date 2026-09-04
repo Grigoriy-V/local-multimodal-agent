@@ -53,7 +53,15 @@ Rules that keep the file honest:
 
 ### ISS-0038 — a package is installed into the machine's own Python rather than the workspace
 
-- **Status:** open
+- **Status:** fixed, 2026-09-04, on the human's rule that this must not be
+  possible — structurally, not by a sentence: the command environment makes
+  the workspace's own virtual environment (made on first use) the `python`
+  and `pip` on `PATH`, `PIP_REQUIRE_VIRTUALENV` makes pip refuse any other
+  interpreter, and `npm_config_prefix` sends a global npm install into the
+  workspace (`command_environment`, `ensure_venv` in `app/tools/shell.py`).
+  P re-run the same day: `pip install reportlab` landed in the workspace's
+  `.venv` (cp312 wheels, the agent's own interpreter's version, not the
+  machine's 3.14). Not yet deployed (5a)
 - **Seen:** 2026-09-04, `scripts/loop_live.py` P, run `live-140`, the first
   live turn with `run_command`: asked for a PDF, the model ran
   `pip install reportlab` as its first command, and it landed in

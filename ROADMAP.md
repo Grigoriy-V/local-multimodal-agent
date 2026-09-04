@@ -194,8 +194,11 @@ What exists. How it was reached, and every number, is in the linked report.
      modes and `/mode`; the brief says where commands run. Offline: 17
      tests and one adapter test. Live the same day: O (a script written and
      run), P (the PDF made, checked and sent — the 4.3 acceptance), Q (a
-     command killed at its timeout) passed. One observation, ISS-0038: the
-     first install went to the machine's Python, not the workspace.
+     command killed at its timeout) passed. ISS-0038, the first install
+     going to the machine's Python, fixed the same day on the human's rule:
+     the workspace's own venv is the `python` and `pip` a command sees,
+     and pip refuses any other; P re-run passed with the install in
+     `.venv`.
      `reports/2026-09-04_v2_isolated_execution_review.md` §9.
    - **5a Deployed (Modal) — next.** A `run_command` Function beside the renderer:
      same image plus base tools, the workspaces Volume, no secret, 180 s

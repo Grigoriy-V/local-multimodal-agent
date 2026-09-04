@@ -94,7 +94,7 @@ def test_the_environment_is_what_a_shell_needs_and_home_is_the_workspace(workspa
         workspace, {"PATH": "/bin", "TELEGRAM_TOKEN": "x", "AGENT_DATABASE_URL": "y", "SYSTEMROOT": "C:\\W"}
     )
 
-    assert env["PATH"] == "/bin" and env["SYSTEMROOT"] == "C:\\W"
+    assert env["PATH"].endswith("/bin") and env["SYSTEMROOT"] == "C:\\W"
     assert "TELEGRAM_TOKEN" not in env and "AGENT_DATABASE_URL" not in env
     assert env["HOME"] == str(workspace) == env["USERPROFILE"]
 
@@ -286,3 +286,20 @@ def test_the_agent_reads_the_mode_when_it_builds_a_toolbox(workspace: Path) -> N
         assert agent.toolbox("t").requires_approval("write_file")
         assert agent.toolbox("t").requires_approval("run_command")
         assert not agent.toolbox("t").requires_approval("list_files")
+
+
+def test_python_and_pip_are_the_workspaces_own_environment(workspace: Path) -> None:
+    """The human's rule, 2026-09-04: an install can never reach the machine's Python."""
+
+    from app.tools.shell import VENV, venv_python
+
+    finished = run(LocalRunner().run("python -c \"import sys; print(sys.prefix)\"", workspace, 120))
+
+    assert finished.exit_code == 0, finished.output
+    assert Path(finished.output.strip()).resolve() == (workspace / VENV).resolve()
+    assert venv_python(workspace).exists()
+
+    env = command_environment(workspace, {"PATH": "/usr/bin"})
+    assert env["PATH"].split(os.pathsep)[0] == str(workspace / VENV / ("Scripts" if sys.platform == "win32" else "bin"))
+    assert env["PIP_REQUIRE_VIRTUALENV"] == "1"
+    assert env["npm_config_prefix"] == str(workspace / ".npm-global")

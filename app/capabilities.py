@@ -163,12 +163,11 @@ def _shell_lines(tools: Toolbox, where: str | None) -> list[str]:
     return [
         f"- run_command runs a shell command {place}, in your workspace, and gives "
         "you the exit code and the output. Use it to run, test and check what you "
-        "make, and to install what that needs. The environment between turns may be "
-        "fresh, but the workspace is kept: install Python packages into a virtual "
-        "environment inside the workspace (python -m venv .venv, then that venv's "
-        "pip and python), and node packages in the workspace, so they are there next "
-        "time. A command cannot ask you anything: give it its answers on the command "
-        "line.",
+        "make, and to install what that needs. `python` and `pip` there are the "
+        "workspace's own virtual environment, so `pip install` lands in the "
+        "workspace and nowhere else; node packages go in the workspace too. That is "
+        "what survives between turns. A command cannot ask you anything: give it its "
+        "answers on the command line.",
     ]
 
 

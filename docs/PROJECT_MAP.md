@@ -265,7 +265,9 @@ the registry owns and the profile chooses (`app/tools/shell.py`). Locally it
 is a process in the person's workspace with the agent's own environment
 withheld; deployed it is a container beside the renderer with no secret
 (5a). What a command installs lives in the workspace, which is what survives
-between turns in both profiles. A conversation runs in `full` mode, where
+between turns in both profiles — by construction: the workspace's own virtual
+environment is the `python` and `pip` on a command's `PATH`, pip refuses any
+other interpreter, and a global npm install is redirected there too. A conversation runs in `full` mode, where
 everything inside the workspace is autonomous, or `careful`, where the tools
 that change it ask first (`app/agent/mode.py`). `DECISIONS.md` 2026-09-04.
 

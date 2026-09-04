@@ -10,8 +10,14 @@ model reads and the codes are the same in both.
 What a command gets: the workspace as its working directory and its home, and
 an environment reduced to what a shell needs. Nothing from the process that
 started the agent — no `.env` value, no token — is passed on. What survives a
-command is whatever it wrote into the workspace; that is where a virtual
-environment goes, and the brief says so.
+command is whatever it wrote into the workspace, so the environment makes the
+workspace the place things land rather than asking the model to remember it:
+`python` and `pip` are the workspace's own virtual environment (made on first
+use, first on `PATH`), `pip` refuses to install anywhere else
+(`PIP_REQUIRE_VIRTUALENV`), and a global `npm` install goes to the workspace
+too (`npm_config_prefix`). On 2026-09-04 the first live install went into the
+person's own Python against the brief's sentence; the human's rule is that
+this must not be possible, and an environment is what makes it impossible.
 
 A non-zero exit is a result, not a failure (`docs/v2_tool_system.md`, "Failure
 is not the same as an unwanted result"). The failures are the runner's own: the
@@ -51,6 +57,33 @@ TAIL_CHARS = 4_000
 # start on Windows; `TEMP`/`TMP` so tools that write temporary files work.
 _PASSED = ("PATH", "SYSTEMROOT", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL")
 
+# The workspace's own Python and node homes. Relative to the workspace, so the
+# same layout is on a person's disk and on the deployed Volume.
+VENV = ".venv"
+NPM_HOME = ".npm-global"
+
+
+def venv_bin(workspace: Path) -> Path:
+    return workspace / VENV / ("Scripts" if sys.platform == "win32" else "bin")
+
+
+def venv_python(workspace: Path) -> Path:
+    return venv_bin(workspace) / ("python.exe" if sys.platform == "win32" else "python")
+
+
+def ensure_venv(workspace: Path) -> bool:
+    """The workspace's virtual environment, made on first use. Returns whether it was made now."""
+
+    if venv_python(workspace).exists():
+        return False
+    subprocess.run(
+        [sys.executable, "-m", "venv", str(workspace / VENV)],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    return True
+
 
 @dataclass(frozen=True)
 class Finished:
@@ -81,6 +114,16 @@ def command_environment(workspace: Path, source: dict[str, str] | None = None) -
     env = {name: source[name] for name in _PASSED if name in source}
     env["HOME"] = str(workspace)
     env["USERPROFILE"] = str(workspace)
+    # The workspace's Python first, so `python` and `pip` are its own; pip
+    # refuses any interpreter that is not a virtual environment, so the
+    # machine's Python cannot be installed into from here at all.
+    npm_bin = workspace / NPM_HOME / ("" if sys.platform == "win32" else "bin")
+    env["PATH"] = os.pathsep.join(
+        [str(venv_bin(workspace)), str(npm_bin), *filter(None, [env.get("PATH", "")])]
+    )
+    env["VIRTUAL_ENV"] = str(workspace / VENV)
+    env["PIP_REQUIRE_VIRTUALENV"] = "1"
+    env["npm_config_prefix"] = str(workspace / NPM_HOME)
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -135,6 +178,13 @@ class LocalRunner:
 
     async def run(self, command: str, cwd: Path, timeout: float) -> Finished:
         started = time.monotonic()
+        try:
+            await asyncio.to_thread(ensure_venv, cwd)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ToolError(
+                f"the workspace's Python environment could not be made: {error}",
+                code=COMMAND_NOT_STARTED,
+            ) from error
         try:
             process = subprocess.Popen(  # noqa: S602 - the command is the point
                 command,

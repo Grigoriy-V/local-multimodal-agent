@@ -250,16 +250,19 @@ Built the same day on the human's start signal, in the tree, not deployed
   `read_document` on the PDF, `send_file`, 13.2 s, ~25 s derived) — the 4.3
   acceptance that waited for generic execution, met without a PDF-specific
   workflow; **Q** passed (`shell.timeout` at 3 s, the model said so, 5.1 s).
-- One observation from P, recorded as ISS-0038: the install went to the
+- One observation from P, ISS-0038: the first install went to the
   machine's global Python, not a workspace venv, against the brief's
-  sentence in the same prompt. Two levers, for the human to choose between
-  or defer: measure it (a sentence is the instructions lever, and one turn
-  is not a rate), or make it structural the way `HOME` already is — an
-  environment in which an install lands in the workspace (`PYTHONUSERBASE`
-  and `PIP_USER`, `npm_config_prefix`), which is a general property of
-  the runner rather than a rule about pip, but has a known snag:
-  `PIP_USER` breaks `pip` inside a venv, so it would need care or a
-  different mechanism. Not built.
+  sentence in the same prompt. The human's rule, the same day: this must
+  not be possible; the agent works in the project, and global is the
+  person's own explicit act. Made structural, the way `HOME` already was:
+  the runner makes the workspace's virtual environment on first use and
+  puts it first on `PATH`, so `python` and `pip` are the workspace's;
+  `PIP_REQUIRE_VIRTUALENV=1` makes pip refuse every other interpreter;
+  `npm_config_prefix` sends a global npm install into the workspace. No
+  rule about pip in the prompt and nothing that reads the command. P
+  re-run: the install landed in `.venv` (30 s with the venv creation and
+  a full download, ~35 s derived GPU). Deployed (5a) the same layout on
+  the Volume is what makes installs survive the container.
 - Not in 5b, by the approved shape: background processes, the deployed
   runner, the Chainlit `/mode` (Chainlit has no `/plan` either).
 

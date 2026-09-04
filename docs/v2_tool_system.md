@@ -288,9 +288,12 @@ a `Runner` with one method, chosen by the profile and owned by the
 the workspace, with the environment reduced to what a shell needs, `HOME` in
 the workspace, and nothing of the agent's own environment passed on; the
 deployed runner (5a) is a container beside the renderer that holds no secret.
-The brief says where commands run, in the runner's own words, and that what
-is installed should go into the workspace because the environment between
-turns may be fresh. `DECISIONS.md` 2026-09-04.
+The environment makes the workspace the place an install lands rather than
+asking the model to remember it: the workspace's `.venv` (made on first use)
+is first on `PATH`, `PIP_REQUIRE_VIRTUALENV` makes pip refuse any other
+interpreter, `npm_config_prefix` points global npm installs into the
+workspace (ISS-0038). The brief says where commands run, in the runner's own
+words, and that this is what survives between turns. `DECISIONS.md` 2026-09-04.
 
 **Two modes.** A tool declares `mutates` when it changes the workspace
 (`write_file`, `edit_file`, `run_command`). In `full`, the default, that
