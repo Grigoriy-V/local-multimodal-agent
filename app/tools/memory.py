@@ -70,6 +70,7 @@ def memory_tools(
         ),
         Tool(
             name="search_memory",
+            replay_safe=True,
             description="Search previously saved facts by keyword.",
             parameters={
                 "type": "object",

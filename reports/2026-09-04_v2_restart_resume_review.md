@@ -226,3 +226,35 @@ preview of 4.3.
 No implementation, no deploy, no GPU run, no worker. The next gate is the
 human's word on §4.1 A, §4.2 A and the suite shape, and then a separate
 start signal for the implementation.
+
+## 7. Built, 2026-09-04
+
+After the human's "делай" on the recommended shape:
+
+- `Tool.replay_safe`, set on the eleven reading tools; the `interrupted`
+  failure code and `interrupted()` in `app/agent/graph.py`;
+  `already_stored()` makes `persist` idempotent.
+- `Agent.unfinished(thread_id)` reads `aget_state().next` with no interrupt
+  pending; `Agent.resume_interrupted_events` answers a dead `tools` step per
+  call (`aupdate_state(as_node="tools")`), records `turn_resumed`
+  (`node`, `unknown`, `replayed`) and continues the graph with `None`.
+- Telegram: the adapter takes a turn up when the update's text is the
+  message the turn began with (`same_request`), starts afresh otherwise;
+  `give_up` tells the person. The worker claims with `LEASE_SECONDS` 590,
+  gives up at the fourth claim (`update_abandoned`), and the Modal function
+  has `retries=1` beside `WORKER_TIMEOUT_SECONDS = 600`.
+- Tests: `tests/test_turn_resume.py` (killed inside `tools`: the read is
+  replayed, the write and the dead call are `interrupted`, the person's
+  later edit of the file stands, the turn is stored once; killed between
+  steps; killed inside `persist` after the store was written; nothing to
+  take up; the `replay_safe` declarations), three adapter tests, one worker
+  test. Offline suite: 1026 passed, 27 skipped.
+- `scripts/loop_live.py`: **K** (a fold between two steps of a turn, on a
+  9k budget over seeded history) and **J** (the turn killed once the model
+  asked for its first tool, taken up by a fresh agent on the same
+  checkpoints); every scenario line now carries derived GPU-active seconds
+  and cost, and the run ends with the item 3 baseline for comparison.
+
+Not built, as §4: the orphaned preview of the dead attempt; whether Modal
+retries a timeout is confirmed on the first real kill. Live J and K, the
+deploy and the after-deploy run are the next gates.

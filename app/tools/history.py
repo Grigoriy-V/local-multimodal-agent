@@ -175,6 +175,7 @@ def history_tools(
     return [
         Tool(
             name="search_history",
+            replay_safe=True,
             description=(
                 "Find what was actually said earlier in this conversation, including "
                 "before the summary: the exact wording, a filename, a number, an error "
@@ -200,6 +201,7 @@ def history_tools(
         ),
         Tool(
             name="read_history",
+            replay_safe=True,
             description=(
                 "Read stored messages of this conversation as they were said, by position "
                 "(from search_history, or from a shortened result's note). A long message "

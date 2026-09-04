@@ -211,6 +211,18 @@ in-flight turn                 -> conversation checkpointer
 
 Locally checkpoints use SQLite. Deployed checkpoints use PostgreSQL so a later CPU worker can resume work started by another container.
 
+A turn a worker died in is taken up, not restarted (4.7, 2026-09-04).
+`Agent.unfinished` reads the checkpoint for a next node with nobody asking a
+question; `Agent.resume_interrupted_events` continues it. A death inside the
+`tools` node is the one case with something unknown: every call of that step
+gets a result before the graph moves on — a `replay_safe` tool (reading) is
+run now, anything else is answered `interrupted`, "whether it ran is unknown",
+and the model decides what to check. The harness never runs a side effect
+twice on its own. `persist` is idempotent, so a death after the store was
+written does not store the turn twice. The Telegram adapter takes a turn up
+only when the update it holds is the message that turn began with; any other
+message starts afresh.
+
 ## Capability and tool system
 
 ### Tool primitive
@@ -429,6 +441,8 @@ return HTTP 200
 The model wake is requested in parallel with durable admission for updates that need the model.
 
 `ui/telegram/inbox.py` owns the PostgreSQL leased inbox. It deduplicates by Telegram `update_id` and leases by conversation: a claim takes the oldest unfinished update of the conversation that woke it, and refuses while another of that conversation's updates is still running. A per-conversation advisory lock makes the refusal hold across containers. The conversation is named by the webhook when the row is written; a row queued before the column existed is still claimed on its own.
+
+A lease is shorter than the worker container's life (`LEASE_SECONDS` 590 against a 600 s timeout), so a killed container's row is claimable the moment the platform re-invokes the same update or the next message arrives. An update claimed three times and never finished is given up on at the fourth claim, with a message to the person; the count is read at the claim because a dead worker cannot return its update to the queue itself.
 
 The update worker keeps its conversation until nothing is left, so a burst is answered in order by one warm container. Past a drain window it hands the rest to a fresh worker rather than risk its own timeout.
 

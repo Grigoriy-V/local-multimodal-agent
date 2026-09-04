@@ -1113,3 +1113,40 @@ Supersedes / Superseded by
 Builds on 2026-08-30 "Stored history is canonical; what the model sees is a
 projection" and 2026-09-03 "The model-visible surface is shortened by age".
 None superseded.
+
+## 2026-09-04 — A turn a worker died in is taken up, and what may run again is the tool's to say
+
+Decision
+
+A worker that dies mid-turn leaves the turn in the checkpoint, and the next
+worker to claim that update continues it from there rather than starting it
+again. The one thing a death can leave unknown is whether the tools of the
+step it died in ran; each such call is answered before the graph moves on —
+run again if the tool declared itself `replay_safe` (reading), otherwise
+answered `interrupted`, "whether it ran is unknown", for the model to check.
+The harness never repeats a side effect on its own and never drops the work
+that was done. The inbox lease is shorter than the worker container's life,
+the same update is re-invoked once after a kill, and an update claimed three
+times without finishing is given up on and said so.
+
+Why
+
+The 2026-09-04 review found that a killed turn was silently lost until the
+person's next message and then replayed from the start with every tool run
+twice, files sent twice and facts saved twice. Every reference that survives
+a restart does the same two things: make "a turn is running" durable with the
+message, and on recovery tell the model per call what is known (OpenClaw's
+synthetic interruption message and restart-safe tools, DeepSeek's
+`TOOL_OUTCOME_UNKNOWN` with "retry only if read-only or idempotent"). The
+replay decision is a property of the tool, like `requires_approval`, because
+nobody can judge it at recovery time. Three attempts is OpenClaw's budget and
+matches `MAX_ATTEMPTS`. `reports/2026-09-04_v2_restart_resume_review.md`.
+
+Consequences
+
+`Agent.unfinished` and `Agent.resume_interrupted_events` in
+`app/agent/runtime.py`; `Tool.replay_safe`; the `interrupted` failure code;
+`persist` idempotent; `LEASE_SECONDS` in `ui/telegram/webhook.py` derived from
+the Modal timeout and kept below it; `retries=1` on the worker function.
+Not decided here: clearing the dead attempt's status and preview messages in
+the chat (their ids died with the process), and tool deadlines (ISS-0033).

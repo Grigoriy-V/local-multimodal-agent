@@ -667,3 +667,30 @@ async def test_a_settled_status_button_does_not_spend_a_gpu_wake() -> None:
         assert warm.calls == 0, f"{data} spent a GPU wake"
         # Still delivered, so the adapter can acknowledge the tap.
         assert spawned == [12]
+
+
+async def test_an_update_claimed_three_times_and_never_finished_is_given_up_on() -> None:
+    """A worker that dies cannot return its update to the queue, so the count
+    of claims is read at the next claim: the fourth is not another attempt,
+    it is the moment to stop and say so (roadmap 4.7; OpenClaw's budget of
+    three)."""
+
+    inbox = FakeInbox()
+    await queued(inbox, 5, 7)
+    inbox.attempts[5] = MAX_ATTEMPTS  # claimed three times; three workers died
+
+    class Remembering(Handler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.given_up: list[tuple[int, int]] = []
+
+        async def give_up(self, update, attempts: int) -> None:
+            self.given_up.append((update["update_id"], attempts))
+
+    handler = Remembering()
+    assert await TelegramUpdateWorker(inbox, handler).run(5) is True
+
+    assert update_ids(handler) == [7], "the dead update is not tried a fourth time"
+    assert handler.given_up == [(5, 3)]
+    assert [update_id for update_id, _ in inbox.abandoned] == [5]
+    assert inbox.state[5] == "done" and inbox.state[7] == "done"

@@ -2303,3 +2303,65 @@ async def test_a_preview_that_cannot_be_sent_stands_aside(
 
     # Tried once, then stopped trying: the turn is answered the ordinary way.
     assert attempts == ["sendMessage"]
+
+
+# --- a turn a dead worker left is taken up by the same update ---------------------------
+#
+# Roadmap 4.7. The queue hands the update a dead worker was answering back
+# first; the adapter must take the checkpointed turn up rather than start it
+# again with every tool run twice, and must start afresh for any other message.
+
+
+async def test_the_same_message_again_takes_the_interrupted_turn_up(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    dying = ScriptedBackend(
+        calls("write_file", path="page.html", content="<p>hi</p>"),
+        RuntimeError("the worker died"),
+    )
+    first = build(telegram, settings, tmp_path, dying)
+    await first.handle_update(text_update("make a page", update_id=1))
+    assert any("That request failed" in text for text in telegram.sent)
+
+    later = ScriptedBackend(says("Done."), default=says("summary"))
+    second = build(telegram, settings, tmp_path, later)
+    await second.handle_update(text_update("make a page", update_id=1))
+
+    assert "Done." in telegram.sent
+    request = later.requests[0]
+    assert [m.role for m in request][-3:] == ["user", "assistant", "tool"], "continued, not restarted"
+    assert request[-2].tool_calls[0].name == "write_file"
+    store = SqliteStore(str(tmp_path / "memory.sqlite3"))
+    thread = store.active_thread(canonical_user_id(ALLOWED))
+    stored = store.messages(thread)
+    assert [m.role for m in stored] == ["user", "assistant", "tool", "assistant"]
+    assert sum(1 for m in stored if m.role == "user") == 1
+
+
+async def test_a_different_message_starts_afresh_after_an_interrupted_turn(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    dying = ScriptedBackend(
+        calls("write_file", path="page.html", content="<p>hi</p>"),
+        RuntimeError("the worker died"),
+    )
+    first = build(telegram, settings, tmp_path, dying)
+    await first.handle_update(text_update("make a page", update_id=1))
+
+    later = ScriptedBackend(says("Fresh."), default=says("summary"))
+    second = build(telegram, settings, tmp_path, later)
+    await second.handle_update(text_update("something else", update_id=2))
+
+    assert "Fresh." in telegram.sent
+    assert not any(m.role == "tool" for m in later.requests[0])
+    store = SqliteStore(str(tmp_path / "memory.sqlite3"))
+    stored = store.messages(store.active_thread(canonical_user_id(ALLOWED)))
+    assert [prompt_text([m]) for m in stored] == ["something else", "Fresh."]
+
+
+async def test_giving_up_is_said_to_the_person(
+    telegram: FakeTelegram, settings: TelegramSettings, tmp_path: Path
+) -> None:
+    adapter = build(telegram, settings, tmp_path, ScriptedBackend())
+    await adapter.give_up(text_update("make a page"), 3)
+    assert any("interrupted 3 times" in text for text in telegram.sent)

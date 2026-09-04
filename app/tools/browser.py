@@ -197,6 +197,7 @@ def browser_tools(
     return [
         Tool(
             name="inspect_page",
+            replay_safe=True,
             description=(
                 "Open a self-contained local HTML file inside the allowed workspace in a "
                 "real browser. Returns the page structure with a ref on every interactive "

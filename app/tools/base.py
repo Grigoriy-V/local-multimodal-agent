@@ -26,6 +26,7 @@ BAD_ARGUMENTS = "bad_arguments"  # the arguments failed the schema or were unrea
 OUTPUT_CUT = "output_cut"  # the model's answer hit its output limit inside the call
 DECLINED = "declined"  # the person answered no to an approval
 NOT_RUN = "not_run"  # the loop halted the call: budget, stop, or a repeating failure
+INTERRUPTED = "interrupted"  # the worker died while the call ran; whether it ran is unknown
 TIMEOUT = "timeout"  # the executor's deadline passed
 INTERNAL = "internal"  # an exception the tool did not expect; traceback in the log
 FAILED = "failed"  # a ToolError that named no code
@@ -88,6 +89,13 @@ class Tool:
     budget, which is only read at step boundaries. A synchronous tool with a
     timeout runs in a worker thread so the deadline can pass without it; one
     without a timeout runs on the loop as before.
+
+    `replay_safe` says the call may simply be run again when nobody knows
+    whether it ran: a worker died while a step's tools were running, and a
+    later worker takes the turn up. Reading is replay-safe; anything that
+    changes, sends or remembers is not, and the model is told the outcome is
+    unknown instead (the `interrupted` result). Declared here, once, like
+    `requires_approval`, rather than guessed at the moment of recovery.
     """
 
     name: str
@@ -96,6 +104,7 @@ class Tool:
     run: Callable[..., ToolReturn | Awaitable[ToolReturn]]
     requires_approval: bool = False
     timeout_seconds: float | None = None
+    replay_safe: bool = False
     # A tool that only hands something already made to the person. It costs no
     # model time and its result is the outcome of the turn, so a turn that has
     # spent its budget still runs it: the ceiling bounds work, not delivery.

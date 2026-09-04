@@ -48,6 +48,13 @@ DRAIN_SECONDS = 240.0
 # callback query failed the turn, and would have blocked every message after it.
 MAX_ATTEMPTS = 3
 
+# How long a claim holds a conversation. Equal to the worker container's own
+# life less a margin, never longer: a container killed at its timeout leaves
+# a lease that expires with it, so the platform's re-invocation of the same
+# update — or the next message — can claim it and take the turn up
+# (ISS-0034: the old 900 s outlived a 600 s kill by five minutes).
+LEASE_SECONDS = 590
+
 
 @dataclass(frozen=True)
 class WebhookResponse:
@@ -193,6 +200,7 @@ class TelegramUpdateWorker:
         *,
         spawn: Callable[[int], Awaitable[None]] | None = None,
         drain_seconds: float = DRAIN_SECONDS,
+        lease_seconds: int = LEASE_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.inbox = inbox
@@ -200,6 +208,7 @@ class TelegramUpdateWorker:
         self.telemetry = telemetry or Telemetry(None)
         self.spawn = spawn
         self.drain_seconds = drain_seconds
+        self.lease_seconds = lease_seconds
         self.clock = clock
 
     def _open_trace(self, job: InboxJob) -> TurnTrace:
@@ -221,12 +230,18 @@ class TelegramUpdateWorker:
         return self.telemetry.start(run, offset_ms=job.queued_ms)
 
     async def run(self, update_id: int) -> bool:
-        job = await self.inbox.claim(update_id)
+        job = await self.inbox.claim(update_id, self.lease_seconds)
         if job is None:
             return False
         deadline = self.clock() + self.drain_seconds
         while True:
-            await self._answer(job)
+            if job.attempts > MAX_ATTEMPTS:
+                # Claimed three times and never finished: a worker that dies
+                # cannot return it to the queue itself, so the count is read
+                # here. Given up on, and said so, rather than claimed for ever.
+                await self._give_up(job)
+            else:
+                await self._answer(job)
             if job.control:
                 # A control worker exists to answer beside a conversation, not
                 # to take it over. Draining from here would put this container
@@ -242,10 +257,27 @@ class TelegramUpdateWorker:
                 # reads the key from the row and takes the oldest unfinished one.
                 await self._hand_off(job)
                 return True
-            following = await self.inbox.claim_next(job.conversation_key)
+            following = await self.inbox.claim_next(job.conversation_key, self.lease_seconds)
             if following is None:
                 return True
             job = following
+
+    async def _give_up(self, job: InboxJob) -> None:
+        log_event(
+            TraceEvent(
+                run_id=job.run_id,
+                seq=0,
+                type="update_abandoned",
+                data={"update_id": job.update_id, "attempts": job.attempts},
+            )
+        )
+        await self.inbox.abandon(job, f"interrupted {job.attempts - 1} times")
+        give_up = getattr(self.handler, "give_up", None)
+        if give_up is not None:
+            try:
+                await give_up(job.payload, job.attempts - 1)
+            except Exception:  # noqa: BLE001 - the queue has moved on either way
+                pass
 
     async def _answer(self, job: InboxJob) -> None:
         trace = self._open_trace(job)

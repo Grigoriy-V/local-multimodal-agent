@@ -48,7 +48,15 @@ from app.models import (
     Usage,
 )
 from app.telemetry import NO_TRACE, Telemetry, TurnTrace
-from app.tools import DECLINED, NOT_RUN, ToolExecutor, Toolbox, refusal_message, tool_failed
+from app.tools import (
+    DECLINED,
+    INTERRUPTED,
+    NOT_RUN,
+    ToolExecutor,
+    Toolbox,
+    refusal_message,
+    tool_failed,
+)
 
 # The key a text delta travels under on LangGraph's custom stream channel. The
 # channel carries anything, so the runtime and the graph have to agree on one
@@ -268,6 +276,49 @@ def succeeded_before(messages: Sequence[Message], call: ToolCall) -> int:
         and earlier.name == call.name
         and earlier.arguments == call.arguments
         and earlier.raw_arguments == call.raw_arguments
+    )
+
+
+INTERRUPTED_REASON = (
+    "the worker was restarted while this call was running, so whether it ran "
+    "is unknown and nothing was recorded; check the workspace or the "
+    "conversation before doing it again"
+)
+
+
+def interrupted(call: ToolCall) -> Message:
+    """The result of a call a dead worker left without one.
+
+    The references' shape (DeepSeek's `TOOL_OUTCOME_UNKNOWN`): not a failure
+    and not a success, a fact about what the harness knows. The model decides
+    what to check; the harness never runs a side effect twice on its own.
+    """
+
+    return refusal_message(call, ToolFailure(code=INTERRUPTED, message=INTERRUPTED_REASON))
+
+
+def already_stored(store: ConversationStore, thread_id: str, messages: Sequence[Message]) -> bool:
+    """Whether the thread's tail is already exactly these messages.
+
+    `persist` runs again when a worker died inside it after the store was
+    written and before the checkpoint was; appending a second time would give
+    the person their own message twice. Compared by role, text and call ids,
+    which is what a message is once it is stored.
+    """
+
+    if not messages:
+        return True
+    stored = store.messages(thread_id)
+    if len(stored) < len(messages):
+        return False
+    tail = stored[-len(messages) :]
+    return all(
+        kept.role == fresh.role
+        and kept.tool_call_id == fresh.tool_call_id
+        and [call.id for call in kept.tool_calls] == [call.id for call in fresh.tool_calls]
+        and "".join(part.text or "" for part in kept.content)
+        == "".join(part.text or "" for part in fresh.content)
+        for kept, fresh in zip(tail, messages, strict=True)
     )
 
 
@@ -890,7 +941,8 @@ def build_agent(
     async def persist(state: AgentState, config: RunnableConfig) -> None:
         trace = trace_of(config)
         with trace.step("persist"):
-            store.append(state.thread_id, state.messages, user_id)
+            if not already_stored(store, state.thread_id, state.messages):
+                store.append(state.thread_id, state.messages, user_id)
         try:
             await fold_older_messages(
                 backend, store, state.thread_id, policy, state.usage.input_tokens

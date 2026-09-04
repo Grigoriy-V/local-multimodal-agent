@@ -796,8 +796,37 @@ class TelegramAdapter:
         # model request per message, before the answer the person was waiting
         # for, is now this line.
         trace.route("loop")
+        # The queue hands a conversation's oldest unfinished update over first,
+        # so the update a dead worker was answering comes back here before any
+        # later one. If the checkpoint holds a turn that began with this very
+        # message, it is taken up where it stopped rather than started again
+        # with every tool run twice. A different message means the earlier
+        # turn was given up on; it starts afresh, as `extend` makes it.
+        left = await agent.unfinished(thread_id)
         await self._answer(
-            agent, incoming.chat_id, thread_id, message, incoming.update_id, trace
+            agent,
+            incoming.chat_id,
+            thread_id,
+            message,
+            incoming.update_id,
+            trace,
+            resume=left is not None and same_request(left.request, message),
+        )
+
+    async def give_up(self, update: dict[str, Any], attempts: int) -> None:
+        """Say that a request was interrupted too often to be finished.
+
+        Called by the worker when the queue stops claiming an update, so the
+        person learns why nothing came rather than waiting on it.
+        """
+
+        incoming = read_update(update)
+        if incoming is None:
+            return
+        await self.client.send_message(
+            incoming.chat_id,
+            f"This request was interrupted {attempts} times and could not be "
+            "finished. Send it again if you still want it.",
         )
 
     # --- choosing a conversation ---------------------------------------------
@@ -1042,13 +1071,19 @@ class TelegramAdapter:
         message: Message,
         sequence: int = 0,
         trace: TurnTrace = NO_TRACE,
+        resume: bool = False,
     ) -> None:
         activity = ToolActivity(self.client, chat_id)
         preview = AnswerPreview(self.client, chat_id)
         delivered: set[str] = set()
         _, covered = agent.store.summary(thread_id)
+        events = (
+            agent.resume_interrupted_events(thread_id, trace)
+            if resume
+            else agent.events(thread_id, message, trace, sequence)
+        )
         try:
-            async for event in agent.events(thread_id, message, trace, sequence):
+            async for event in events:
                 if isinstance(event, AssistantDelta):
                     if await preview.add(event.text):
                         # There is something to read now, so the status has
@@ -1314,3 +1349,18 @@ class TelegramAdapter:
         for agent in self._agents.values():
             await agent.aclose()
         self._agents.clear()
+
+
+def same_request(left: Message | None, incoming: Message) -> bool:
+    """Whether the message an update carries is the one a turn began with.
+
+    By text: an attachment is admitted under a fresh name each time, and the
+    queue's order already makes the oldest unfinished update the one that
+    comes back, so the text is the tie-break, not the proof.
+    """
+
+    if left is None:
+        return False
+    return "".join(part.text or "" for part in left.content) == "".join(
+        part.text or "" for part in incoming.content
+    )

@@ -111,6 +111,7 @@ def web_search_tools(root: Path, settings: WebSettings | None = None) -> list[To
     return [
         Tool(
             name="search_web",
+            replay_safe=True,
             description=(
                 "Search the internet for pages about something, when you do not already "
                 "have an address. Returns ranked titles, URLs and short summaries written "
@@ -146,6 +147,7 @@ def web_fetch_tools(root: Path, settings: WebSettings | None = None) -> list[Too
     return [
         Tool(
             name="fetch_page",
+            replay_safe=True,
             description=(
                 "Read one public web page as text over a direct HTTP request. Use this "
                 "whenever you need what a page says: it is the cheapest way to read the web "
@@ -186,6 +188,7 @@ def web_view_tools(root: Path, settings: WebSettings | None = None) -> list[Tool
     return [
         Tool(
             name="view_web_page",
+            replay_safe=True,
             description=(
                 "Open a public web page in a real browser and look at it: returns the "
                 "rendered text, a screenshot for your own inspection, and the workspace path "

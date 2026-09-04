@@ -50,7 +50,14 @@ class Tool:
     run: Callable[..., ToolReturn]      # str | Sequence[ContentPart], sync or async
     requires_approval: bool = False     # was `destructive`; the boundary crossed, not bytes changed
     timeout_seconds: float | None = None
+    replay_safe: bool = False           # 4.7: may be run again when nobody knows whether it ran
 ```
+
+`replay_safe` (2026-09-04) is read only when a worker died while a step's
+tools were running: a reading tool is run again by the next worker, anything
+else is answered `interrupted` and the model decides. The reading tools set
+it; `write_file`, `edit_file`, `send_file`, `remember_fact` and the todo tool
+do not.
 
 A tool **returns content on success and raises `ToolError` on failure**. It
 never builds a failure by hand and never returns one as text. What it returns

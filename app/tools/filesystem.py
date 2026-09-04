@@ -262,6 +262,7 @@ def filesystem_tools(root: Path) -> list[Tool]:
     return [
         Tool(
             name="list_files",
+            replay_safe=True,
             description=(
                 "List files and directories inside the allowed workspace root. Accepts "
                 "either an absolute path inside that root or a path relative to it."
@@ -284,6 +285,7 @@ def filesystem_tools(root: Path) -> list[Tool]:
         ),
         Tool(
             name="read_file",
+            replay_safe=True,
             description=(
                 "Read a UTF-8 text file inside the allowed workspace root. Accepts either "
                 "an absolute path inside that root or a path relative to it. A long file "

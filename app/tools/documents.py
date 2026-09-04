@@ -151,6 +151,7 @@ def document_tools(root: Path) -> list[Tool]:
     return [
         Tool(
             name="read_document",
+            replay_safe=True,
             description=(
                 f"Read a document saved in the workspace ({readable}). Returns numbered "
                 "sections with their own labels — page numbers for a PDF, headings for "
@@ -181,6 +182,7 @@ def document_tools(root: Path) -> list[Tool]:
         ),
         Tool(
             name="view_pages",
+            replay_safe=True,
             description=(
                 "Render PDF pages as images for your own visual inspection and return "
                 "workspace paths for the rendered pages. This never sends anything to "

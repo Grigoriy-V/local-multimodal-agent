@@ -23,6 +23,10 @@ scripted answer:
                                       history, not guessed from the summary
     I  a result already shortened     read back by position rather than the
                                       tool run again
+    J  a worker killed mid-turn       a fresh agent takes the turn up from the
+                                      checkpoint; nothing is redone unasked
+    K  a fold in the middle of a turn the conversation is folded between two
+                                      steps and the turn still finishes
 
 Each scenario is checked, not only printed: a line starting with PASS or FAIL
 says whether what happened is what the scenario expects, and the exit code is
@@ -41,7 +45,12 @@ half of 4.5.5 and needs a browser where this runs; G is the request the
 person tested live all day on 2026-09-03, in the plan-off shape that is the
 default, with the numbers a plan-on run can be compared against. H and I are
 the live half of 4.6b: the way back to what a summary or a stub stands for.
-Every run of it costs GPU time and needs permission at the time.
+J and K are the live half of 4.7: restart, resume, and a turn across a
+compaction, asserted on harness events. Every scenario line also carries the
+derived GPU-active seconds and cost of its run, the item 3 estimate
+(`app/telemetry/cost.py`), so a run can be read beside the 2026-08-29
+baseline printed at the end. Every run of it costs GPU time and needs
+permission at the time.
 """
 
 from __future__ import annotations
@@ -57,6 +66,7 @@ from app.agent.stop import MemoryStopRequests
 from app.config import AgentSettings
 from app.models import ContentPart, Message, ToolCall, ToolFailure
 from app.telemetry import TurnRun
+from app.telemetry.cost import gpu_cost
 from app.telemetry.open import open_telemetry
 
 USER = "loop-live-check"
@@ -108,6 +118,7 @@ class Turn:
         trace = self.telemetry.start(run)
         trace.route("loop")
         started = time.monotonic()
+        outcome = "answer_delivered"
         try:
             async for event in self.agent.events(
                 thread_id, text_message(prompt), trace, self.sequence
@@ -118,6 +129,29 @@ class Turn:
                 answers = {call["id"]: True for call in pending}
                 async for event in self.agent.resume_events(thread_id, answers, trace):
                     self.observe(event)
+        except asyncio.CancelledError:
+            # J kills a turn this way. The record says so rather than
+            # claiming an answer that never came.
+            outcome = "failed"
+            raise
+        finally:
+            trace.finish(outcome, error_type="killed" if outcome == "failed" else None)
+            self.telemetry.release(self.run_id)
+        self.seconds = time.monotonic() - started
+        self.run = run
+        return self
+
+    async def take_up(self, thread_id: str) -> "Turn":
+        """Continue the turn a killed worker left in `thread_id`, as a new run."""
+
+        run = TurnRun(run_id=self.run_id, source="loop-live", user_id=USER)
+        run.thread_id = thread_id
+        trace = self.telemetry.start(run)
+        trace.route("loop")
+        started = time.monotonic()
+        try:
+            async for event in self.agent.resume_interrupted_events(thread_id, trace):
+                self.observe(event)
         finally:
             trace.finish("answer_delivered")
             self.telemetry.release(self.run_id)
@@ -163,6 +197,31 @@ class Turn:
             return False
         return any(event.type == "turn_budget_exhausted" for event in store.events(self.run_id))
 
+    def events(self, kind: str) -> list[dict]:
+        """The events of one type the store kept for this turn, by their data."""
+
+        store = self.telemetry.store
+        if store is None:
+            return []
+        return [event.data for event in store.events(self.run_id) if event.type == kind]
+
+    def event_types(self) -> list[str]:
+        store = self.telemetry.store
+        if store is None:
+            return []
+        return [event.type for event in store.events(self.run_id)]
+
+    def gpu(self) -> str:
+        """Derived GPU-active seconds and cost, the item 3 estimate."""
+
+        store = self.telemetry.store
+        if store is None:
+            return "-"
+        cost = gpu_cost(store.events(self.run_id))
+        if cost is None:
+            return "no model call"
+        return f"~{cost.estimated_active_ms / 1000:5.1f} s   ${cost.derived_usd:.4f}"
+
     def failed_events(self) -> list[dict]:
         """The `tool_failed` events the store kept for this turn, by their data."""
 
@@ -181,6 +240,7 @@ class Turn:
         if self.failures:
             print("  failures    " + "; ".join(f"{tool}: {why.code}" for tool, why in self.failures))
         print(f"  seconds     {self.seconds:6.2f}   run {self.run_id}")
+        print(f"  gpu derived {self.gpu()}")
         print(f"  answer      {(self.answer or '(nothing said)')[:160]}")
         for expectation, held in checks.items():
             print(f"  {'PASS' if held else 'FAIL'}  {expectation}")
@@ -474,11 +534,103 @@ async def main() -> int:
             )
             if "read_file" in i.tools:
                 print("  note        the model tried the file first, then read history")
+
+        if wanted("K"):
+            # K — a fold in the middle of a turn. The conversation already
+            # holds enough that a few steps of work push the request over a
+            # small budget; `fitted` folds it between two steps and the turn
+            # goes on. The checks are the fold event inside the turn, the
+            # work done, and an answer — the roadmap's "continues correctly
+            # across a compaction", on events.
+            filler = " ".join(f"note {n}: the orchard at {n * 37} elm street keeps {n * 3} trees" for n in range(1, 60))
+            agent.store.append(
+                "chat-k",
+                [
+                    text_message("Here are my orchard notes, keep them in mind:\n" + filler),
+                    Message(role="assistant", content=[ContentPart(kind="text", text="Noted: fifty-nine orchard entries.")]),
+                    text_message("And the second batch:\n" + filler.replace("elm", "oak")),
+                    Message(role="assistant", content=[ContentPart(kind="text", text="Noted the second batch too.")]),
+                ],
+                USER,
+            )
+            agent.context_tokens = 9000
+            agent.rewire()
+            k = await Turn(agent, telemetry, 100).ask(
+                "chat-k",
+                "In my workspace, write orchard.txt with twelve lines, one per month, "
+                "each naming one job to do in an apple orchard that month. Then read it "
+                "back, then write orchard-summary.txt with a two-line summary of it, "
+                "and tell me which month has the most work.",
+            )
+            agent.context_tokens = None
+            agent.rewire()
+            kinds = k.event_types()
+            folded_at = kinds.index("context_folded") if "context_folded" in kinds else -1
+            failed += k.report(
+                "K a fold in the middle of the turn",
+                {
+                    "the conversation was folded during the turn": folded_at >= 0,
+                    "a model step followed the fold": folded_at >= 0
+                    and "model_finished" in kinds[folded_at:],
+                    "orchard.txt exists": (root / "orchard.txt").is_file(),
+                    "an answer was given": bool(k.answer),
+                    "the turn ended before its ceiling": not k.budget_exhausted(),
+                },
+            )
+
+        if wanted("J"):
+            # J — the worker dies while the model's tools are running, and a
+            # fresh agent on the same checkpoints takes the turn up. What is
+            # checked is the harness: the resume event, that the work exists,
+            # that the resumed turn did not write again without looking first,
+            # and that an answer came. Last, because the agent is replaced.
+            killed = Turn(agent, telemetry, 110)
+            work = asyncio.create_task(
+                killed.ask(
+                    "chat-j",
+                    "In my workspace, write poem.txt with a four-line poem about apples, "
+                    "then read it back and tell me its first line.",
+                )
+            )
+            while not killed.tools and not work.done():
+                await asyncio.sleep(0.05)
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
+            print("\n  (the turn was killed once the model asked for its first tool)")
+            await agent.aclose()
+            agent = create_agent(
+                agent_settings=settings, user_id=USER, telemetry=telemetry, stops=stops
+            )
+            left = await agent.unfinished("chat-j")
+            j = await Turn(agent, telemetry, 111).take_up("chat-j")
+            resumed = j.events("turn_resumed")
+            first_write = j.tools.index("write_file") if "write_file" in j.tools else None
+            looked_first = first_write is None or any(
+                tool in ("read_file", "list_files") for tool in j.tools[:first_write]
+            )
+            failed += j.report(
+                "J a worker killed mid-turn, taken up",
+                {
+                    "the checkpoint held an unfinished turn": left is not None,
+                    "the turn was resumed, not restarted": bool(resumed),
+                    "poem.txt exists": (root / "poem.txt").is_file(),
+                    "no write without looking first": looked_first,
+                    "an answer was given": bool(j.answer),
+                },
+            )
+            if resumed:
+                print(f"  resumed     {resumed[0]}")
     finally:
         await agent.aclose()
         telemetry.close()
 
     print(f"\n{'all scenarios passed' if not failed else f'{failed} check(s) failed'}")
+    print(
+        "\nItem 3 baseline, 2026-08-29 (reports/2026-08-29_v2_gpu_baseline_measured.md,"
+        " reports/2026-08-30_v2_step4_harness_preparation.md):\n"
+        "  six live turns, 21.22 s derived GPU, $0.0065 a successful turn;\n"
+        "  prefill ~2.3k tok/s, decode ~45 tok/s, a 12-second idle window charged to each turn."
+    )
     print(
         f"\nRead any of them back with:\n  AGENT_TELEMETRY_DATABASE={settings.telemetry_database} "
         f"AGENT_DATABASE_URL= python tools/show_run.py --last 10 --summary"

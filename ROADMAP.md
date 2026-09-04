@@ -1,12 +1,12 @@
 # Roadmap
 
-**Updated:** 2026-09-03
+**Updated:** 2026-09-04
 
 **Project status:** Version 1.5 closed; Version 2 in progress
 
-**Current approved step:** none. 4.6a and 4.6b, the context engine and the
-way back into history, both closed 2026-09-03 (below). Next in order is 4.7;
-selecting it is the human's word.
+**Current approved step:** 4.7, restart, resume and the scenario suite,
+approved 2026-09-04; built in the tree, its live run and deploy are the next
+gates (below).
 
 **Before changing media delivery**, read
 `reports/2026-08-29_v2_capabilities_browser_workspace_documents.md`, section
@@ -280,9 +280,19 @@ What exists. How it was reached, and every number, is in the linked report.
      numbers, including that a turn continues correctly across a compaction.
      Live suites run as one warm window and only with explicit permission,
      because every run wakes a GPU. Reviewed against the references
-     2026-09-04, options and a recommended shape in
-     `reports/2026-09-04_v2_restart_resume_review.md`; **not approved, not
-     started.**
+     2026-09-04 (`reports/2026-09-04_v2_restart_resume_review.md`) and
+     approved in that shape the same day.
+
+     **State, 2026-09-04:** built in the tree, not deployed. A turn a worker
+     died in is taken up from its checkpoint by the next claim: a dead
+     `tools` step is answered per call (reading tools run again, anything
+     else `interrupted`, "whether it ran is unknown"), `persist` is
+     idempotent, the lease is below the container's life, the same update is
+     re-invoked once, the fourth claim gives up and says so. Offline: five
+     resume tests, three adapter, one worker; 1026 passed. Live: scenarios J
+     (killed and taken up) and K (a fold between two steps) in
+     `scripts/loop_live.py`, not yet run; derived GPU seconds per scenario
+     beside the item 3 baseline. `DECISIONS.md` 2026-09-04.
    - **4.8 `ask_user`** for a genuinely missing decision, not for permission.
      Was 4.5; moved behind the tool system it returns through, and behind the
      suite that can accept it.

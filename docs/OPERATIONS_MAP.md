@@ -321,10 +321,21 @@ memory: 2048 MiB
 min containers: 0
 max containers: 8
 scaledown window: 60 s
-timeout: 600 s
+timeout: 600 s   (`WORKER_TIMEOUT_SECONDS`)
+retries: 1
 ```
 
 It mounts the persistent workspace Volume, reloads before a turn and commits after the turn.
+
+`retries=1` re-invokes the same `update_id` once after the container is killed
+at its timeout; a crashed container is rescheduled by the platform on its own.
+The inbox lease (`ui/telegram/webhook.py` `LEASE_SECONDS`, 590 s) is shorter
+than the timeout on purpose: the re-invocation, or the conversation's next
+message, finds the row claimable and the checkpointed turn is taken up rather
+than started again. Raising the timeout means raising the lease with it, and
+the lease must stay below it. Whether the platform retries a timeout the way
+it retries a crash is to be confirmed on the first real kill; the next
+message resumes the turn either way.
 
 It keeps taking the next update of its conversation for `DRAIN_SECONDS`
 (`ui/telegram/webhook.py`, 240 s) and then spawns a fresh worker for the rest.

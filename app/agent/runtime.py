@@ -24,6 +24,7 @@ from app.agent.graph import (
     RUN_ID,
     TurnBudget,
     build_agent,
+    interrupted,
     latest_text,
 )
 from app.agent.stop import NO_STOPS, StopRequests
@@ -51,6 +52,7 @@ from app.tools import (
     PRESENT_FILES,
     CapabilityGrant,
     CapabilityRegistry,
+    ToolExecutor,
     Toolbox,
     history_tools,
     memory_tools,
@@ -142,6 +144,24 @@ class ContextReport:
     layers: dict[str, int]
     last_used: int | None
     last_cached: int | None
+
+
+@dataclass(frozen=True)
+class Unfinished:
+    """A turn a worker started and did not end, as the checkpoint has it.
+
+    `node` is what was about to run when the process died: `tools` means the
+    model asked for calls and their results were never recorded, some of them
+    may have run; `model` or `load` means nothing is unknown; `persist` means
+    the answer exists and was not stored. `request` is the user message the
+    turn began with, so the caller can tell whether the update it holds is
+    this turn or a later one.
+    """
+
+    node: str
+    request: Message | None
+    messages: tuple[Message, ...]
+    tool_calls: int
 
 
 class Agent:
@@ -551,6 +571,69 @@ class Agent:
             keep_results=self.policy.keep_results,
         )
         return context.prompt(messages)
+
+    async def unfinished(self, thread_id: str) -> Unfinished | None:
+        """The turn a dead worker left in this thread, if there is one.
+
+        A turn waiting on the person's answer is not one: that is `pending`,
+        and it is waiting on purpose. What this finds is a graph with a next
+        node and nobody asking anything — the shape a kill leaves behind.
+        """
+
+        graph = await self._graph(thread_id)
+        state = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+        if not state.next or any(task.interrupts for task in state.tasks):
+            return None
+        messages = tuple(state.values.get("messages") or ())
+        return Unfinished(
+            node=state.next[0],
+            request=next((m for m in messages if m.role == "user"), None),
+            messages=messages,
+            tool_calls=int(state.values.get("tool_calls") or 0),
+        )
+
+    async def resume_interrupted_events(
+        self, thread_id: str, trace: TurnTrace = NO_TRACE
+    ) -> AsyncIterator[AgentEvent]:
+        """Take up the turn a dead worker left, reporting the same events.
+
+        A step whose tools were running gets one result per call before the
+        graph moves on: a read is simply run now, since running it twice
+        changes nothing; anything else is answered `interrupted`, because the
+        harness does not know whether it ran and will not run it again to
+        find out (2026-09-04 review, DeepSeek's rule). The model then decides
+        what to check. A death anywhere else has nothing unknown in it and the
+        graph carries on from the checkpoint.
+        """
+
+        left = await self.unfinished(thread_id)
+        if left is None:
+            return
+        graph = await self._graph(thread_id)
+        config = {
+            "configurable": {"thread_id": thread_id, RUN_ID: trace.run.run_id or None}
+        }
+        replayed = unknown = 0
+        if left.node == "tools" and left.messages and left.messages[-1].tool_calls:
+            toolbox = self.toolbox(thread_id)
+            executor = ToolExecutor(toolbox, trace)
+            results: list[Message] = []
+            for call in left.messages[-1].tool_calls:
+                tool = toolbox.get(toolbox.resolve(call.name) or call.name)
+                if tool is not None and tool.replay_safe:
+                    results.append(await executor.call(call))
+                    replayed += 1
+                else:
+                    results.append(interrupted(call))
+                    unknown += 1
+            await graph.aupdate_state(
+                config,
+                {"messages": results, "tool_calls": left.tool_calls + replayed},
+                as_node="tools",
+            )
+        trace.event("turn_resumed", node=left.node, unknown=unknown, replayed=replayed)
+        async for event in self._run(thread_id, None, trace):
+            yield event
 
     async def pending(self, thread_id: str) -> list[dict[str, Any]] | None:
         """The calls this thread is waiting on an answer for, if any.

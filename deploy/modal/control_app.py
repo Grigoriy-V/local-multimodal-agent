@@ -15,6 +15,9 @@ from fastapi import Request
 APP_NAME = "assistant-control"
 SECRET_NAME = "assistant-control"
 WORKSPACE_ROOT = "/workspaces"
+# The worker container's life. `ui.telegram.webhook.LEASE_SECONDS` is derived
+# from this number and must stay below it.
+WORKER_TIMEOUT_SECONDS = 600
 
 app = modal.App(APP_NAME)
 control_secret = modal.Secret.from_name(SECRET_NAME)
@@ -160,7 +163,13 @@ def _settings() -> tuple[object, object]:
     # $0.00026. At a hundred wakes a day that is about $3 a month, against the
     # roughly $46 of GPU it sits in front of.
     scaledown_window=60,
-    timeout=600,
+    timeout=WORKER_TIMEOUT_SECONDS,
+    # One re-invocation of the same update after the container dies. A crash
+    # is rescheduled by the platform on its own; this covers the kill at
+    # `timeout`. The claim's lease (`LEASE_SECONDS`, below the timeout) has
+    # expired by then, so the retry claims the row and takes the turn up from
+    # its checkpoint instead of finding it running.
+    retries=1,
     include_source=False,
 )
 async def process_telegram_update(update_id: int) -> bool:
