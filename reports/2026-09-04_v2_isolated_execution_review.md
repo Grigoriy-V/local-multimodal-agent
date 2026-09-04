@@ -631,3 +631,13 @@ a step gets the step; one that states a fact ("a `.venv` in the workspace
 is the `python` a command gets") leaves the step to the model. Option,
 unbuilt: `where` states facts and no commands.
 
+**Built and deployed on the human's word, 2026-09-04:** `BASE_PACKAGES`
+(reportlab, fpdf2, python-docx, openpyxl, pandas, matplotlib, Pillow, pypdf,
+markdown) in `command_image` through `uv_pip_install` — a `pip_install`
+layer failed on the first build because `uv_sync` makes the image's Python
+a uv venv (`/.uv/.venv`) with no `pip` module — and the runner's `where`
+rewritten as facts with no command in it. Deploy 28 s. Not yet measured:
+the cold start with the larger image and the packages importable through
+the command's `python3` (`scripts/measure_command_cold_start.py` now
+imports all nine), and P in Russian on this image.
+

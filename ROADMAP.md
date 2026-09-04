@@ -208,9 +208,13 @@ What exists. How it was reached, and every number, is in the linked report.
    tool results were being stubbed after the newest two, a command's
    traceback included, so the model repeated its first error at the
    fourth attempt; fixed, the turn in progress is never shortened
-   (`DECISIONS.md` 2026-09-03 amended). **Next, each its own gate:**
-   deploy, P in Russian again, the after-deploy run; the libraries in the
-   image on the human's list. Until 2026-09-04 this was 5a;
+   (`DECISIONS.md` 2026-09-03 amended). Deployed and seen live: results visible
+   through twelve steps; the remaining loop was the model running the
+   venv's python binary as a script six times, and the brief's venv recipe
+   run verbatim as every turn's first command — so the everyday libraries
+   went into the image (`BASE_PACKAGES`) and `where` states facts without
+   a command, deployed. **Next, each its own gate:** the cold start and
+   the imports on the new image, P in Russian, the after-deploy run. Until 2026-09-04 this was 5a;
    the local half was 5b and is item 7 now, on the human's word: local work
    on files is a stage of its own, not a sub-step of the sandbox.
 
