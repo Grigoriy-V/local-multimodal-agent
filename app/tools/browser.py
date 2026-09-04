@@ -89,7 +89,13 @@ def _local_document(root: Path, path: str) -> Path:
     if not target.is_file():
         raise ToolError(f"path {path!r} is not a file", code=NOT_A_FILE)
     if target.suffix.lower() not in {".html", ".htm"}:
-        raise ToolError("inspect_page accepts only .html and .htm files", code=UNSUPPORTED)
+        # The remedy beside the refusal (DeepSeek's shape): live, R 2026-09-04,
+        # the model brought a chart here to look at it and was told only no.
+        raise ToolError(
+            "inspect_page accepts only .html and .htm files; an image is looked at "
+            "with read_file, a PDF with view_pages",
+            code=UNSUPPORTED,
+        )
     if target.stat().st_size > MAX_HTML_BYTES:
         raise ToolError(
             f"HTML file exceeds the {MAX_HTML_BYTES}-byte browser limit", code=TOO_LARGE

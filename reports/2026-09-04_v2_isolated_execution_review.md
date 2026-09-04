@@ -890,3 +890,19 @@ image part with one line naming it, instead of decoding it as text; the
 tool's description and the workspace brief say so; R now checks that the
 chart was looked at before it was sent. `tests/test_read_image.py`.
 \n
+
+**R and S run live on this machine, 2026-09-04** (`loop_live R S`, runs
+`live-160`, `live-170`). *S* is the clean shape of the day: `list_files`,
+`run_command` (the assert fails), `read_file calc.py`, `edit_file` (`a - b`
+→ `a + b`), `run_command` again — `exit code: 0`, `calc ok` — and the
+answer says what was wrong. Six model calls, 7.9 s, four of four checks.
+*R*: `list_files`, `read_file sales.csv`, a 65 s first command (the local
+runner's venv made and pandas and matplotlib installed into it, on a
+machine that has both — §11's crutch, item 7), the chart made, then
+**`inspect_page chart.png`** — refused, HTML only — a further command,
+`send_file`, and the largest total named. Three of four checks; the one
+that failed is the look: the model reached for the browser to see a
+picture, and the refusal did not say where a picture is looked at. The
+remedy pattern again, at the tool: the unsupported-file failure names
+`read_file` for an image. Then R again.
+
