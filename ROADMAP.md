@@ -194,10 +194,14 @@ What exists. How it was reached, and every number, is in the linked report.
    other way round; `create_agent` and the Telegram adapter take a
    `runner`, and the worker passes it so a command never runs beside the
    secrets; no venv is made in the container and the runner's `where` says
-   what survives; `scripts/measure_command_cold_start.py`. Offline: seven
-   structural tests and three runner tests. **Next, each its own gate:**
-   deploy, the Volume round trip live, the cold-start number, O, P, Q
-   through Telegram, the after-deploy run. Until 2026-09-04 this was 5a;
+   what survives; `scripts/measure_command_cold_start.py`. **Deployed and
+   measured 2026-09-04:** cold container 8.3 s, warm 0.7 s; the Volume
+   round trip holds both ways, a venv the model made in the workspace
+   served the next turn; O and Q passed through Telegram, P handed over a
+   PDF of black squares without looking (ISS-0040, the model's) because the
+   image had no Cyrillic font (the harness's, fixed: DejaVu and Liberation
+   in `BASE_TOOLS`). **Next, each its own gate:** redeploy with the fonts,
+   P again, the after-deploy run. Until 2026-09-04 this was 5a;
    the local half was 5b and is item 7 now, on the human's word: local work
    on files is a stage of its own, not a sub-step of the sandbox.
 

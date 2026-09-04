@@ -377,6 +377,9 @@ def test_the_command_image_carries_the_base_tools_and_no_browser() -> None:
     assert "command_image = _with_source(_dependencies.apt_install(*BASE_TOOLS))" in text
     for tool in ("nodejs", "npm", "git", "ffmpeg", "imagemagick", "poppler-utils", "pandoc", "jq"):
         assert f'"{tool}"' in text
+    # A document made without a Cyrillic font is black squares (P, live, 2026-09-04).
+    assert text.index('"fonts-dejavu-core"') < text.index("command_image =")
+    assert '"fonts-liberation",' in text and text.index('"fonts-dejavu-core"') < text.index('"nodejs"')
     assert '"libreoffice"' not in text.lower()
 
 

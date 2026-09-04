@@ -284,7 +284,7 @@ The file defines three image shapes:
 control_image  -> dependencies + source; no Chromium
 agent_image    -> Chromium/fonts + source; deployed agent worker
 render_image   -> Chromium/fonts + source; isolated page renderer
-command_image  -> dependencies + BASE_TOOLS (node, git, ffmpeg, imagemagick, poppler, pandoc, ...) + source; where a command runs
+command_image  -> dependencies + BASE_TOOLS (DejaVu/Liberation fonts, node, git, ffmpeg, imagemagick, poppler, pandoc, ...) + source; where a command runs
 ```
 
 Heavy dependencies/browser are layered below copied source so source-only changes can reuse earlier image layers.

@@ -96,7 +96,13 @@ render_image = _with_source(_with_browser)
 # LibreOffice, for its size. Python is the image's own 3.12 with `pip` and
 # `venv`; what a project needs beyond this goes into a venv in the workspace,
 # which is on the Volume and outlives the container.
+#
+# The fonts are the renderer's, for the renderer's reason: a document made
+# where there is no font with Cyrillic comes out as black squares (P, live,
+# 2026-09-04), and this assistant is used in Russian. debian_slim has none.
 BASE_TOOLS = (
+    "fonts-dejavu-core",
+    "fonts-liberation",
     "nodejs",
     "npm",
     "git",
@@ -244,7 +250,9 @@ class ModalRunner:
         "in a Linux container of its own, through sh, with no secret in it and "
         "your workspace mounted. Installed there: python3 with pip and venv, node "
         "and npm, git, curl, zip, unzip, tar, jq, ffmpeg, imagemagick, poppler "
-        "(pdftotext, pdftoppm), pandoc. The container is disposable: what a "
+        "(pdftotext, pdftoppm), pandoc, and TrueType fonts with Cyrillic under "
+        "/usr/share/fonts/truetype (DejaVu, Liberation) for documents and images. "
+        "The container is disposable: what a "
         "command installs into it — apt, a pip install into the system python — "
         "is gone by the next turn, and what it writes in the workspace stays. So "
         "install Python packages into a venv in the workspace (`python3 -m venv "

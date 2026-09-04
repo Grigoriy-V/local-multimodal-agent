@@ -446,3 +446,49 @@ from the command seen by `read_file`, same turn); the cold-start number
 (`scripts/measure_command_cold_start.py`); O, P, Q through Telegram; the
 after-deploy run.
 
+**Deployed and measured, 2026-09-04.** `modal deploy` in 107 s, the
+`command_image` built once. `scripts/measure_command_cold_start.py`, two
+invocations from this machine, the second right after the first:
+
+| run | waited | command | container | inside |
+|---|---|---|---|---|
+| cold | 8.49 s | 0.20 s | 8.29 s | Python 3.12.10, node 18.20.4, git 2.39.5 |
+| warm | 0.81 s | 0.11 s | 0.69 s | same |
+
+The container's share of a cold command is about eight seconds — more than
+the worker's own 4.9 s, because this image is larger and its first execution
+imports the tools module. A warm call costs under a second of round trip,
+Volume commit and reload on the worker's side not yet included. What this
+says for the person: the first command of a piece of work waits eight
+seconds once; the rest, within three minutes of each other, wait under one.
+
+**Live through Telegram, 2026-09-04, three messages from the human**
+(runs `c089c570`, `a3ef6a14`, `3f51cd70`, and a fourth, `3935092c`, when
+the human asked again about the PDF):
+
+| | tools | run_command | turn | what it showed |
+|---|---|---|---|---|
+| O, primes | `write_file` → `run_command` | 2.78 s | 23.9 s | the file from `write_file` was there for the command: the worker's commit before the call works |
+| P, PDF | `write_file` → `run_command` → `send_file` | 23.68 s | 55.9 s | `pip install reportlab` into a venv the model made in the workspace (`.venv` is on the Volume), the PDF from the command was there for `send_file`: the reload after the call works. **No look at the document** — ISS-0040 |
+| Q, timeout | `run_command` failed `shell.timeout` | 6.17 s | 14.4 s | the code reached the model and the turn went on |
+| P again | same three | 2.53 s | 32.1 s | the venv on the Volume served the second run in a warm container; still no look |
+
+The round trip holds in both directions, and what was installed survived
+into the next turn on the Volume. The Function's `seconds` is the whole
+wait: O's 2.78 s is a warm container after the cold-start probe.
+
+**What the person saw:** the PDF came as black squares. The model's script
+used reportlab's built-in Helvetica for Russian text, and there is no glyph
+for Cyrillic in it; the container had no font at all — `debian_slim` ships
+none, and the renderer's image had `fonts-dejavu-core` added for exactly
+this ("a screenshot of Cyrillic is a row of boxes"). Sorted by the rule:
+the missing font is the **harness's** — a place where documents are made
+for a person who writes Russian needs a font with Cyrillic, the same
+property the renderer already has — and `fonts-dejavu-core` and
+`fonts-liberation` are now in `BASE_TOOLS`, with the runner's `where`
+saying where the TrueType files are. Not looking at the PDF before sending
+it, twice, is the **model's** (ISS-0040), the brief already asks for the
+look, and it is measured by P, not scripted. Asked again, the model dropped
+the Russian text rather than registering a font it did not know it had;
+with the fonts named in `where`, that is the next P's question.
+

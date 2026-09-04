@@ -51,6 +51,28 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0040 — a document is handed over without a look at it
+
+- **Status:** open — model behaviour, measured
+- **Seen:** 2026-09-04, deployed, Telegram, runs `a3ef6a14` and `3935092c`:
+  "make a one-page PDF about coffee and send it" — `write_file`,
+  `run_command`, `send_file`, no `view_pages` or `read_document` in between,
+  twice in a row. The first PDF reached the person as black squares (the
+  container had no font with Cyrillic; fixed in the image the same day),
+  and a look would have shown it; asked again, the model dropped the
+  Russian text instead of registering a font, and again did not look.
+- **Costs:** the person receives a document the assistant never saw, and
+  finds the defect the assistant was equipped to find.
+- **Reproduce:** P through Telegram; not every time — the same request
+  passed with a look locally twice on 2026-09-04.
+- **Cause:** the model's; the brief says a made document is looked at
+  before it is handed over, and the tools were there. Measured with the
+  scenario suite, not scripted (`AGENTS.md`, the human's rule).
+- **Evidence:** `reports/2026-09-04_v2_isolated_execution_review.md` §12
+- **Related:** ISS-0039 (the other P failure), ISS-0028; roadmap 5
+
+---
+
 ### ISS-0039 — a command that succeeds silently is not believed, and is run again
 
 - **Status:** open — model behaviour, measured
