@@ -332,6 +332,15 @@ recorded, not scheduled.
 Recorded, not approved, not begun, and not in the order above. One line each;
 an observed defect is described in `ISSUES.md`, not here.
 
+- **An API-served model as a fourth choice, the human's word 2026-09-05.**
+  One of the next experiments: point the assistant at a hosted
+  OpenAI-compatible model instead of a GPU App, first candidate CometAPI's
+  `glm-5.3-flash` (1M context, tools, images, thinking; $0.06/$0.20 per 1M
+  in/out). The client already speaks bearer auth (`MODEL_API_KEY`,
+  `MODEL_AUTH_STYLE=bearer`), so it is a secret change and a control
+  deploy, no GPU; what has to be checked is the served context limit (the
+  client reads `/v1/models`), the thinking dial and the tool-call format,
+  then the same scenarios. Fits item 13's list of model choices.
 - **The whole-code review of 2026-09-03**, thirteen findings ranked and an
   order proposed: `reports/2026-09-03_v2_whole_code_review.md`. Items 1 and 2
   of its order (§2.1–2.4: the summarizer reads stubs, a fold cannot fail a
