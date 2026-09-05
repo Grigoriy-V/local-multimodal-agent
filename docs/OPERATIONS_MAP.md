@@ -30,9 +30,9 @@ assistant-control
           ├────────────> Modal Volume: assistant-workspaces
           │               per-user workspace directories
           │
-          └────────────> assistant-llm-v2
-                           A10 / vLLM / scale-to-zero
-                           HF cache + vLLM cache Volumes
+          └────────────> assistant-llm-v2        or   assistant-llm-qwen
+                           A10 / vLLM / scale-to-zero    L40S / vLLM / scale-to-zero
+                           HF cache + vLLM cache Volumes (shared by both)
 ```
 
 The CPU control plane and GPU model are separately deployed apps. Deploying `assistant-control` does not redeploy the model app.
@@ -478,6 +478,43 @@ which happens before the snapshot exists. Without them a restored container
 polls a socket whose peer is gone and logs `Broken pipe` about once a second for
 its whole life.
 
+### The second model: `assistant-llm-qwen`
+
+**Owner:** `deploy/modal/model_app_qwen.py`, which imports the machinery of
+`model_app.py` and shares its image and both Volumes. Since 2026-09-05.
+
+```text
+checkpoint: Qwen/Qwen3.8-27B-FP8 (revision 017b9c7a)
+served name: qwen3.8-27b
+GPU: L40S
+max model length: 131072
+GPU memory utilization: 0.86
+KV cache dtype: auto (bf16)
+default chat template kwargs: {"reasoning_effort": "low"}
+parsers: tool qwen3_xml, reasoning qwen3
+multimodal per-prompt limits: image=4, video=0
+container memory request: 32 GiB (sleep level 1 holds the weights in CPU memory)
+scaledown window, containers, concurrency: the first App's, by import
+```
+
+The same three functions, `fetch_weights`, `preflight` and `Server`, run
+from this file:
+
+```text
+modal run deploy/modal/model_app_qwen.py::fetch_weights
+modal run deploy/modal/model_app_qwen.py::preflight
+modal deploy deploy/modal/model_app_qwen.py
+```
+
+**Switching the assistant between the two models** is configuration, never
+code: set `MODEL_ENDPOINT` to the App's `.modal.run` URL plus `/v1` and
+`MODEL_NAME` to its served name in `.env`, publish the secret with
+`tools/sync_control_secret.py`, and redeploy `assistant-control` so that
+fresh containers read it (a warm worker keeps the old values until it
+sleeps). The context ceiling is read from the server, so nothing else
+changes. Both Apps stay deployed; the one not in use costs nothing while
+asleep. A run under one model is recorded under that model's served name.
+
 ### Model functions
 
 #### `fetch_weights`
@@ -845,6 +882,8 @@ Human-readable implementation evidence belongs in `reports/` rather than in the 
 | Preview/publish Telegram profile and command menu | `tools/telegram_profile.py` |
 | Deploy CPU control plane | `deploy/modal/control_app.py` |
 | Deploy model server | `deploy/modal/model_app.py` |
+| Deploy the second model server (Qwen3.8) | `deploy/modal/model_app_qwen.py` |
+| Point the assistant at the other model | `MODEL_ENDPOINT`, `MODEL_NAME` in `.env`, then `tools/sync_control_secret.py` and a control-plane deploy |
 | Change current GPU idle window without deploy | `deploy/modal/autoscale.py` |
 | Diagnose deployed capabilities | `control_app.py::self_test` |
 | Diagnose local install | `scripts/doctor.py` |

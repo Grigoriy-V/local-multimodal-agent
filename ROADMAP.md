@@ -38,6 +38,9 @@ documents.
   ceiling is 65,536 since 2026-08-30, at 0.80 utilization and unquantized KV.
   The original `assistant-llm` stays deployed as rollback only; retiring it is a
   destructive human gate.
+- `assistant-llm-qwen` (`deploy/modal/model_app_qwen.py`, since 2026-09-05)
+  serves Qwen3.8-27B-FP8 on an L40S at a 131,072 ceiling, 0.86 utilization,
+  unquantized KV, as the second model; not yet the one the assistant uses.
 - `assistant-control` also serves `run_command` (the command runner, no
   secret) and `scenarios` (the live scenarios in the worker's own
   environment, `loop_live --deployed`), since 2026-09-04/05.
@@ -234,6 +237,20 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    against the runs of 2026-09-05 with the goal alone
    (`reports/2026-09-04_v2_isolated_execution_review.md` §15).
 
+9. **A second model: Qwen3.8-27B in FP8 on an L40S — selected 2026-09-05.**
+   Its own App, `assistant-llm-qwen` (`deploy/modal/model_app_qwen.py`),
+   beside `assistant-llm-v2`: 128k ceiling in bf16 KV, utilization 0.86 on
+   the human's word, thinking at `low`, `qwen3_xml`/`qwen3` parsers; the
+   assistant switches by `MODEL_ENDPOINT` and `MODEL_NAME`. Why this
+   checkpoint and card, the arithmetic and the published quantization
+   benchmarks: `reports/2026-09-05_qwen38_second_model.md`. The first boot
+   was refused by vLLM's memory check (7.04 GiB of KV against 8.18 needed
+   for 131,072 at 0.86; weights 28.5 GiB resident) and the App is stopped.
+   **Next, each its own gate:** the human's choice between 0.90 and a 96k
+   ceiling (report §5), then the boot and its log; the live scenarios on it
+   against the Gemma runs of 2026-09-05; then the human's call on which
+   the assistant uses.
+
 ### Not started
 
 Recorded, not approved, not begun, and not in the order above. One line each;
@@ -285,13 +302,11 @@ works, Open WebUI as the main UI, and the superseded policy-platform/MCP version
 of Version 2. Changing scope requires an edit here, and a `DECISIONS.md` entry
 when the change is architecturally durable.
 
-**A different endpoint for 128k**, recorded 2026-08-30 and not begun: L40S with
-Qwen3-8B, a 128k ceiling and KV-cache quantization, as its own measured
-comparison rather than a continuation of the A10. 128k on the current hardware
-is an open question rather than a settled no; it stays out of scope until
-someone wants it. Any such run needs its own approval, and quantized KV on an
-already 4-bit QAT checkpoint needs a quality comparison, not just a successful
-boot. `DECISIONS.md` 2026-08-30.
+**A different endpoint for 128k**, recorded 2026-08-30: became item 9 on
+2026-09-05, with Qwen3.8-27B instead of Qwen3-8B and no KV quantization,
+because the newer model's hybrid attention makes 128k fit in bf16. 128k on
+the A10 stays an open question rather than a settled no. `DECISIONS.md`
+2026-08-30, 2026-09-05.
 
 ## How this file is kept
 

@@ -1238,6 +1238,46 @@ extension, the todo list's. Measured next on G and P deployed, goal on and
 off; if the parts written down do not change what is handed over, the tool
 comes out the way the check did.
 
+## 2026-09-05 — A second model is a second App, and the assistant is pointed at one by configuration
+
+Decision
+
+A model the project wants to try or keep beside the current one gets its own
+Modal App with its own identity, image layer, snapshot and scale-to-zero,
+sharing the first App's machinery by import and its Volumes by name. The
+assistant is pointed at a model by `MODEL_ENDPOINT` and `MODEL_NAME` in the
+control secret and nothing else; switching is those two keys and fresh
+containers, and the rollback is the same two keys back. The first of these
+is `assistant-llm-qwen`: Qwen3.8-27B in Qwen's own FP8 on an L40S, a 128k
+ceiling with the KV cache unquantized, utilization 0.86, thinking at `low`.
+
+Why
+
+The human asked for Qwen3.8-27B on 2026-09-05 and, when the card arithmetic
+was shown, chose the official FP8 on an L40S over community int4 builds on
+an A10 or an A100: the publisher's quantization, FP8 as a hardware path on
+Ada, and 128k in bf16 with room, against the A10 where the same model needs
+int4 and a quantized cache and 0.90 at once. A second App rather than a
+change to the first because `assistant-llm-v2` is the configuration behind
+every recorded measurement, and a redeploy over it would overwrite the
+comparison and the rollback; both Apps sleep for free. The harness already
+binds to nothing model-specific — the ceiling is read from the server, the
+parsers are the server's — so the switch is configuration, which was the
+point of `ModelBackend` from the start (2026-08-01).
+
+Consequences
+
+`deploy/modal/model_app_qwen.py`, importing `model_app`; `_warmup` takes
+the served name. 0.86 is the human's number, and 262k was declined for now:
+it needs the cache in fp8 with no scales in the checkpoint, and its prefill
+is minutes. `reasoning_effort: low` is the first setting to measure against,
+not a finding. Which model the assistant uses is decided by the live
+scenarios run on both, then the human. `reports/2026-09-05_qwen38_second_model.md`.
+
+Supersedes: the 2026-08-30 note that 128k belongs to "L40S with Qwen3-8B
+and quantized KV" — the model and the quantization changed; the card and
+the separate identity did not.
+
 ## 2026-09-04 — Generated code runs where no secret is, and what it installs lives in the workspace
 
 Decision

@@ -349,11 +349,11 @@ def _wait_ready(process, timeout: float, stage: str) -> float:
         time.sleep(POLL_INTERVAL)
 
 
-def _warmup() -> None:
+def _warmup(served_name: str = SERVED_NAME) -> None:
     """Force the compilation and graph capture that must land inside the snapshot."""
 
     payload = {
-        "model": SERVED_NAME,
+        "model": served_name,
         "messages": [{"role": "user", "content": "Who are you?"}],
         "max_tokens": 16,
     }

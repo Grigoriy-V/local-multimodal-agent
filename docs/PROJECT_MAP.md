@@ -15,6 +15,8 @@ reconsidered; this map describes the current system.
                         │      Model endpoint      │
                         │ OpenAI-compatible vLLM   │
                         │ assistant-llm-v2 / A10   │
+                        │ or assistant-llm-qwen /  │
+                        │ L40S — one at a time     │
                         └────────────┬─────────────┘
                                      │ ModelBackend
                                      │
@@ -514,9 +516,16 @@ measure_database_latency
 
 The deployed workspace is Modal Volume `assistant-workspaces` mounted at `/workspaces`. `user_workspace()` creates a separate directory per canonical user inside that root. The worker reloads the volume before a turn and commits it after the turn.
 
-### Model plane: `assistant-llm-v2`
+### Model plane: `assistant-llm-v2`, and `assistant-llm-qwen` beside it
 
 `deploy/modal/model_app.py` owns the current Modal vLLM deployment.
+`deploy/modal/model_app_qwen.py` owns a second one, since 2026-09-05:
+Qwen3.8-27B in FP8 on an L40S with a 131,072-token ceiling, importing the
+first file's machinery and sharing its Volumes. The assistant uses one at a
+time, chosen by `MODEL_ENDPOINT` and `MODEL_NAME`; the other sleeps
+(`DECISIONS.md` 2026-09-05).
+
+Current shape of the first:
 
 Current shape:
 

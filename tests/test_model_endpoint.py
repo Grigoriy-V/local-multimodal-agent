@@ -211,5 +211,50 @@ class DeploymentIdentityTests(unittest.TestCase):
         self.assertNotIn("video", model_app.MM_LIMITS)
 
 
+QWEN_SOURCE = SOURCE.with_name("model_app_qwen.py")
+
+if model_app is not None:
+    # `model_app_qwen` imports its sibling by name, as Modal's CLI and the
+    # container both allow; here the directory has to be on the path for it.
+    sys.path.insert(0, str(SOURCE.parent))
+    sys.modules["model_app"] = model_app
+    spec = importlib.util.spec_from_file_location("model_app_qwen_under_test", QWEN_SOURCE)
+    model_app_qwen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(model_app_qwen)
+else:  # pragma: no cover
+    model_app_qwen = None
+
+
+@unittest.skipIf(model_app_qwen is None, "modal is not installed")
+class SecondModelIdentityTests(unittest.TestCase):
+    """The second App is its own identity and shares the first one's machinery."""
+
+    def test_is_neither_the_baseline_nor_the_gemma_app(self):
+        self.assertNotIn(model_app_qwen.APP_NAME, {"assistant-llm", model_app.APP_NAME})
+        self.assertNotEqual(model_app_qwen.SERVED_NAME, model_app.SERVED_NAME)
+
+    def test_the_card_holds_the_weights(self):
+        # FP8 weights of a 27B model are ~26 GiB; nothing under 48 GB holds them
+        # with a pool beside. The name is Modal's.
+        self.assertEqual(model_app_qwen.GPU, "L40S")
+        self.assertGreater(model_app_qwen.GPU_MEMORY_UTILIZATION, model_app.GPU_MEMORY_UTILIZATION)
+        self.assertLessEqual(model_app_qwen.GPU_MEMORY_UTILIZATION, 0.90)
+
+    def test_sleep_has_the_cpu_memory_the_weights_need(self):
+        self.assertGreaterEqual(model_app_qwen.MEMORY_MB, 28 * 1024)
+
+    def test_parsers_match_the_template(self):
+        # What the model's own chat template requires: XML-shaped calls, and
+        # a `<think>` block that must not reach the client as the answer.
+        self.assertEqual(model_app_qwen.TOOL_CALL_PARSER, "qwen3_xml")
+        self.assertEqual(model_app_qwen.REASONING_PARSER, "qwen3")
+        self.assertIn("reasoning_effort", model_app_qwen.DEFAULT_CHAT_TEMPLATE_KWARGS)
+
+    def test_the_idle_window_and_timeouts_are_the_first_apps(self):
+        # One priced choice, made once; the second App inherits it by import
+        # rather than restating a number that would then drift.
+        self.assertIs(model_app_qwen.base, model_app)
+
+
 if __name__ == "__main__":
     unittest.main()
