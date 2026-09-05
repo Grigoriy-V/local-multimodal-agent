@@ -81,6 +81,7 @@ permission at the time.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import sys
 import tempfile
 import time
@@ -294,6 +295,28 @@ def chosen(argv: list[str]) -> frozenset[str]:
 RUN_PREFIX = "live-"
 
 
+async def start_clean(agent, selected, root: Path) -> None:
+    """Every scenario begins in an empty conversation and an empty workspace.
+
+    Locally that is what the sealed room gives for free. Deployed, the probe
+    user's threads and workspace live in the real database and on the Volume
+    and outlive the run: on 2026-09-05 the third G sample answered from the
+    history of the two before it, in one model call and no tool, and measured
+    nothing (run `deployed-808b8717-70`). What a scenario measures is one
+    request from nothing, in both profiles.
+    """
+
+    from app.conversations import delete_conversation
+
+    for letter in sorted(selected):
+        await delete_conversation(agent.store, f"chat-{letter.lower()}", agent.checkpoints)
+    for entry in sorted(Path(root).iterdir(), key=lambda path: path.is_dir()):
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
+
+
 async def run_scenarios(selected, agent, telemetry, agent_factory, prefix: str = "live-") -> int:
     """Run the chosen scenarios against one agent and print the report.
 
@@ -310,6 +333,7 @@ async def run_scenarios(selected, agent, telemetry, agent_factory, prefix: str =
 
     root = agent.capability_grant.root
     print(f"workspace {root}")
+    await start_clean(agent, selected, root)
     failed = 0
 
     try:

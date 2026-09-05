@@ -1024,3 +1024,15 @@ for the list first — each part of the request on a line with the tool
 call that did it or `nothing` — and the word last, because a verdict
 written first is written from the answer's own claim and one written
 after the list is written from the calls. Not deployed yet.
+
+**Third sample, invalid, 2026-09-05** (deploy d3421a0, the list-first
+question, run `deployed-808b8717-70`): one model call, no tool, 22 s, the
+answer of the run before repeated word for word. The probe user's thread
+`chat-g` lives in the deployed database and its workspace on the Volume,
+so the third G began with the two earlier turns in its history and the
+app already on disk, and answered from them; with no tool run the check
+is never asked. The instrument's, not the model's: locally the sealed room
+gives every scenario an empty conversation and an empty workspace, and
+deployed nothing did. `start_clean` in `scripts/loop_live.py` now deletes
+the selected scenarios' threads and empties the workspace root before the
+run, in both profiles. The list-first form is still unmeasured.
