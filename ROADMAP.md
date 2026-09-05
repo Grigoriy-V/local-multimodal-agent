@@ -317,8 +317,11 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
     served name and the thinking setting go with it.
 
 Order: 10, 11, 12 together are one cohesive change to how the model is
-told what it can do and how that is measured; 13 after. The command
-environment of ISS-0053 is recorded, not scheduled.
+told what it can do and how that is measured; 13 after. The analysis and
+the proposal for the three: `reports/2026-09-05_suite_and_tools_review.md`,
+awaiting the human's word on the contract shape, the merged tool's
+parameter and G's checks. The command environment of ISS-0053 is
+recorded, not scheduled.
 
 ### Not started
 
