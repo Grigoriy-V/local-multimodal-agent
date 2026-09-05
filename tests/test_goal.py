@@ -61,8 +61,8 @@ def spoken(messages) -> list[str]:
     ("text", "expected"),
     [
         ("done", (DONE, "")),
-        ("`done`\nThe PDF is there.", (DONE, "")),
-        ("Not yet", (NOT_YET, "")),
+        ("- a PDF: run_command made it\n- sent: send_file\n`done`", (DONE, "")),
+        ("- the files: nothing\nNot yet", (NOT_YET, "")),
         ("not_yet — the file is in English", (NOT_YET, "")),
         ("blocked: no Cyrillic font is installed", (BLOCKED, "no Cyrillic font is installed")),
         ("Blocked — the site needs a login", (BLOCKED, "the site needs a login")),
@@ -71,7 +71,7 @@ def spoken(messages) -> list[str]:
         ("", (DONE, "")),
     ],
 )
-def test_the_first_line_is_the_verdict(text, expected) -> None:
+def test_the_last_line_is_the_verdict(text, expected) -> None:
     assert verdict(text) == expected
 
 

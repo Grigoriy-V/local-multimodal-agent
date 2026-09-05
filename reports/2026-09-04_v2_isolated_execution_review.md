@@ -1007,3 +1007,20 @@ calls and their results, not by what the answer says — "something was
 sent only if a tool that sends it ran" — which is the general form of
 what G exposed and of ISS-0040. Whether that is enough for a 12B model
 is the next sample's to say.
+
+**Second sample, deployed, 2026-09-05** (deploy 4a7f8ad, the traced check
+with "judge by the tool calls", `loop_live --deployed G`, run
+`deployed-ab47f011-70`; again a first attempt died in `ReadTimeout` on
+the cold GPU, `deployed-f845ff58-70` — now ISS-0044). Seven of eight:
+three files, `inspect_page` as a tool, **the screenshot sent** by
+`send_file`, the files not, answer 283 s with the first call 80 s and
+132 s unattributed. The check is in the trace now: purpose `goal`, 2.0 s,
+3422 tokens in, 2 out, `goal_checked verdict=done round=1`. So the
+second sample is the same as the first: `done` to a request whose last
+line, "пришли в чат скриншот и файлы программы", had one of its two
+things done — with the question already saying to judge by the tool
+calls. Two of two. One more form before §14's verdict: the question asks
+for the list first — each part of the request on a line with the tool
+call that did it or `nothing` — and the word last, because a verdict
+written first is written from the answer's own claim and one written
+after the list is written from the calls. Not deployed yet.

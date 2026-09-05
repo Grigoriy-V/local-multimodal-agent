@@ -51,6 +51,27 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0044 — the first streamed request to a sleeping model endpoint dies at the read timeout
+
+- **Status:** open, 2026-09-05
+- **Seen:** 2026-09-05, twice, `loop_live --deployed` from a cold GPU (runs
+  `deployed-019b85ed-70`, `deployed-f845ff58-70`): the turn's first model
+  request raised `httpx.ReadTimeout` out of `stream` and the turn died;
+  the run that followed once the endpoint was awake went through. In the
+  next successful turn the first model call still shows 80–118 s and
+  120–130 s "unattributed" before it — the wake, paid a second time.
+- **Costs:** the first thing a person asks after a quiet hour fails
+  outright, and the wake it paid for is spent on nothing.
+- **Reproduce:** let the model app scale to zero, then send one turn.
+- **Cause:** `ModelSettings.timeout` is 120 s and the endpoint wakes in
+  more than that; `_completion` (the non-streaming path) retries a
+  transport error twice with backoff, `stream` does not retry at all —
+  its docstring says a failure before the first delta "could be retried
+  safely, and is not, for now". A wake is exactly that failure.
+- **Where it belongs:** the harness. The general property is that a
+  request that produced nothing yet may be sent again; no interface
+  should know that an endpoint sleeps.
+
 ### ISS-0043 — in the deployed container, `pip` is not `python3`'s pip
 
 - **Status:** fixed in the tree, 2026-09-04 — `pip` installed into the

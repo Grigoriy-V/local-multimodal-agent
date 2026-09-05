@@ -15,7 +15,8 @@ does not end on the model's first answer. It is asked one question, without
 tools, over the turn it just made: did that give the person what they
 asked, as they asked it? `done` ends the turn as it stands. `not yet` gives
 the tools back for another round, at most `ROUNDS` in a turn and always
-inside the turn's own budget. `blocked` ends the turn, and the answer has to
+inside the turn's own budget. The model lists the request's parts against
+the tool calls before it says the word. `blocked` ends the turn, and the answer has to
 carry the reason in the model's own words. A turn that used no tool is never
 asked and pays nothing.
 
@@ -51,14 +52,22 @@ BLOCKED = "blocked"
 # The question, as the model reads it. A user turn because that is the only
 # channel a chat model has mid-turn; framed so it is not answered as if the
 # person had typed it. The request is quoted whole.
+#
+# The list comes before the verdict, on purpose. Asked for the word first
+# (two deployed samples, 2026-09-05, G: the files not sent, the screenshot
+# claimed sent), a 12B model answered `done` both times, once with the
+# question already saying to judge by the tool calls. A verdict written
+# first is written from the answer's own claim; one written after each part
+# of the request has been matched to a tool call is written from the calls.
 CHECK = (
     "Turn control (not from the user). The person asked:\n\n{request}\n\n"
-    "Did what you did in this turn give them that, as they asked it? Judge "
-    "by the tool calls and their results above, not by what your answer "
-    "says: something was sent only if a tool that sends it ran. Answer on "
-    "the first line with exactly one of: `done` — they have it; `not yet` "
-    "— there is work left that you can do now; `blocked: ` and the reason — "
-    "you cannot finish. Nothing else."
+    "Go through that request part by part. For each thing they asked for, "
+    "write one line: what it was, and which tool call above did it — or "
+    "`nothing` if no tool call did. Judge by the tool calls and their "
+    "results, not by what your answer says: something was sent only if a "
+    "tool that sends it ran. Then, as the last line, exactly one of: `done` "
+    "— every part has its tool call; `not yet` — some part has none and you "
+    "can do it now; `blocked: ` and the reason — you cannot."
 )
 
 CHECK_SYSTEM = (
@@ -102,18 +111,18 @@ def worked(messages: Sequence[Message]) -> bool:
 
 
 def verdict(text: str) -> tuple[str, str]:
-    """The first line of the model's answer, read as one of three words.
+    """The last line of the model's answer, read as one of three words.
 
     Anything else counts as `done`: an answer the check cannot read must not
     cost the person a round, and it is recorded so the measurement sees it.
     """
 
-    first = next((line for line in text.splitlines() if line.strip()), "")
-    lowered = first.strip().strip("`*'\" ").lower()
+    last = next((line for line in reversed(text.splitlines()) if line.strip()), "")
+    lowered = last.strip().strip("`*'\" ").lower()
     if lowered.startswith("not yet") or lowered.startswith("not_yet"):
         return NOT_YET, ""
     if lowered.startswith("blocked"):
-        reason = first.strip().strip("`*'\" ")[len("blocked") :].lstrip(" :.-—")
+        reason = last.strip().strip("`*'\" ")[len("blocked") :].lstrip(" :.-—")
         return BLOCKED, reason.strip() or WITHOUT_REASON
     return DONE, ""
 
