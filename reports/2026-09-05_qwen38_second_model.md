@@ -742,6 +742,34 @@ repeat loop (above). The fold and the summary now travel as one system
 message (ISS-0052), the facts as the head of the turn's user message,
 and H and K show both working.
 
+### G alone, a second time, thinking off
+
+On the human's word, nothing changed: `deployed-c0c0a622-70`, 347.6 s,
+13 model calls, 13 tool calls, the turn ended at its budget with no
+answer. The thread, from the store: three `write_file`, then ten
+`run_command` — a Python HTTP server and a look for a browser
+("chrome: None"), `which node`, `npm install puppeteer` twice, `apt-get
+install` of Chromium's libraries (41 s), three attempts at a puppeteer
+screenshot script — and the budget. `inspect_page` was never called. It
+was offered: the toolbox is the same object for every scenario, and the
+brief's own line says a page you made is looked at with `inspect_page`,
+which opens it itself (F used it the same afternoon, twice). So the two
+G failures with thinking off are of one kind: the model does not take
+the route the brief names and spends the turn on its own — a repeat
+loop the guard broke, then a browser install the budget broke. The
+harness told the truth both times and ended both turns as designed.
+
+A false lead, corrected here: the `schemas` figure in `context_prepared`
+(3,956 in this run against 5,371 in the earlier G) is an estimate at the
+client's calibrated chars-per-token, and the first turn of every process
+reads 3,956 whatever the toolbox; it says nothing about which tools were
+offered.
+
+What is not yet measured and decides where this belongs: the same G
+with thinking on, through `MODEL_CHAT_TEMPLATE_KWARGS` — the morning's
+FP8 run at `low` did call `inspect_page` four times before it failed in
+a different way.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`
