@@ -277,11 +277,48 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    loses the handover in a repeat loop with thinking off. Found on the
    way, all fixed: the edge's 303 after 150 s that the client never
    followed (ISS-0044's cause), a mid-thread system message the template
-   refuses (ISS-0052). **Next, each its own gate:** G with thinking on
-   through `MODEL_CHAT_TEMPLATE_KWARGS`, for the comparison; MTP as a
-   separate measurement; the FP8 App is not run again (cost)
-   against the Gemma runs of 2026-09-05; then the human's call on which
-   the assistant uses.
+   refuses (ISS-0052). G with thinking off: two scenario runs failed on
+   the model's own route (a repeat loop; a browser built by hand with
+   `npm` and `apt`, during which the model slept three times behind the
+   12 s window) and the human's own live run of the same request passed
+   in 75 s with `inspect_page` and four `send_file`. The human's reading,
+   2026-09-05: thinking is not the answer (2.5x Gemma's cost already);
+   the route the model missed is the harness's to make obvious — items
+   10–12. The FP8 App is not run again (cost); MTP stays a separate
+   measurement, not scheduled.
+
+10. **The scenario suite, reconsidered — next, the human's word 2026-09-05.**
+    The suite does not do what it is for: checks that assert a route
+    (`write_file then inspect_page` in F and G) against the suite's own
+    rule; a runner whose long-running turns let the model sleep and pay
+    restores inside the turn (G: three model containers in one turn);
+    results that arrive only when the whole batch ends, so a crash loses
+    every summary; a batch that dies with its container. What to keep,
+    what to change and why, as a report first; then the changes.
+
+11. **Tools as the references have them.** Every tool's description
+    states what it takes, what it returns and what it leaves where, and an
+    offline test refuses a tool without all three, the way one already
+    refuses a tool without a Telegram label. The difference from Hermes
+    and DeepSeek Harness read tool by tool, in a report, before the
+    rewrite.
+
+12. **One way to look at a page: `inspect_page` removed.** `view_web_page`
+    already opens a real browser, returns the text and a screenshot, and
+    says the screenshot's workspace path; it takes a workspace path as
+    well as an address, returns the structure with refs too, and
+    `inspect_page`, its brief line and the scenario checks that name it
+    go. No new tool, no new name.
+
+13. **The model chosen from Telegram, and a default model.** A command
+    in the chat picks which deployed model App the assistant talks to;
+    the default is not yet chosen. Needs a design first: today the model
+    is one endpoint in the control secret, and the context ceiling, the
+    served name and the thinking setting go with it.
+
+Order: 10, 11, 12 together are one cohesive change to how the model is
+told what it can do and how that is measured; 13 after. The command
+environment of ISS-0053 is recorded, not scheduled.
 
 ### Not started
 

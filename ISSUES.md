@@ -97,6 +97,30 @@ Rules that keep the file honest:
   healthy and exits with its log; the snapshot boot follows only after
   that passes. What `dry_run` cannot see is the restore.
 
+### ISS-0053 — what a command installs outside the workspace is gone by the next command
+
+- **Status:** open, recorded 2026-09-05 on the human's word; not
+  scheduled, not diagnosed further
+- **Seen:** 2026-09-05, scenario G on the INT4 App
+  (`deployed-c0c0a622-70`): the model ran `npm install puppeteer` in
+  `/tmp` and `apt-get install` of Chromium's libraries, then its script
+  could not find what it had installed; each `run_command` may land in a
+  fresh command container, and only the workspace persists between them.
+  The brief says "install what that needs" and that what is installed
+  lives in the workspace; the first result in a fresh container says "new
+  environment: nothing installed by earlier commands is present".
+- **Costs:** minutes of a turn spent installing what the next command
+  cannot see; a model that reads the "new environment" line as its own
+  earlier work being gone.
+- **Where it might belong:** the harness's command environment. A
+  possible general shape, not decided: everything a command installs
+  lands in the workspace by default (`HOME`, npm's prefix and cache,
+  pip's target, the working directory), so persistence needs no
+  knowledge from the model, and the "new environment" line becomes
+  unnecessary. pip already has a workspace venv (ISS-0043); node does
+  not. Compare DeepSeek Harness, whose shell environment is one per
+  session. The human: "пока непонятно, просто запиши".
+
 ### ISS-0052 — a system message that is not first is refused by Qwen3.8's chat template
 
 - **Status:** fixed 2026-09-05 in the tree, deployed with the next
