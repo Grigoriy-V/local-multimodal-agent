@@ -104,6 +104,58 @@ def install_connection(
     return connection
 
 
+class HungUpConnection(FakeConnection):
+    """Looks open, and fails the first statement sent — a server's idle hang-up."""
+
+    def cursor(self) -> FakeCursor:
+        return HungUpCursor(self)
+
+
+class HungUpCursor(FakeCursor):
+    def execute(self, statement: Any, parameters: object = None) -> None:
+        raise psycopg.OperationalError("consuming input failed: SSL connection has been closed unexpectedly")
+
+
+def test_a_server_hang_up_during_idle_is_answered_with_a_fresh_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ISS-0048: the pooled server closes an idle connection during a long
+    # model call; `closed` and `broken` still say the connection is fine, and
+    # the first statement after the pause — the store's own search path — is
+    # where the hang-up surfaces. That statement is resent on a fresh
+    # connection and the caller's read runs there; the caller never sees it.
+    hung_up = HungUpConnection({})
+    fresh = FakeConnection({})
+    handed_out = iter([hung_up, fresh])
+    monkeypatch.setattr(
+        "app.memory.postgres.psycopg.connect",
+        lambda _dsn, *, row_factory: next(handed_out),
+    )
+    store = PostgresStore("postgresql://unused", schema="test", migrate_schema=False)
+
+    assert store.messages("thread") == []
+
+    assert hung_up.closed
+    assert hung_up.executions == []
+    statements = [statement for statement, _ in fresh.executions]
+    assert statements[0] == 'SET LOCAL search_path TO "test"'
+    assert any("FROM messages" in statement for statement in statements[1:])
+
+
+def test_a_hang_up_on_the_fresh_connection_too_is_the_callers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handed_out = iter([HungUpConnection({}), HungUpConnection({})])
+    monkeypatch.setattr(
+        "app.memory.postgres.psycopg.connect",
+        lambda _dsn, *, row_factory: next(handed_out),
+    )
+    store = PostgresStore("postgresql://unused", schema="test", migrate_schema=False)
+
+    with pytest.raises(psycopg.OperationalError):
+        store.messages("thread")
+
+
 def test_runtime_open_does_not_execute_migrations(monkeypatch: pytest.MonkeyPatch) -> None:
     connection = install_connection(monkeypatch, {})
 

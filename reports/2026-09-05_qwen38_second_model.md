@@ -270,6 +270,64 @@ Volume, but on a 20k turn it saves about a second against a restore it
 cannot remove, and it adds a component and per-user gigabytes; declined for
 now, noted here as the path if prefill of long turns ever dominates.
 
+## 7. The live scenarios on Qwen, first attempt: A–F pass the harness, G does not come back
+
+The assistant was pointed at the new endpoint by the two keys in the
+control secret and a control-plane deploy; the sixteen scenarios ran in
+the deployed worker (`loop_live --deployed`). What the record holds:
+
+| Run | Scenario | Time | Calls | Tokens in/out | Outcome |
+|---|---|---|---|---|---|
+| `3a7b245a-10` | A | 40.1 s | 1m/0t | 4,824/43 | answered |
+| `3a7b245a-20` | B | 10.7 s | 2m/1t | 9,709/77 | answered |
+| `3a7b245a-30` | C | 20.2 s | 3m/2t | 14,865/223 | answered |
+| `3a7b245a-40` | D | 36.1 s | 2m/5t | 10,164/536 | answered |
+| `3a7b245a-50` | E | 16.9 s | 2m/1t | 9,804/192 | answered |
+| `3a7b245a-60` | F | 32.9 s | 3m/2t | 15,836/409 | answered |
+| `3a7b245a-70` | G | 274.6 s | 1m/0t | 0/0 | killed: the container went away during the first model call |
+| `d6beb190-10…60` | A–F again | 9–99 s | | | answered; A's 99 s is a restore |
+| `d6beb190-70` | G | 456.9 s | 2m/0t | 9,176/8,334 | first model token at 454.7 s; then ISS-0048 |
+
+The Gemma runs of the same day for comparison: B 3.2 s, C 5.1 s, D 4.5 s,
+F 15.5 s, G 102 s with 9 calls and 3,534 tokens out.
+
+Three things, in the order they matter:
+
+1. **G's first model call wrote 8,334 tokens in one go — 7.5 minutes at
+   ~18 tokens/s — and called no tool.** Gemma answers G with nine calls
+   and eight tool uses. With `reasoning_effort: low` Qwen still reasons
+   at length over a four-file request and then, apparently, writes the
+   files into its answer instead of into `write_file`; the turn was not
+   stored (see 3), so the text itself is gone. Whether this is the
+   thinking budget, the tool parser with a long `<think>` block, or the
+   model's reading of the request is the next thing to measure, on G
+   alone, with the turn stored.
+2. **The first G was killed at 274 s** in the scenarios container, with
+   the model call still open: `turn_failed error_type=killed`, then the
+   Function's input was rescheduled and the run started over from A
+   (`d6beb190-*`). The control-app log for that window returned nothing
+   through the CLI; cause not established. Recorded, not diagnosed.
+3. **ISS-0048.** After G's 457 s the store's connection had been hung up
+   on by Neon; `persist` failed on the store's first statement, the run
+   died, G's turn was never stored. Fixed: the store resends its own
+   search-path statement once on a fresh connection.
+
+Also seen: a restore in the middle of the run cost A 99 s
+(`d6beb190-10`, one model call), because the 12 s idle window had closed
+the model container between scenarios. The window is the first App's,
+priced for Gemma's ~10 s restore, and on a 28.5 GiB snapshot it charges
+a person a minute for every pause; not changed here, the human's call.
+
+Cost of the attempt: about 22 minutes of L40S across three model
+containers, ~$0.70, plus the control container.
+
+**Correction to §6.** It said a smaller snapshot would save "a few
+seconds"; the restores measured today (19 s, 28 s, 80 s, 86 s on the
+same 28.5 GiB snapshot) are proportional to the snapshot and dominated
+by whether the host has it cached, so a 17 GiB INT4 snapshot is about
+half the restore, not a few seconds off it. The human chose to move to
+`RedHatAI/Qwen3.8-27B-INT4`; noted, not begun.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`

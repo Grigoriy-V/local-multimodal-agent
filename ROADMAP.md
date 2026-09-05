@@ -251,7 +251,13 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    blocks, and the compile-cache Volume committed before the snapshot
    (ISS-0047). Measured: 9.75 GiB of KV, 155,600 tokens, 1.19x at 131,072;
    restored wake 88.5 s; text, image and a parsed tool call with thinking
-   at `low`. **Next, each its own gate:** the live scenarios on it
+   at `low`. The scenarios ran once (report §7): A–F answered, G wrote
+   8,334 tokens in one call and no tool, the first G was killed in the
+   worker, and the store's idle connection failed the turn (ISS-0048,
+   fixed). The human means to move to `RedHatAI/Qwen3.8-27B-INT4` for a
+   snapshot half the size (report §5, §7). **Next, each its own gate:**
+   deploy the store fix; G alone on Qwen with the turn stored; the
+   INT4 App; then the live scenarios on it
    against the Gemma runs of 2026-09-05; then the human's call on which
    the assistant uses.
 

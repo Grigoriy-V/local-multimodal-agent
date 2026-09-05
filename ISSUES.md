@@ -75,6 +75,31 @@ Rules that keep the file honest:
   name is found, and had never run against Postgres.
 - **Where it belongs:** the harness.
 
+### ISS-0048 — the store's connection, hung up on during a long model call, fails the next turn
+
+- **Status:** fixed 2026-09-05 in the tree; deployed with the next
+  `assistant-control` deploy
+- **Seen:** 2026-09-05, the live scenarios in the deployed worker on
+  Qwen3.8 (`deployed-d6beb190-70`): G's one model call took 457 s, and
+  the turn's `persist` then failed on `store.messages` with
+  `psycopg.OperationalError: consuming input failed: SSL connection has
+  been closed unexpectedly`; the whole scenario run died with it and the
+  turn was not stored. The pooled server had closed the idle connection
+  during the call. `connection.closed` and `.broken` do not know until a
+  statement is sent, so `_live_connection` handed the dead one over.
+- **Costs:** a turn lost after its model work was done, and a run of
+  scenarios lost with it; on a person's turn, an error after a long wait.
+- **Reproduce:** any turn whose gap between two store statements outlasts
+  the server's idle timeout — a long model call, a long tool. Gemma's
+  turns rarely reached it; a 27B with thinking does.
+- **Where it belongs:** the harness. The first statement after a pause is
+  the store's own (`SET LOCAL search_path`), so a hang-up surfacing there
+  is resent once on a fresh connection with nothing of the caller's to
+  replay (`PostgresStore._opened`); a hang-up during the caller's
+  statements is still the caller's, as before. Offline tests with a
+  connection that looks open and fails its first statement.
+  `reports/2026-09-05_qwen38_second_model.md` §7.
+
 ### ISS-0047 — a GPU snapshot taken with an uncommitted Volume path open cannot be restored
 
 - **Status:** fixed 2026-09-05, deployed in `assistant-llm-qwen`; in the

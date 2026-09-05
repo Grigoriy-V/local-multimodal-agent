@@ -270,15 +270,23 @@ class PostgresStore(ConversationStore):
         assistant is idle by design between messages. Reconnecting is therefore
         the normal path after a pause, not an error path.
 
-        A connection that dies mid-statement is not retried here: the caller's
-        statements would have to be replayed, and this cannot know whether that
-        is safe. It is dropped instead, so the next call opens a new one.
+        A connection the server hung up on while it sat idle looks open from
+        here — `closed` and `broken` say nothing until a statement is sent —
+        so the hang-up surfaces on the first statement after the pause. That
+        statement is this method's own, the search path, and it can be sent
+        again on a fresh connection with nothing of the caller's to replay.
+        Observed 2026-09-05 (ISS-0048): a turn whose one model call took 457 s
+        came back to `SSL connection has been closed unexpectedly` on the
+        store, and the whole live run with it.
+
+        A connection that dies during the caller's statements is not retried
+        here: those would have to be replayed, and this cannot know whether
+        that is safe. It is dropped instead, so the next call opens a new one.
         """
 
-        connection = self._live_connection()
+        connection = self._opened()
         try:
             with connection.cursor() as cursor:
-                cursor.execute(f'SET LOCAL search_path TO "{self.schema}"')
                 yield cursor
             # Writers commit for themselves; this is what ends a read's
             # transaction, which nothing else would.
@@ -287,6 +295,29 @@ class PostgresStore(ConversationStore):
             self._connection = None
             connection.close()
             raise
+
+    def _opened(self) -> psycopg.Connection:
+        """A connection that has just answered the search-path statement.
+
+        Once on the connection at hand, and once more on a fresh one if the
+        server had hung up on the first — the only statement sent is this
+        method's own. `SET LOCAL` lives for the transaction it opens, which the
+        caller's cursor continues until `_settle` or the caller's own commit.
+        """
+
+        connection = self._live_connection()
+        for fresh in (False, True):
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(f'SET LOCAL search_path TO "{self.schema}"')
+                return connection
+            except psycopg.OperationalError:
+                self._connection = None
+                connection.close()
+                if fresh:
+                    raise
+                connection = self._open()
+        raise AssertionError("unreachable")
 
     # --- threads -------------------------------------------------------------
 
