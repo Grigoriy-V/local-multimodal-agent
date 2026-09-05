@@ -660,6 +660,23 @@ call with thinking at `low`; now thinking is off and the cache is on);
 thinking turned back on by `MODEL_CHAT_TEMPLATE_KWARGS` for a
 comparison; MTP alone.
 
+## 13. The remaining scenarios, and a retry that queued copies
+
+Started on the human's word with the model asleep: D, G, H, I, K, J, O,
+P, Q. The first call landed on a worker type with no snapshot of the
+0.28.0 version yet, so a full boot ran (healthy after 448.6 s), and the
+human saw what the morning's ISS-0044 fix did in front of it: the
+client's 120 s timeout expired, the stream was sent again, and again —
+one input a minute queued at the edge behind the boot, each a copy the
+server would answer to a closed connection. `measure_endpoint_wake.py`
+had said as much in its own docstring: a timed-out request "may still
+be queued, so retrying it would create another paid task". The fix
+retried the wrong failure. Now a timeout is never retried (a refused
+connection or a "later" status still is, before the first chunk), and
+`MODEL_TIMEOUT` is 600 s, which covers a snapshot boot's first byte.
+The run itself was left to finish: stopping it would have wasted the
+boot it was paying for.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`

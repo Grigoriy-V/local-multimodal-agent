@@ -216,13 +216,17 @@ Rules that keep the file honest:
 
 ### ISS-0044 — the first streamed request to a sleeping model endpoint dies at the read timeout
 
-- **Status:** fixed 2026-09-05 in the tree, deployed with the next
-  `assistant-control` deploy. `stream` now sends the request again while
-  nothing has arrived — a transport failure or a "later" status before the
-  first chunk, up to `MODEL_RETRIES` with the same backoff as
-  `_completion` — and still never after a delta was yielded. Three offline
-  tests. Seen a third time the same day on the INT4 App: a scenario run
-  died on its first call while the endpoint was creating a snapshot.
+- **Status:** fixed 2026-09-05, twice. The first fix retried the stream
+  on a timeout, and that was wrong: a timed-out request is still queued
+  at Modal's edge and is answered when the container is up, so each
+  retry queued another copy — seen the same evening as one request a
+  minute stacking up behind a seven-minute snapshot boot, every copy
+  then answered to a closed connection (the human's observation). The
+  second fix: a timeout is never retried, in `stream` or `_completion`;
+  what is retried before the first chunk is a refused connection or a
+  "later" status; and `MODEL_TIMEOUT` is 600 s, long enough for the
+  first byte of an endpoint creating a snapshot. Deployed with the next
+  `assistant-control` deploy.
 - **Also seen:** 2026-09-05, `loop_live --deployed A B C E F R S` on
   `assistant-llm-qwen-int4`, first call, `httpx.ReadTimeout`; the
   endpoint was seven minutes into a snapshot boot.

@@ -597,7 +597,10 @@ class OpenAICompatibleBackend(ModelBackend):
                 failure = BackendError(
                     f"the endpoint {self.settings.endpoint} could not be reached ({detail})"
                 )
-                transient = True
+                # A timed-out request is still queued at the endpoint; sending
+                # it again doubles it (see `stream`). Everything else transport
+                # never reached the server and may be sent again.
+                transient = not isinstance(error, httpx.TimeoutException)
             else:
                 if response.status_code < 400:
                     return response.json()
@@ -635,15 +638,19 @@ class OpenAICompatibleBackend(ModelBackend):
     ) -> AsyncIterator[StreamEvent]:
         """Yield text as it arrives, then the assembled result.
 
-        Retried only while nothing has arrived. A stream that fails halfway
-        has already given the caller part of an answer, and there is no way to
-        ask for the rest — retrying would repeat what was said, in front of
-        the person reading it. A request that produced nothing yet may be
-        sent again, the same as `_completion` does: a transport failure, or a
-        status the server means as "later". The case that made this matter is
-        an endpoint waking from sleep (ISS-0044): the first request of a turn
-        waited out the read timeout and the turn died, though the server was
-        seconds from answering.
+        Retried only while nothing has arrived, and never on a timeout. A
+        stream that fails halfway has already given the caller part of an
+        answer, and there is no way to ask for the rest — retrying would repeat
+        what was said, in front of the person reading it. A request that
+        produced nothing yet may be sent again when the server refused it — a
+        connection that failed, or a status that means "later" — the same as
+        `_completion` does. A timeout is different: the request was accepted
+        and is still queued at the endpoint, and sending it again queues a
+        second copy that the server will also answer, to nobody (ISS-0044,
+        seen on 2026-09-05 as one request a minute stacking up behind a
+        seven-minute boot). So a timeout ends the call, and the timeout is
+        long enough for what an endpoint legitimately takes to answer its
+        first byte: `ModelSettings.timeout`.
 
         `CompletionDone` is yielded only if the response ended; a stream that
         breaks raises out of here instead, so a caller can never mistake a
@@ -676,8 +683,8 @@ class OpenAICompatibleBackend(ModelBackend):
                         if text:
                             yield TextDelta(text)
                 break
-            except (httpx.HTTPError, _Later):
-                if received or attempt >= self.settings.retries:
+            except (httpx.HTTPError, _Later) as error:
+                if received or attempt >= self.settings.retries or isinstance(error, httpx.TimeoutException):
                     raise
                 await asyncio.sleep(self.settings.retry_backoff * 2**attempt)
                 attempt += 1

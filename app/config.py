@@ -24,7 +24,14 @@ class ModelSettings(BaseSettings):
     # can instead require the proxy token as two headers; keeping this explicit
     # avoids guessing from a URL or from the shape of a secret.
     auth_style: Literal["bearer", "modal_proxy"] = "bearer"
-    timeout: float = 120.0
+    # How long a request may wait for its first byte, and a stream between
+    # bytes. 600 since 2026-09-05, from 120: a deployed endpoint that has to
+    # create a snapshot on a worker type that has none takes six to seven
+    # minutes before it answers, the request waits queued at the edge the whole
+    # time, and a client that gives up sooner and asks again only queues a
+    # second copy (ISS-0044). An endpoint that fails answers with an error
+    # well inside this; a local server never sleeps.
+    timeout: float = 600.0
     # An output cap, not reserved output and not the server's context length
     # (64k since 2026-08-30). 8192 since 2026-09-04: a single file of about
     # 15k characters is 5k tokens, and 4096 cut it mid-call (ISS-0031); output

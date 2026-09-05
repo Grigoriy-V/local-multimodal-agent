@@ -646,9 +646,25 @@ async def test_a_broken_stream_is_not_retried_and_yields_no_completion() -> None
     assert attempts == 1
 
 
-async def test_a_stream_that_timed_out_before_anything_arrived_is_sent_again() -> None:
-    """ISS-0044: the endpoint was waking; the request produced nothing; ask again."""
+async def test_a_stream_that_timed_out_is_not_sent_again() -> None:
+    """ISS-0044: the request is still queued at the endpoint; a second copy is waste."""
 
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ReadTimeout("no byte within the timeout")
+
+    async with backend(handler, retries=2, retry_backoff=0.0) as client:
+        with pytest.raises(httpx.ReadTimeout):
+            async for _ in client.stream([Message(role="user", content=[text_part()])]):
+                pass
+
+    assert attempts == 1
+
+
+async def test_a_stream_refused_by_the_transport_is_sent_again() -> None:
     attempts = 0
     body = (
         f"data: {json.dumps(delta({'content': 'awake'}))}\n\n"
@@ -660,7 +676,7 @@ async def test_a_stream_that_timed_out_before_anything_arrived_is_sent_again() -
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise httpx.ReadTimeout("no byte within the timeout")
+            raise httpx.ConnectError("connection refused")
         return httpx.Response(200, content=body.encode())
 
     async with backend(handler, retries=2, retry_backoff=0.0) as client:
@@ -693,20 +709,19 @@ async def test_a_stream_refused_with_a_later_status_is_sent_again() -> None:
     assert events[0] == TextDelta("now")
 
 
-async def test_a_stream_that_keeps_timing_out_raises_after_the_retries() -> None:
+async def test_a_completion_that_timed_out_is_not_sent_again() -> None:
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal attempts
         attempts += 1
-        raise httpx.ReadTimeout("still asleep")
+        raise httpx.ReadTimeout("still booting")
 
-    async with backend(handler, retries=1, retry_backoff=0.0) as client:
-        with pytest.raises(httpx.ReadTimeout):
-            async for _ in client.stream([Message(role="user", content=[text_part()])]):
-                pass
+    async with backend(handler, retries=2, retry_backoff=0.0) as client:
+        with pytest.raises(BackendError, match="ReadTimeout"):
+            await client.invoke([Message(role="user", content=[text_part()])])
 
-    assert attempts == 2
+    assert attempts == 1
 
 
 async def test_an_http_error_becomes_a_backend_error() -> None:
