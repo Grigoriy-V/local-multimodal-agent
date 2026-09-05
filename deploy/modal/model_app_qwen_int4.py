@@ -14,7 +14,8 @@ which is decode; it costs about the same per hour. Why not the A10: 27B
 int4 leaves it ~2 GiB for KV, about 24k tokens.
 
     modal run deploy/modal/model_app_qwen_int4.py::fetch_weights
-    modal run deploy/modal/model_app_qwen_int4.py::preflight
+    modal run deploy/modal/model_app_qwen_int4.py::preflight     (CPU)
+    modal run deploy/modal/model_app_qwen_int4.py::dry_run       (one GPU boot, no snapshot)
     modal deploy deploy/modal/model_app_qwen_int4.py
 """
 
@@ -69,7 +70,9 @@ SERVING = qwen.Serving(
 )
 
 app = modal.App(APP_NAME)
-image = base.image.add_local_python_source("model_app", "model_app_qwen", "model_app_qwen_int4")
+image = base.image.env(qwen.QWEN_ENV).add_local_python_source(
+    "model_app", "model_app_qwen", "model_app_qwen_int4"
+)
 
 
 @app.function(
@@ -90,6 +93,20 @@ def fetch_weights() -> None:
 )
 def preflight() -> None:
     qwen.check(SERVING)
+
+
+@app.function(
+    image=image,
+    gpu=GPU,
+    memory=MEMORY_MB,
+    volumes={"/root/.cache/huggingface": base.hf_cache},
+    timeout=qwen.STARTUP_TIMEOUT,
+    retries=0,
+)
+def dry_run() -> None:
+    """One boot on the A100, no snapshot, no retries; see `model_app_qwen.dry_boot`."""
+
+    qwen.dry_boot(SERVING)
 
 
 @app.cls(

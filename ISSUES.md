@@ -75,6 +75,47 @@ Rules that keep the file honest:
   name is found, and had never run against Postgres.
 - **Where it belongs:** the harness.
 
+### ISS-0049 — a failed server start is retried by the platform for as long as a request waits
+
+- **Status:** open as a property of the platform; worked around 2026-09-05
+- **Seen:** 2026-09-05, three times: the FP8 App's first boot (four
+  containers in 13 minutes on the same refused ceiling), the INT4 App's
+  fourth boot (three containers in one minute on the same crash). A
+  request at the edge waits up to the server's `startup_timeout`, and
+  Modal starts a new container for it each time the previous one's enter
+  hook fails. The wake probe's own client timeout does not end the
+  request: it stays queued server-side (`measure_endpoint_wake.py` says
+  so), so a client that gave up still drives restarts.
+- **Costs:** a refused configuration is paid for several times over
+  before anyone stops it, and raising `startup_timeout` (20 min for the
+  Qwen Apps) lengthens how long a stale request keeps spawning.
+- **Reproduce:** deploy a configuration that fails in `start` and send
+  one request.
+- **Where it belongs:** the harness's deployment procedure. A
+  configuration now boots first in `dry_run`, a plain Function with
+  `retries=0` and no request behind it, which runs the same `boot` to
+  healthy and exits with its log; the snapshot boot follows only after
+  that passes. What `dry_run` cannot see is the restore.
+
+### ISS-0050 — vLLM's ahead-of-time compile of the INT4 checkpoint dies tracing a renamed weight
+
+- **Status:** worked around 2026-09-05 (`VLLM_USE_AOT_COMPILE=0` on the
+  Qwen Apps); not diagnosed
+- **Seen:** 2026-09-05, the INT4 App's fourth boot: the ordinary
+  `torch.compile` had succeeded in an earlier boot of the same
+  configuration, and `aot_compile_fullgraph` in `profile_run` died with
+  `AttributeError: 'MergedColumnParallelLinear' object has no attribute
+  'weight_packed'` — the compressed-tensors name of the packed int4
+  weight, which the Marlin repack replaces after loading. The first boot
+  of the same App had completed an AOT compile in 191 s; what differed
+  is not established.
+- **Costs:** a boot, and the restarts of ISS-0049 behind it.
+- **Where it belongs:** vLLM 0.26.0 with this checkpoint; not the
+  harness's to fix. AOT compilation serves a later process loading the
+  artifact from disk, and no Qwen App has one: the snapshot holds the
+  compiled engine. Off, per `vllm/envs.py`, the ordinary compile runs once
+  per boot.
+
 ### ISS-0048 — the store's connection, hung up on during a long model call, fails the next turn
 
 - **Status:** fixed 2026-09-05 in the tree; deployed with the next

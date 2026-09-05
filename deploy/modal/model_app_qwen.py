@@ -19,7 +19,8 @@ its own numbers and a small class. The boot history that shaped those helpers
 is `reports/2026-09-05_qwen38_second_model.md` §5.
 
     modal run deploy/modal/model_app_qwen.py::fetch_weights
-    modal run deploy/modal/model_app_qwen.py::preflight
+    modal run deploy/modal/model_app_qwen.py::preflight      (CPU)
+    modal run deploy/modal/model_app_qwen.py::dry_run        (one GPU boot, no snapshot)
     modal deploy deploy/modal/model_app_qwen.py
 """
 
@@ -325,12 +326,51 @@ def check(spec: Serving) -> None:
     print("PASS: the configuration builds and the ceiling fits the pool", flush=True)
 
 
+# vLLM's ahead-of-time compilation writes the compiled graph to disk so a
+# later *process* can load it without tracing again. Here no later process
+# ever does: the snapshot holds the compiled engine, and the compile cache is
+# not kept. What the path did do was fail — the INT4 App's fourth boot died
+# in `aot_compile_fullgraph` tracing `weight_packed` on a
+# `MergedColumnParallelLinear`, an attribute the Marlin repack had renamed —
+# while the same boot's ordinary `torch.compile` had succeeded before it.
+# `vllm/envs.py` (0.26.0): "compilation is done in warmup phase and the
+# compilation will be reused in subsequent calls"; off, the ordinary path
+# compiles once per boot and the snapshot keeps it.
+QWEN_ENV = {"VLLM_USE_AOT_COMPILE": "0"}
+
+
+def dry_boot(spec: Serving) -> None:
+    """Boot the engine once, in a plain Function, and exit: no snapshot, no loop.
+
+    What a failed `Server.start` costs is not one boot. A request waits at
+    the edge for as long as `startup_timeout`, and Modal starts a container
+    for it again each time the previous one dies — three in one minute on
+    2026-09-05, until the App was stopped by hand. A Function has no request
+    behind it: `modal run …::dry_boot` starts one container, runs the same
+    `boot` to healthy, answers one completion, wakes and answers again, and
+    exits with the log. A configuration boots here before it boots in the
+    server that can loop. It cannot see the restore, which only a deployed
+    snapshot has.
+    """
+
+    import time
+
+    process = boot(spec)
+    started = time.monotonic()
+    base._wake_up()
+    base._wait_ready(process, base.WAKE_READY_TIMEOUT, "resume")
+    print(f"dry boot: slept and woke in {time.monotonic() - started:.1f}s", flush=True)
+    base._warmup(spec.served_name)
+    print("dry boot: PASS — start, warmup, sleep, wake and a completion", flush=True)
+    process.terminate()
+
+
 app = modal.App(APP_NAME)
 
-# The image is the first App's, with this directory's modules on it: the
-# helpers this file calls live in `model_app`, and Modal includes only the
-# entrypoint by itself.
-image = base.image.add_local_python_source("model_app", "model_app_qwen")
+# The image is the first App's with the Qwen environment on it and this
+# directory's modules: the helpers this file calls live in `model_app`, and
+# Modal includes only the entrypoint by itself.
+image = base.image.env(QWEN_ENV).add_local_python_source("model_app", "model_app_qwen")
 
 
 @app.function(
@@ -355,6 +395,20 @@ def preflight() -> None:
     """Build the engine's configuration and check the pool on CPU; see `check`."""
 
     check(SERVING)
+
+
+@app.function(
+    image=image,
+    gpu=GPU,
+    memory=MEMORY_MB,
+    volumes={"/root/.cache/huggingface": base.hf_cache},
+    timeout=STARTUP_TIMEOUT,
+    retries=0,
+)
+def dry_run() -> None:
+    """One boot of this configuration on the GPU, no snapshot, no retries; see `dry_boot`."""
+
+    dry_boot(SERVING)
 
 
 @app.cls(

@@ -268,6 +268,18 @@ class SecondModelIdentityTests(unittest.TestCase):
         )
         self.assertLess(worst_start, model_app_qwen.STARTUP_TIMEOUT)
 
+    def test_no_ahead_of_time_compile(self):
+        # The fourth INT4 boot died in `aot_compile_fullgraph`; nothing here
+        # ever loads an AOT artifact, the snapshot holds the compiled engine.
+        self.assertEqual(model_app_qwen.QWEN_ENV.get("VLLM_USE_AOT_COMPILE"), "0")
+
+    def test_a_dry_boot_exists_for_every_qwen_app(self):
+        # A configuration boots once in a Function that cannot loop before it
+        # boots in the server that can.
+        self.assertTrue(callable(model_app_qwen.dry_boot))
+        self.assertIsNotNone(getattr(model_app_qwen, "dry_run", None))
+        self.assertIsNotNone(getattr(model_app_qwen_int4, "dry_run", None))
+
     def test_the_snapshot_holds_nothing_on_the_compile_cache_volume(self):
         # ISS-0047: the Qwen Apps' boot neither reads nor commits the
         # compile-cache Volume; the source is the record of that.

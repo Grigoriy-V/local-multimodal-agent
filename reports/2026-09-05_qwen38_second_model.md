@@ -420,7 +420,34 @@ a restore never compiles; so the Qwen Apps' `Server` no longer mounts the
 compile-cache Volume at all, and a version's first boot compiles from
 nothing, once. Deployed, not booted.
 
-Spent on the INT4 App: three boots, about 21 A100-minutes, ~$0.75.
+**The fourth boot, uninvited.** Stopping the third boot's container did
+not end the request behind it: Modal started another container for it
+four seconds later, on the version with the copy, and that one loaded
+the weights and died fourteen seconds into the profile run, in
+`aot_compile_fullgraph`, tracing `weight_packed` on a
+`MergedColumnParallelLinear` (ISS-0050) — then two more containers in
+the next minute on the same crash, until the human stopped the App
+(ISS-0049). The first boot of this App had completed the same AOT
+compile in 191 s and the second had loaded its artifact; what differed
+in the fourth is not established, and it is not worth a GPU to
+establish: the artifact serves a later process, and no Qwen App has
+one. `VLLM_USE_AOT_COMPILE=0` on the Qwen Apps (`vllm/envs.py` 0.26.0:
+on by default with torch ≥ 2.10).
+
+Two things the day's spawning taught, now in the procedure. A request
+waits at the edge for as long as `startup_timeout` and Modal restarts a
+failing container for it as often as it fails, so the wake probe is the
+wrong instrument for a first boot; `dry_run`, a plain Function with
+`retries=0`, boots the same configuration once to healthy, sleeps,
+wakes, answers, and exits with its log. And the third boot's eight
+silent minutes may not have been the copy at all: when its container
+was stopped, the next one started in four seconds and printed
+`vllm serve` at once, so the copy was fast, and the silence looks like a
+wait for an A100 — the availability risk named in §3. Not established
+either way; the copy is gone regardless.
+
+Spent on the INT4 App: four boots, about 25 A100-minutes, ~$0.85. Not
+booted since; `dry_run` is the next step, on the human's word.
 
 ## Sources
 

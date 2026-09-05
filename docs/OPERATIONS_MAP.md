@@ -520,12 +520,15 @@ everything else: the FP8 App's (parsers, thinking low, max num seqs 16, image=4)
 container memory request: 24 GiB
 ```
 
-**Before any GPU boot of a Qwen App, `preflight` on CPU** builds the
-engine configuration and runs `model_app_qwen.fits`: the pool arithmetic
-calibrated on the boots of 2026-09-05 (KV 64 KB a token, weights resident
-at their bytes on disk, ~2 GiB of engine overhead, good to about half a
-gigabyte). It refuses a ceiling the pool cannot hold, which cost four L40S
-boots to learn.
+**The order for a Qwen App, each step its own gate:** `fetch_weights`
+(CPU) → `preflight` (CPU: the engine configuration builds, and
+`model_app_qwen.fits` — the pool arithmetic calibrated on the boots of
+2026-09-05, good to about half a gigabyte — accepts the ceiling) →
+`dry_run` (one GPU boot in a plain Function with no request behind it and
+`retries=0`, so a failure is paid once, ISS-0049) → `modal deploy` → the
+first request, which creates the snapshot and is the only step that can
+show a failed restore. The Qwen Apps' `Server` mounts no compile-cache
+Volume (ISS-0047) and runs with `VLLM_USE_AOT_COMPILE=0` (ISS-0050).
 
 The same three functions, `fetch_weights`, `preflight` and `Server`, run
 from this file:
@@ -915,6 +918,7 @@ Human-readable implementation evidence belongs in `reports/` rather than in the 
 | Deploy the second model server (Qwen3.8 FP8, L40S) | `deploy/modal/model_app_qwen.py` |
 | Deploy the third model server (Qwen3.8 INT4, A100-40GB) | `deploy/modal/model_app_qwen_int4.py` |
 | Check a Qwen App's ceiling against its pool without a GPU | `modal run deploy/modal/model_app_qwen*.py::preflight` (`model_app_qwen.fits`) |
+| Boot a Qwen configuration once, no snapshot, no retries, before deploying it | `modal run deploy/modal/model_app_qwen*.py::dry_run` (`model_app_qwen.dry_boot`; a GPU boot, permission each time) |
 | Measure a wake and probe a model endpoint | `scripts/measure_endpoint_wake.py --url … --model <served name> [--no-audio]` |
 | Point the assistant at the other model | `MODEL_ENDPOINT`, `MODEL_NAME` in `.env`, then `tools/sync_control_secret.py` and a control-plane deploy |
 | Change current GPU idle window without deploy | `deploy/modal/autoscale.py` |
