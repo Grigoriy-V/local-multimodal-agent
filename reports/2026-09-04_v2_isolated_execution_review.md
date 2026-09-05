@@ -965,3 +965,19 @@ the files and no screenshot. Two samples, each with half of the handover
 G asks for. The sentence did what it was for; what remains is the
 model's, measured by G.
 
+**§14 built, 2026-09-05, on the human's word after discussion.** The four
+points settled: the check is against the person's words verbatim; the same
+model answers it in the same turn; `not yet` continues silently (the
+interface takes the draft back through `AnswerWithdrawn`) and `blocked`
+asks for the reason only when the answer lacks one; it is the same family
+as 4.9's refused check — a question at the end of the turn — and differs
+in being about the request and no tool, which the human accepted.
+`app/agent/goal.py`, `FirstObjection` in `stopping.py`, on by default in
+`create_agent`, `prompt_scenarios --goal on|off`, eighteen offline tests in
+`tests/test_goal.py`. `DECISIONS.md` 2026-09-05. **Not measured yet**: the
+local endpoint was down when it was built, and every run wakes a GPU. The
+plan: `prompt_scenarios` with `--goal on` and `--goal off` on the local
+endpoint for cost and for reflexive `done`; then G and P through
+`loop_live --deployed` after a deploy, where the half-handover of §12 is
+the case the question is asked about.
+

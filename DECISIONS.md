@@ -1192,6 +1192,49 @@ Consequences
 `app/context/summary.py`; `fitted` in `app/agent/graph.py` loops;
 `keep_recent` is gone from policy, settings and the Telegram wording.
 
+## 2026-09-05 — The person's request is the turn's goal, and a turn that worked is asked whether it met it
+
+Decision
+
+A turn in which at least one tool ran does not end on the model's first
+answer. The harness asks the same model, in the same turn and without
+tools, one question that quotes the person's request word for word:
+did what you did give them that, as they asked it? `done` ends the turn as
+it stands; `not yet` gives the tools back for another round, at most two
+per turn and always inside the turn's existing budget; `blocked` keeps the
+answer and asks for the reason only if the answer does not carry one. A
+turn that used no tool is never asked. The todo list's objection is asked
+first, so the cheap check goes before the one that costs a model call.
+`tools/prompt_scenarios.py --goal off` measures the loop without it.
+
+Why
+
+Every unfinished turn of 2026-09-04 ended the same way: the model stopped
+when it had something — an English PDF against "по-русски", a text file
+against "PDF", half of a handover — not when it had what was asked. With
+`/plan` on, the same requests were finished, and the measured reason was
+not better planning but the open list keeping the request in front of the
+model until it was closed (report §14). That is DeepSeek Harness's
+goal-round-driver in its smallest form: the goal is the request, which
+already exists, rather than an object the model creates and must keep
+true; the check is about the request and not about any tool, which is
+what separates it from the check refused in 4.9. The words are the
+person's own, never the model's paraphrase, because "in Russian" is
+exactly what a paraphrase loses. The same model judges, deliberately: a
+separate reviewer is a second thing to keep true, and whether a 12B model
+answers `done` to its own English PDF is the measurement, not a design
+premise. If it does, the mechanism comes out.
+
+Consequences
+
+`app/agent/goal.py` (`MeetsTheRequest`), `FirstObjection` in
+`app/agent/stopping.py`, wired in `create_agent`; a `not yet` reaches an
+interface as the existing `AnswerWithdrawn`; the trace records a steering
+with source `goal:not_yet` or `goal:blocked` and nothing of what was said.
+One short model call per working turn, nothing for a conversational one.
+The check's own call is not priced into the turn's seconds; the round it
+opens is. Measured before it is built on: report §14.
+
 ## 2026-09-04 — Generated code runs where no secret is, and what it installs lives in the workspace
 
 Decision

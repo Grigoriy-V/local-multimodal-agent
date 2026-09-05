@@ -37,7 +37,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.agent.goal import MeetsTheRequest
 from app.agent.runtime import Agent, MessageProduced, create_agent, text_message
+from app.agent.stopping import STOP_ON_ANSWER
 from app.capabilities import system_message
 from app.config import AgentSettings, ModelSettings
 from app.context import DEFAULT_SYSTEM_PROMPT
@@ -530,12 +532,17 @@ async def measure(options: argparse.Namespace) -> int:
     settings = sealed(root, stream=not options.no_stream)
     telemetry = Telemetry(SqliteTelemetry(settings.telemetry_database))
     model_settings = ModelSettings()
+    # The goal check is the product's default; `--goal off` measures the
+    # loop without it. Explicit either way, so the comparison is between two
+    # named things and not between a default and whatever it was that day.
+    goal = None if options.goal == "on" else STOP_ON_ANSWER
     agent = create_agent(
         model_settings=model_settings,
         agent_settings=settings,
         user_id=SCENARIO_USER,
         telemetry=telemetry,
         system_prompt=prompt,
+        stopping=goal,
     )
     planning(agent, options.planning)
     whole = assembled(agent, prompt, "preview")
@@ -548,6 +555,7 @@ async def measure(options: argparse.Namespace) -> int:
         "sampling": f"temperature {model_settings.temperature}, "
         f"max_tokens {model_settings.max_tokens}",
         "planning": options.planning,
+        "goal check": options.goal,
         "streaming": "on" if settings.stream_answers else "off",
     }
 
@@ -609,6 +617,12 @@ def parse(argv: list[str]) -> argparse.Namespace:
         choices=("nested", "flat", "none"),
         default="nested",
         help="which planning tool the agent is given, or none at all",
+    )
+    parser.add_argument(
+        "--goal",
+        choices=("on", "off"),
+        default="on",
+        help="whether a turn that ran a tool is asked if it met the request",
     )
     parser.add_argument(
         "--no-stream",

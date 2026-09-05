@@ -38,6 +38,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change whether a model result ends the turn | `app/agent/stopping.py` | `TurnStopping`, `Candidate`, `Steering`, `Steered`, `STOP_ON_ANSWER`, `settled`, `carried`, `tests/test_turn_stopping.py` |
 | Change the agent's own plan for a turn | `app/tools/todo.py` | `todo_write`, `normalise`, `current`, `unfinished`, `tests/test_todo.py` |
 | Change what an unfinished plan does to an ending | `app/agent/todo.py` | `FinishesItsOwnList`, `INSTRUCTION`, `Candidate.steerings` |
+| Change whether a turn that worked is asked if it met the request | `app/agent/goal.py` | `MeetsTheRequest`, `CHECK`, `CONTINUE`, `EXPLAIN`, `ROUNDS`, `verdict`, `FirstObjection` in `stopping.py`, `tests/test_goal.py` |
 | Change how much a plan is encouraged | `app/capabilities.py`, `app/tools/todo.py` | `_planning_lines`, `DESCRIPTION` — wording only; nothing classifies a request |
 | Change what the person sees of the plan | `ui/telegram/adapter.py` | `plan_lines`, `PLAN_MARKS`, `ToolActivity.plan`, `ToolActivity.show` |
 | Change which updates skip the conversation queue | `ui/telegram/wire.py` | `travels_out_of_band`, `needs_model`, `InboxJob.control` |

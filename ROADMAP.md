@@ -220,8 +220,13 @@ What exists. How it was reached, and every number, is in the linked report.
    `/plan` (report §14: the request stays the goal). `read_file` shows an image as a picture,
    and two more command scenarios, R (data into a chart, looked at, sent)
    and S (a failing script repaired from its traceback), pass live on this
-   machine. **Next, each its own gate:** the goal check as an option (§14),
-   the after-deploy run, then the close of the step. Until 2026-09-04 this was 5a;
+   machine. The after-deploy run in the worker: A, B pass, G seven of
+   eight twice, each with half of the handover (report §12). The goal
+   check of §14 was discussed and built on the human's word, 2026-09-05
+   (`app/agent/goal.py`, `DECISIONS.md` 2026-09-05), and is not yet
+   measured. **Next, each its own gate:** the measurement (`prompt_scenarios
+   --goal on/off` locally, then G and P deployed), then the close of the
+   step. Until 2026-09-04 this was 5a;
    the local half was 5b and is item 7 now, on the human's word: local work
    on files is a stage of its own, not a sub-step of the sandbox.
 
