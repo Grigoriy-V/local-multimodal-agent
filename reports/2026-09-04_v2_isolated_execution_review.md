@@ -1036,3 +1036,19 @@ gives every scenario an empty conversation and an empty workspace, and
 deployed nothing did. `start_clean` in `scripts/loop_live.py` now deletes
 the selected scenarios' threads and empties the workspace root before the
 run, in both profiles. The list-first form is still unmeasured.
+
+**Fourth sample, deployed, from a clean thread, 2026-09-05** (deploy
+e46037b, run `deployed-aa318e5b-70`): seven of eight, and the whole
+handover — the screenshot **and** the three files sent, in two
+`send_file` calls — with **no `goal_checked` event**: twelve model calls,
+the turn's step ceiling, and a turn at its ceiling is not offered to the
+seam at all (`settled`: "a turn already finalizing after its budget is
+not asking anyone whether it may spend more"). The model did it on its
+own this time. The one failed check is a `run_command` of
+`python3 -m http.server 8080`, which hung until `shell.timeout` at 120 s
+— the model's, answered by the harness as designed, but 120 s of a 227 s
+turn. Four deployed runs of G today, then: two `done` to a half-done
+request (verdict-first question), one invalid (history), one where the
+check was never reached. The list-first form has no valid sample yet.
+Worth the human's eye: the turns long enough to lose the request are the
+turns that hit the ceiling, where the check is skipped by design.
