@@ -529,12 +529,13 @@ class Server:
         # Real requests, so torch.compile and CUDA graph capture happen now and
         # land inside the snapshot rather than on every wake.
         _warmup()
-        # Commit what the boot wrote to the compile-cache Volume before the
-        # snapshot captures a handle into it. Found on the second App
-        # (`model_app_qwen.py`, 2026-09-05): a fresh compile saved its graph to
-        # the Volume uncommitted, and the restore failed walking that path.
-        # Latent here — this App's cache predates its snapshot — and live the
-        # first time a configuration change recompiles.
+        # This App's compile cache predates its snapshot, which is the only
+        # reason a restore has never failed here: a snapshot holding a handle
+        # into a path the container itself wrote on the Volume is not
+        # restorable, committed or not (ISS-0047; the Qwen Apps keep their
+        # cache off the Volume for that reason). The commit is kept as
+        # harmless; the first configuration change that recompiles will need
+        # what `model_app_qwen.py` does instead.
         vllm_cache.commit()
         _sleep()
 

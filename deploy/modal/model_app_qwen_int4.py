@@ -96,10 +96,7 @@ def preflight() -> None:
     image=image,
     gpu=GPU,
     memory=MEMORY_MB,
-    volumes={
-        "/root/.cache/huggingface": base.hf_cache,
-        qwen.VLLM_CACHE_VOLUME: base.vllm_cache,
-    },
+    volumes={"/root/.cache/huggingface": base.hf_cache},
     scaledown_window=base.SCALEDOWN_WINDOW,
     min_containers=base.MIN_CONTAINERS,
     max_containers=base.MAX_CONTAINERS,

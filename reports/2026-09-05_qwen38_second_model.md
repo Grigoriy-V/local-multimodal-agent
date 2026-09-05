@@ -410,7 +410,17 @@ a time on the GPU instead of reading first. And the watcher that stopped
 the App on a failed boot removed the deployment each time; from here it
 stops the container by id and leaves the App.
 
-Spent on the INT4 App: two boots, about 13 A100-minutes, ~$0.45.
+**The third boot, the copy.** Started on the human's word with the copy
+in place, it printed nothing from the engine for eight minutes: the copy
+of the Volume's cache — six AOT directories, eight compile caches, the
+Triton kernels of each, thousands of small files over 9p — had not
+finished. Stopped by hand. The copy was the wrong shape too. What the
+Volume ever bought a Qwen App was a faster first boot of a version, and
+a restore never compiles; so the Qwen Apps' `Server` no longer mounts the
+compile-cache Volume at all, and a version's first boot compiles from
+nothing, once. Deployed, not booted.
+
+Spent on the INT4 App: three boots, about 21 A100-minutes, ~$0.75.
 
 ## Sources
 

@@ -268,26 +268,14 @@ class SecondModelIdentityTests(unittest.TestCase):
         )
         self.assertLess(worst_start, model_app_qwen.STARTUP_TIMEOUT)
 
-    def test_the_compile_cache_is_copied_not_mounted_under_the_engine(self):
-        # ISS-0047: nothing the snapshot holds open may live on a Volume, so
-        # the Volume is mounted beside the engine's cache directory, and the
-        # cache is copied in and out around the boot.
-        import tempfile
-        from pathlib import Path
+    def test_the_snapshot_holds_nothing_on_the_compile_cache_volume(self):
+        # ISS-0047: the Qwen Apps' boot neither reads nor commits the
+        # compile-cache Volume; the source is the record of that.
+        import inspect
 
-        self.assertNotEqual(model_app_qwen.VLLM_CACHE_VOLUME, model_app_qwen.VLLM_CACHE_LOCAL)
-        with tempfile.TemporaryDirectory() as room:
-            source = Path(room) / "volume"
-            target = Path(room) / "local"
-            (source / "a").mkdir(parents=True)
-            (source / "a" / "kernel.so").write_bytes(b"12345")
-            (source / "index").write_bytes(b"x")
-            self.assertEqual(model_app_qwen.copy_tree(str(source), str(target)), 2)
-            self.assertEqual((target / "a" / "kernel.so").read_bytes(), b"12345")
-            # A second pass copies nothing that is already there and the same size.
-            self.assertEqual(model_app_qwen.copy_tree(str(source), str(target)), 0)
-            # And a missing source is not an error: the first boot of a Volume.
-            self.assertEqual(model_app_qwen.copy_tree(str(Path(room) / "absent"), str(target)), 0)
+        source = inspect.getsource(model_app_qwen.boot)
+        self.assertNotIn("vllm_cache", source)
+        self.assertNotIn("copy_tree", source)
 
     def test_the_command_is_the_spec(self):
         command = model_app_qwen.serve_command(model_app_qwen.SERVING)

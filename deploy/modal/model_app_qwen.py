@@ -149,20 +149,19 @@ START_READY_TIMEOUT = 12 * base.MINUTES
 STARTUP_TIMEOUT = 20 * base.MINUTES
 assert START_READY_TIMEOUT + base.WARMUP_TIMEOUT * base.WARMUP_REQUESTS + base.SLEEP_TIMEOUT < STARTUP_TIMEOUT
 
-# Where the compile cache is while vLLM runs, and where it is kept between
-# boots. The snapshot must hold nothing open on a Volume: a path the container
-# itself created there is not found by the restore, committed or not — the
-# FP8 App's third boot died on its AOT directory (ISS-0047), and after the
-# commit-before-sleep fix the INT4 App's second boot died the same way on a
-# Triton kernel directory written during warmup. Only paths that existed on
-# the Volume before the container started have survived a restore. So the
-# engine runs against the container's own disk: the Volume's cache is copied
-# in before `vllm serve` and what the boot added is copied back and committed
-# after warmup, and by the time the snapshot is taken no file on the Volume
-# is open. The cost is a copy each way on the first boot only; a restore
-# copies nothing.
-VLLM_CACHE_LOCAL = "/root/.cache/vllm"
-VLLM_CACHE_VOLUME = "/vllm-cache"
+# The compile cache of a Qwen App is the container's own disk and nothing
+# else; the `assistant-vllm-cache` Volume is not mounted on its `Server`.
+# The snapshot must hold nothing open on a Volume: Modal's guide — "Deleting
+# files in a Volume used during restore will cause restore failures" — and
+# the compilers write through temporary names they rename and remove, so the
+# FP8 App's third boot died restoring on its AOT directory and the INT4 App's
+# second on a Triton kernel directory, committed or not (ISS-0047). Copying
+# the Volume's cache to local disk around the boot was tried next and hung
+# the third INT4 boot for eight minutes on thousands of small files over 9p.
+# What the Volume bought was a faster first boot of a version, ~150 s of
+# compile; every restore skips compilation regardless, because the snapshot
+# holds the compiled engine. So a version's first boot compiles from nothing,
+# once, and no restore can be broken by the cache.
 
 KV_BYTES_PER_TOKEN = 65_536
 RESIDENT_OVER_DISK = 1.0
@@ -261,40 +260,16 @@ def serve_command(spec: Serving) -> list[str]:
     return command
 
 
-def copy_tree(source: str, target: str) -> int:
-    """Copy a directory tree, files that differ in size or are absent; return how many."""
-
-    import shutil
-
-    copied = 0
-    src = Path(source)
-    if not src.exists():
-        return 0
-    for file in src.rglob("*"):
-        if not file.is_file():
-            continue
-        destination = Path(target) / file.relative_to(src)
-        if destination.exists() and destination.stat().st_size == file.stat().st_size:
-            continue
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(file, destination)
-        copied += 1
-    return copied
-
-
 def boot(spec: Serving):
-    """Start vLLM, warm it, keep what it compiled, put it to sleep; return the process."""
+    """Start vLLM, warm it, put it to sleep; return the process."""
 
     import subprocess
 
-    print(f"compile cache: {copy_tree(VLLM_CACHE_VOLUME, VLLM_CACHE_LOCAL)} files in", flush=True)
     command = serve_command(spec)
     print(*command, flush=True)
     process = subprocess.Popen(command)
     base._wait_ready(process, START_READY_TIMEOUT, "start")
     base._warmup(spec.served_name)
-    print(f"compile cache: {copy_tree(VLLM_CACHE_LOCAL, VLLM_CACHE_VOLUME)} files out", flush=True)
-    base.vllm_cache.commit()
     base._sleep()
     return process
 
@@ -386,10 +361,8 @@ def preflight() -> None:
     image=image,
     gpu=GPU,
     memory=MEMORY_MB,
-    volumes={
-        "/root/.cache/huggingface": base.hf_cache,
-        VLLM_CACHE_VOLUME: base.vllm_cache,
-    },
+    # The weights Volume only; the compile cache is the container's disk.
+    volumes={"/root/.cache/huggingface": base.hf_cache},
     scaledown_window=base.SCALEDOWN_WINDOW,
     min_containers=base.MIN_CONTAINERS,
     max_containers=base.MAX_CONTAINERS,

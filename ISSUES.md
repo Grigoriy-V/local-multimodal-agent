@@ -109,12 +109,15 @@ Rules that keep the file honest:
   documentation states the rule: "Deleting files in a Volume used during
   restore will cause restore failures", and the compilers write through
   temporary names they rename or remove. So the second fix keeps the
-  snapshot from holding anything on a Volume at all: the Qwen Apps mount
-  the compile-cache Volume beside the engine (`/vllm-cache`), copy it to
-  the container's disk before `vllm serve`, and copy what the boot added
-  back and commit it after warmup. Deployed in `assistant-llm-qwen-int4`;
-  in the tree for the other two Apps, which keep working only because
-  their caches predate their snapshots. Not yet booted.
+  snapshot from holding anything on a Volume at all: the Qwen Apps do not
+  mount the compile-cache Volume on their `Server`; a version's first boot
+  compiles from nothing (~190 s, once) and every restore skips compilation
+  because the snapshot holds the compiled engine. Copying the Volume's
+  cache to local disk around the boot was tried in between and hung a
+  boot for eight minutes on thousands of small files over 9p. Deployed in
+  `assistant-llm-qwen-int4`, not yet booted; the FP8 App in the tree; the
+  Gemma App keeps its Volume, which works only because its cache predates
+  its snapshot.
 - **Seen:** 2026-09-05, the third boot of `assistant-llm-qwen`: vLLM
   compiled afresh, saved its AOT graph under
   `/root/.cache/vllm/torch_compile_cache/torch_aot_compile/…` on the
