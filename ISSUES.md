@@ -102,8 +102,19 @@ Rules that keep the file honest:
 
 ### ISS-0047 — a GPU snapshot taken with an uncommitted Volume path open cannot be restored
 
-- **Status:** fixed 2026-09-05, deployed in `assistant-llm-qwen`; in the
-  tree for `assistant-llm-v2`, deployed there with its next deploy
+- **Status:** fixed twice 2026-09-05. The first fix, a Volume commit
+  before the sleep, was not enough: the INT4 App's second boot committed
+  and still died restoring, on a Triton kernel directory
+  (`…/inductor_cache/triton/0/<kernel>`) written during warmup. Modal's
+  documentation states the rule: "Deleting files in a Volume used during
+  restore will cause restore failures", and the compilers write through
+  temporary names they rename or remove. So the second fix keeps the
+  snapshot from holding anything on a Volume at all: the Qwen Apps mount
+  the compile-cache Volume beside the engine (`/vllm-cache`), copy it to
+  the container's disk before `vllm serve`, and copy what the boot added
+  back and commit it after warmup. Deployed in `assistant-llm-qwen-int4`;
+  in the tree for the other two Apps, which keep working only because
+  their caches predate their snapshots. Not yet booted.
 - **Seen:** 2026-09-05, the third boot of `assistant-llm-qwen`: vLLM
   compiled afresh, saved its AOT graph under
   `/root/.cache/vllm/torch_compile_cache/torch_aot_compile/…` on the

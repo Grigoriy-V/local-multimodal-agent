@@ -98,12 +98,12 @@ def preflight() -> None:
     memory=MEMORY_MB,
     volumes={
         "/root/.cache/huggingface": base.hf_cache,
-        "/root/.cache/vllm": base.vllm_cache,
+        qwen.VLLM_CACHE_VOLUME: base.vllm_cache,
     },
     scaledown_window=base.SCALEDOWN_WINDOW,
     min_containers=base.MIN_CONTAINERS,
     max_containers=base.MAX_CONTAINERS,
-    timeout=15 * base.MINUTES,
+    timeout=qwen.STARTUP_TIMEOUT,
     enable_memory_snapshot=True,
     experimental_options={"enable_gpu_snapshot": True},
 )
@@ -121,7 +121,7 @@ class Server:
 
     @modal.web_server(
         port=base.VLLM_PORT,
-        startup_timeout=base.STARTUP_TIMEOUT,
+        startup_timeout=qwen.STARTUP_TIMEOUT,
         requires_proxy_auth=True,
     )
     def serve(self) -> None:

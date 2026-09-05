@@ -138,6 +138,32 @@ MEMORY_MB = 32 * 1024
 # by 0.4), and still refuses that ceiling, as vLLM did. So the estimate is
 # good to about half a gigabyte either way, which is why a ceiling wants a
 # margin of more than that.
+# Readiness budgets of their own. The first App's seven minutes were sized
+# for Gemma's 172 s start with a warm compile cache. A Qwen App on a card it
+# has not compiled for yet spent 191 s in torch.compile alone (INT4 on the
+# A100, 2026-09-05) and was still profiling when the 420 s ran out; the
+# container was killed by its own watchdog, and the boot paid for nothing.
+# Twelve minutes covers a cold compile with the profiling and graphs after
+# it; the whole start path still has to fit under what Modal waits for.
+START_READY_TIMEOUT = 12 * base.MINUTES
+STARTUP_TIMEOUT = 20 * base.MINUTES
+assert START_READY_TIMEOUT + base.WARMUP_TIMEOUT * base.WARMUP_REQUESTS + base.SLEEP_TIMEOUT < STARTUP_TIMEOUT
+
+# Where the compile cache is while vLLM runs, and where it is kept between
+# boots. The snapshot must hold nothing open on a Volume: a path the container
+# itself created there is not found by the restore, committed or not — the
+# FP8 App's third boot died on its AOT directory (ISS-0047), and after the
+# commit-before-sleep fix the INT4 App's second boot died the same way on a
+# Triton kernel directory written during warmup. Only paths that existed on
+# the Volume before the container started have survived a restore. So the
+# engine runs against the container's own disk: the Volume's cache is copied
+# in before `vllm serve` and what the boot added is copied back and committed
+# after warmup, and by the time the snapshot is taken no file on the Volume
+# is open. The cost is a copy each way on the first boot only; a restore
+# copies nothing.
+VLLM_CACHE_LOCAL = "/root/.cache/vllm"
+VLLM_CACHE_VOLUME = "/vllm-cache"
+
 KV_BYTES_PER_TOKEN = 65_536
 RESIDENT_OVER_DISK = 1.0
 ENGINE_OVERHEAD_GIB = 2.0
@@ -235,23 +261,39 @@ def serve_command(spec: Serving) -> list[str]:
     return command
 
 
+def copy_tree(source: str, target: str) -> int:
+    """Copy a directory tree, files that differ in size or are absent; return how many."""
+
+    import shutil
+
+    copied = 0
+    src = Path(source)
+    if not src.exists():
+        return 0
+    for file in src.rglob("*"):
+        if not file.is_file():
+            continue
+        destination = Path(target) / file.relative_to(src)
+        if destination.exists() and destination.stat().st_size == file.stat().st_size:
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file, destination)
+        copied += 1
+    return copied
+
+
 def boot(spec: Serving):
-    """Start vLLM, warm it, commit what it compiled, put it to sleep; return the process."""
+    """Start vLLM, warm it, keep what it compiled, put it to sleep; return the process."""
 
     import subprocess
 
+    print(f"compile cache: {copy_tree(VLLM_CACHE_VOLUME, VLLM_CACHE_LOCAL)} files in", flush=True)
     command = serve_command(spec)
     print(*command, flush=True)
     process = subprocess.Popen(command)
-    base._wait_ready(process, base.START_READY_TIMEOUT, "start")
+    base._wait_ready(process, START_READY_TIMEOUT, "start")
     base._warmup(spec.served_name)
-    # What the boot compiled is on the Volume only in this container until it
-    # is committed, and the snapshot keeps a handle into it: the third FP8
-    # boot (2026-09-05) saved its AOT-compiled graph to the Volume, slept,
-    # snapshotted, and the restore died walking that path in the committed
-    # Volume, where it did not exist ("failed to walk ... torch_aot_compile
-    # ...: no such file or directory", exit 128; ISS-0047). Commit before the
-    # sleep, so the restore finds what the snapshot holds open.
+    print(f"compile cache: {copy_tree(VLLM_CACHE_LOCAL, VLLM_CACHE_VOLUME)} files out", flush=True)
     base.vllm_cache.commit()
     base._sleep()
     return process
@@ -346,12 +388,12 @@ def preflight() -> None:
     memory=MEMORY_MB,
     volumes={
         "/root/.cache/huggingface": base.hf_cache,
-        "/root/.cache/vllm": base.vllm_cache,
+        VLLM_CACHE_VOLUME: base.vllm_cache,
     },
     scaledown_window=base.SCALEDOWN_WINDOW,
     min_containers=base.MIN_CONTAINERS,
     max_containers=base.MAX_CONTAINERS,
-    timeout=15 * base.MINUTES,
+    timeout=STARTUP_TIMEOUT,
     enable_memory_snapshot=True,
     experimental_options={"enable_gpu_snapshot": True},
 )
@@ -369,7 +411,7 @@ class Server:
 
     @modal.web_server(
         port=base.VLLM_PORT,
-        startup_timeout=base.STARTUP_TIMEOUT,
+        startup_timeout=STARTUP_TIMEOUT,
         requires_proxy_auth=True,
     )
     def serve(self) -> None:

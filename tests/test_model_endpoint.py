@@ -258,6 +258,37 @@ class SecondModelIdentityTests(unittest.TestCase):
         # rather than restating a number that would then drift.
         self.assertIs(model_app_qwen.base, model_app)
 
+    def test_a_cold_compile_fits_the_start_path(self):
+        # INT4 on the A100 spent 191 s compiling and was killed at 420 s.
+        self.assertGreaterEqual(model_app_qwen.START_READY_TIMEOUT, 10 * 60)
+        worst_start = (
+            model_app_qwen.START_READY_TIMEOUT
+            + model_app.WARMUP_TIMEOUT * model_app.WARMUP_REQUESTS
+            + model_app.SLEEP_TIMEOUT
+        )
+        self.assertLess(worst_start, model_app_qwen.STARTUP_TIMEOUT)
+
+    def test_the_compile_cache_is_copied_not_mounted_under_the_engine(self):
+        # ISS-0047: nothing the snapshot holds open may live on a Volume, so
+        # the Volume is mounted beside the engine's cache directory, and the
+        # cache is copied in and out around the boot.
+        import tempfile
+        from pathlib import Path
+
+        self.assertNotEqual(model_app_qwen.VLLM_CACHE_VOLUME, model_app_qwen.VLLM_CACHE_LOCAL)
+        with tempfile.TemporaryDirectory() as room:
+            source = Path(room) / "volume"
+            target = Path(room) / "local"
+            (source / "a").mkdir(parents=True)
+            (source / "a" / "kernel.so").write_bytes(b"12345")
+            (source / "index").write_bytes(b"x")
+            self.assertEqual(model_app_qwen.copy_tree(str(source), str(target)), 2)
+            self.assertEqual((target / "a" / "kernel.so").read_bytes(), b"12345")
+            # A second pass copies nothing that is already there and the same size.
+            self.assertEqual(model_app_qwen.copy_tree(str(source), str(target)), 0)
+            # And a missing source is not an error: the first boot of a Volume.
+            self.assertEqual(model_app_qwen.copy_tree(str(Path(room) / "absent"), str(target)), 0)
+
     def test_the_command_is_the_spec(self):
         command = model_app_qwen.serve_command(model_app_qwen.SERVING)
         self.assertEqual(command[:3], ["vllm", "serve", model_app_qwen.MODEL_REPO])

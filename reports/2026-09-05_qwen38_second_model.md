@@ -366,6 +366,52 @@ The three Apps: `model_app.py` (Gemma, A10), `model_app_qwen.py` (FP8,
 L40S, and everything the Qwen Apps share), `model_app_qwen_int4.py` (its
 numbers and a small class).
 
+## 9. The INT4 App's boots, and what the documentation says about Volumes
+
+Two boots on the A100-40GB, both on the human's word, neither served:
+
+1. **Killed by our own readiness budget.** Weights loaded in 20 s (17.71
+   GiB resident), then `torch.compile` from nothing took 191 s, and the
+   seven-minute `START_READY_TIMEOUT` — sized for Gemma's 172 s start
+   with a warm cache — ran out during profiling. The Qwen Apps now have
+   their own twelve-minute budget under a twenty-minute Modal ceiling.
+2. **The engine served and the restore died.** Compile from cache 43 s,
+   profiling 68 s, `Free memory on device (39.08/39.49 GiB)`, `Available
+   KV cache memory: 16.74 GiB`, 267,509 tokens, `2.04x` at 131,072 (the
+   preflight's 15.3 GiB was cautious by 1.4), healthy after 290 s,
+   asleep in 4.5 s, snapshot created — then the same `9p … failed to
+   walk … no such file or directory` as the FP8 App's third boot, this
+   time on `…/inductor_cache/triton/0/<kernel>`, a directory the warmup's
+   JIT had written, and after the Volume had been committed.
+
+Read afterwards, as it should have been read before: Modal's memory
+snapshot guide says "Changes to Modal Volumes do not cause Memory
+Snapshots to update. Deleting files in a Volume used during restore will
+cause restore failures", and "redeploying your Function with new
+configuration or new code will cause previous Memory Snapshots to become
+obsolete". Modal's own vLLM snapshot example mounts its `vllm-cache`
+Volume under `/root/.cache/vllm` as this project did, with a 3B model and
+`--max-num-seqs 2`; nothing there says a large model's compilers, which
+write through temporary names and rename or remove them, leave the
+snapshot pointing at paths the restore cannot find. The commit before the
+sleep addressed the wrong half of the rule.
+
+So the Qwen Apps now keep the snapshot off the Volume entirely: the cache
+Volume is mounted beside the engine at `/vllm-cache`, copied to the
+container's disk before `vllm serve`, and what the boot added is copied
+back and committed after warmup (`copy_tree`; a boot with a warm cache
+copies nothing new). The restore then re-opens nothing on 9p. Deployed,
+not booted.
+
+Two costs of this day worth naming. Every redeploy of an App makes its
+previous snapshot obsolete, so each of the INT4 App's deploys meant a
+full boot rather than a restore — the price of changing one constant at
+a time on the GPU instead of reading first. And the watcher that stopped
+the App on a failed boot removed the deployment each time; from here it
+stops the container by id and leaves the App.
+
+Spent on the INT4 App: two boots, about 13 A100-minutes, ~$0.45.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`
