@@ -272,9 +272,14 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    not a required step. Deployed and measured (report §12): the seven
    scenarios all pass, B 4.1 s, C 6.6, E 5.9, F 11.3, R 26.6, S 14.4,
    against 10.9/15.8/14.2/28.0/40.0/27.7 before, with `cached 4704` on
-   every call after a turn's first. **Next, each its own gate:** the
-   remaining scenarios (D, G, H, I, K, J, O, P, Q); thinking on through
-   the setting, for comparison; MTP as a separate measurement
+   every call after a turn's first. The rest ran on 2026-09-05 too:
+   fifteen of sixteen pass on INT4 (report §13); G does the work and
+   loses the handover in a repeat loop with thinking off. Found on the
+   way, all fixed: the edge's 303 after 150 s that the client never
+   followed (ISS-0044's cause), a mid-thread system message the template
+   refuses (ISS-0052). **Next, each its own gate:** G with thinking on
+   through `MODEL_CHAT_TEMPLATE_KWARGS`, for the comparison; MTP as a
+   separate measurement; the FP8 App is not run again (cost)
    against the Gemma runs of 2026-09-05; then the human's call on which
    the assistant uses.
 

@@ -720,6 +720,28 @@ and the retry were symptoms. `httpx.AsyncClient(follow_redirects=True,
 max_redirects=8)` now, twenty minutes of hops, and `context_limit`
 treats anything but a 200 with JSON as unknown. Three offline tests.
 
+### H, I, K, J, O, P, Q on INT4: all pass
+
+Run `deployed-b68a8b50-*`, 14:57–15:00 UTC, on the control plane with the
+redirect fix, the model asleep at the start:
+
+| Scenario | INT4, s | Calls | Result |
+|---|---|---|---|
+| H, the exact words behind the summary | 40.8 (≈30 s the restore) | 2m/1t | pass: `search_history`, the text quoted |
+| I, a shortened result read back | 4.0 | 2m/1t | pass |
+| K, a fold in the middle of the turn | 20.7 | 4m/3t | pass, folded mid-turn |
+| J, a worker killed mid-turn, taken up | 3.3 | 2m/1t | pass, resumed at the model node |
+| O, a script written and run | 15.3 | 3m/2t | pass |
+| P, a PDF made, checked, handed over | 21.6 | 5m/4t | pass, and with `view_pages` — the look Gemma never gave (ISS-0040) |
+| Q, a command past its timeout | 8.1 | 2m/1t | pass |
+
+With D (22 s) and the earlier seven, that is fifteen of sixteen scenarios
+passing on INT4 at 0.28.0 with prefix caching and no thinking; the one
+that does not is G, which does the work and loses the handover in a
+repeat loop (above). The fold and the summary now travel as one system
+message (ISS-0052), the facts as the head of the turn's user message,
+and H and K show both working.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`
