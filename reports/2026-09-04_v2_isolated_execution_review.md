@@ -1134,3 +1134,26 @@ and their wiring are out; `prompt_scenarios --goal off` now removes the
 tool. `DECISIONS.md` 2026-09-05 rewritten to this. To measure: G and P
 deployed, goal on and off.
 
+
+**`set_goal` measured, deployed, 2026-09-05** (deploy fd8f6b4, clean
+threads; runs `deployed-e63f050c-70/-140`, `deployed-8947e3fb-70`). The
+model wrote the goal first in all three turns, unprompted beyond the
+brief: for G nine lines in Russian, the last "Прислать скриншот и файлы в
+чат"; for P three lines, the last "Send the PDF to the user".
+
+| | calls | s | handover |
+|---|---|---|---|
+| G, goal (1) | 10 | 88 | **8/8**: screenshot and three files sent, the first whole G of the day |
+| G, goal (2) | 9 | 77 | 7/8: screenshot sent, the files listed by path, "приложен выше" |
+| P, goal | 7 | 28 | 4/5, the same instrument check (`pdftotext` is not `view_pages`) |
+| G, no goal, today | 7–12 | 227–316 (cold GPU inside) | 4/8, 7/8, 7/8 (one whole, at the step ceiling) |
+
+The price is what was expected: one call and about ten seconds. The
+benefit on two samples: one whole handover, one half — with the line
+"send the screenshot and the files" written by the model itself in its
+own context and still only the screenshot sent. So the list in the
+context helps and is not enough on its own; the same as the plan's own
+record (G 7/8 with the plan on, 2026-09-03). What is missing in the
+7/8 run is the same one thing as in every G today: files named by path
+in the answer and not sent — ISS-0003's shape, the send-or-name confusion,
+not the goal's.
