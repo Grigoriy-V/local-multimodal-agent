@@ -1,11 +1,10 @@
 # A second model: Qwen3.8-27B in FP8 on an L40S
 
 **Date:** 2026-09-05
-**Status:** built and deployed as `assistant-llm-qwen`; the first boot was
-refused by vLLM's own memory check (§5) and the App is stopped. The next
-boot needs the human's choice between a higher utilization and a lower
-ceiling (§5). The live scenarios on it, and the choice of which model the
-assistant uses, are separate gates (`ROADMAP.md` item 9).
+**Status:** built, deployed as `assistant-llm-qwen`, and serving: text,
+image and a tool call answered from a restored snapshot on the fourth boot
+(§5). The live scenarios on it, and the choice of which model the assistant
+uses, are separate gates (`ROADMAP.md` item 9).
 
 ## 1. What was asked
 
@@ -168,6 +167,97 @@ margin and gives up a quarter of the ceiling that no turn has yet used.
 Either is one boot, ~4 minutes of L40S, and a refused boot restarts until
 stopped, so the stop is part of the procedure: watch the log, not the
 request.
+
+### The second boot, 0.90: the pool fits, the scheduler does not
+
+The human chose 0.90 at 131,072. One attempt, stopped by a watcher on the
+log rather than left to Modal's restarts:
+
+```text
+Available KV cache memory: 8.82 GiB
+GPU KV cache size: 141,036 tokens
+Maximum concurrency for 131,072 tokens per request: 1.08x
+ValueError: max_num_seqs (256) exceeds available Mamba cache blocks (184).
+  Each decode sequence requires one Mamba cache block, so CUDA graph
+  capture cannot proceed.
+```
+
+The pool is now what §5's table said 0.90 would give. The new refusal is
+the hybrid architecture's: every decoding sequence holds one Gated DeltaNet
+state block, vLLM's default schedules 256 sequences, and the pool held 184
+blocks. The container accepts 8 inputs at a time, so `--max-num-seqs 16`
+(`MAX_NUM_SEQS`) — twice what can arrive — and the state the other 240
+would have reserved goes back to KV.
+
+### The third boot: the engine is up, the restore dies
+
+```text
+Loading weights took 12.5 s; Model loading took 28.51 GiB
+torch.compile took 97.6 s (fresh: the scheduler change is a new compile key)
+Available KV cache memory: 9.75 GiB
+GPU KV cache size: 155,600 tokens
+Maximum concurrency for 131,072 tokens per request: 1.19x
+init engine took 180.7 s; start: healthy after 268.3 s
+CuMemAllocator: sleep freed 38.25 GiB, 28.53 GiB backed up in CPU, 9.72 discarded
+It took 9.7 s to fall asleep
+Snapshot created. Restoring Function from memory snapshot.
+restoring container: failed to complete restore for filesystem type "9p":
+  failed to walk ".../torch_compile_cache/torch_aot_compile/e2dbd899…":
+  no such file or directory
+Runner failed with exit code: 128
+```
+
+The boot compiled afresh and saved its AOT graph to the compile-cache
+Volume — in this container only, uncommitted — then slept and was
+snapshotted with a handle into that path. The restore re-mounts the Volume
+at its committed state, where the path does not exist. A harness defect
+(ISS-0047): the Gemma App never met it only because its compile cache
+predates its snapshot. Fixed in both files by committing the Volume after
+the warmup and before the sleep.
+
+### The fourth boot: served
+
+```text
+start: healthy after 286.3 s   (weights 21 s, compile from cache 94 s,
+                                profiling 54 s, init engine 170 s)
+It took 9.3 s to fall asleep; Snapshot created; Restoring
+It took 2.07 s to wake up tags {'weights', 'kv_cache'}
+resume: healthy after 0.0 s
+REQUEST TO SERVING: 490.1 s  (the wake request, start to snapshot to restore)
+```
+
+Then, twelve seconds later, the container asleep again, a second wake
+from the restored snapshot alone:
+
+```text
+REQUEST TO SERVING: 88.5 s   (restore of a 28.5 GiB CPU snapshot; Gemma's ~10 s)
+```
+
+Four raw probes on the warm container, `reasoning_effort: low`:
+
+| Probe | Time | Finish | Content | Reasoning separated | Tokens out |
+|---|---|---|---|---|---|
+| text, 3 primary colours | 10.2 s | stop | the answer, RYB and RGB | yes | 168 |
+| image, red circle | 25.8 s | stop | "Red circle." | yes; 64 image tokens | 47 |
+| tool, `get_weather` | 3.9 s | tool_calls | empty | yes | 61, one parsed call `{"city": "Paris"}` |
+| text, `enable_thinking: false` | 3.9 s | length at 64 | the answer, no reasoning | n/a | 64 |
+
+The tool call comes back parsed with thinking on, so vLLM issue #42021 is
+not present with `qwen3_xml` on 0.26.0. The first text and image requests
+carry Triton JIT of a kernel and the vision path ("JIT compilation during
+inference: _compute_slot_mapping_kernel"), so their times are not the
+steady state; the tool probe's 61 tokens in 3.9 s puts decode near 16
+tokens/s, below the ~30 estimated from bandwidth. Prefill was not
+measured; the scenarios will.
+
+**What `measure_endpoint_wake.py` needed:** `--model` and `--no-audio`,
+because it named Gemma and probed audio, and because a 48-token cap with
+thinking on returns `content: null` — the reasoning spends the cap. That
+last point is the product's too: `MODEL_MAX_TOKENS` is 8192, so a turn
+has room, but every call now pays reasoning tokens before its answer.
+
+**Cost of getting here:** four boots and their retries, about 35
+L40S-minutes, ~$1.15.
 
 ## 6. The cache and the cold start, for the record
 

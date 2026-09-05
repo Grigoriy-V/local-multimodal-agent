@@ -142,9 +142,10 @@ def completion(
     label: str,
     *,
     expected: tuple[str, ...],
+    model: str = "gemma-4-12b-it",
 ) -> None:
     payload = {
-        "model": "gemma-4-12b-it",
+        "model": model,
         "messages": [{"role": "user", "content": content}],
         "max_tokens": 48,
     }
@@ -202,6 +203,12 @@ def main() -> int:
         help="seconds to wait on the single wake request (default: 600)",
     )
     parser.add_argument("--skip-modalities", action="store_true")
+    parser.add_argument("--model", default="gemma-4-12b-it", help="the served model name")
+    parser.add_argument(
+        "--no-audio",
+        action="store_true",
+        help="skip the audio probe, for a model that has no audio input",
+    )
     arguments = parser.parse_args()
     if arguments.wake_timeout <= 0:
         parser.error("--wake-timeout must be greater than zero")
@@ -220,6 +227,7 @@ def main() -> int:
             "Name three primary colours.",
             "text",
             expected=("red", "blue", "yellow"),
+            model=arguments.model,
         )
         if arguments.skip_modalities:
             return 0
@@ -234,7 +242,10 @@ def main() -> int:
             ],
             "image",
             expected=("red", "circle"),
+            model=arguments.model,
         )
+        if arguments.no_audio:
+            return 0
 
         audio = fixture("speech.wav")
         encoded = base64.b64encode(audio.read_bytes()).decode()
@@ -247,6 +258,7 @@ def main() -> int:
             ],
             "audio",
             expected=("travel",),
+            model=arguments.model,
         )
     except VerificationError as error:
         print(f"\nVERIFICATION FAILED: {error}", file=sys.stderr)

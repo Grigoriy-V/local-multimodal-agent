@@ -75,6 +75,30 @@ Rules that keep the file honest:
   name is found, and had never run against Postgres.
 - **Where it belongs:** the harness.
 
+### ISS-0047 — a GPU snapshot taken with an uncommitted Volume path open cannot be restored
+
+- **Status:** fixed 2026-09-05, deployed in `assistant-llm-qwen`; in the
+  tree for `assistant-llm-v2`, deployed there with its next deploy
+- **Seen:** 2026-09-05, the third boot of `assistant-llm-qwen`: vLLM
+  compiled afresh, saved its AOT graph under
+  `/root/.cache/vllm/torch_compile_cache/torch_aot_compile/…` on the
+  `assistant-vllm-cache` Volume, slept, and Modal created the snapshot;
+  the restore failed with `failed to complete restore for filesystem type
+  "9p": failed to walk "…/torch_aot_compile/e2dbd899…": no such file or
+  directory`, exit 128, and the wake request got a 500.
+- **Costs:** a boot (~5 L40S-minutes) per attempt, and no endpoint; the
+  same App boots fine when its compile cache is already committed, so the
+  defect appears exactly when a configuration change forces a recompile.
+- **Reproduce:** change anything that alters vLLM's compile key
+  (`max_num_seqs`, the ceiling) on an App whose `start` does not commit
+  the Volume, then wake it.
+- **Where it belongs:** the harness — the deployment's `start` hook, which
+  wrote to a Volume and snapshotted with the write uncommitted. The
+  general property: what a snapshot holds open must exist where the
+  restore mounts. Fixed by `vllm_cache.commit()` after the warmup and
+  before the sleep, in both `model_app.py` and `model_app_qwen.py`.
+  `reports/2026-09-05_qwen38_second_model.md` §5.
+
 ### ISS-0046 — a deliverable the tools can make is fabricated by another means
 
 - **Status:** open — model behaviour, observed once

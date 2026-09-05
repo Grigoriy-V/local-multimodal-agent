@@ -49,9 +49,9 @@ GPU = "L40S"
 # against it. Qwen3.8's attention is 16 full-attention layers of 4 KV heads at
 # 256 out of 64 (the other 48 are Gated DeltaNet, whose state is fixed per
 # sequence), so a token of KV is 64 KB in bf16 and 128k is 8 GiB. At 0.86 of
-# 48 GB the pool is about 38.7 GiB; after ~26 GiB of weights and tower that
-# leaves ~12 GiB, so one 128k sequence fits in bf16 with room, and the
-# ordinary 20-60k turns fit several at a time. 262k would need the cache in
+# 48 GB the pool was 38.3 GiB and, after 28.5 GiB of weights and 2.7 GiB of
+# profiling, encoder cache and graphs, held 7.04 GiB of KV: too little for
+# 131,072, which is why utilization is 0.90 below. 262k would need the cache in
 # fp8 — quantization on top of quantization, with no scales in this
 # checkpoint — and its prefill is minutes; declined for now.
 #
@@ -60,11 +60,17 @@ GPU = "L40S"
 # boot log, and the report records them.
 MAX_MODEL_LEN = 131072
 
-# 0.86 on the human's word, 2026-09-05. Higher than the first App's 0.80,
-# which was set against an OOM on a 22 GiB card under the cumem allocator's
-# overshoot; the same overshoot on a 48 GB card is a smaller share of it. Every
-# 0.01 here is about 0.45 GiB of pool.
-GPU_MEMORY_UTILIZATION = 0.86
+# 0.90 on the human's word, 2026-09-05, after 0.86 was refused: at 0.86 the
+# first boot found 28.51 GiB of weights resident (not the ~26 estimated),
+# 1.11 GiB of CUDA graphs and 7.04 GiB left for KV, against the 8.18 GiB that
+# 131,072 tokens need. vLLM's own line on that boot: 0.86 is 0.8351 in the
+# accounting before graph profiling was counted, and 0.8849 reproduces the old
+# pool. Every 0.01 here is about 0.45 GiB, so 0.90 leaves ~0.6 GiB beyond what
+# the ceiling needs. The first App's 0.80 was set against an OOM at 0.92 on a
+# 22 GiB card under the cumem allocator's overshoot; on 48 GB that overshoot
+# is a smaller share. The refused boot and its log:
+# `reports/2026-09-05_qwen38_second_model.md` §5.
+GPU_MEMORY_UTILIZATION = 0.90
 
 # Thinking is on by default in Qwen3.8's chat template, at `xhigh` effort. Left
 # there, a ten-call turn would reason at length before every call. `low` keeps
@@ -79,6 +85,14 @@ DEFAULT_CHAT_TEMPLATE_KWARGS = {"reasoning_effort": "low"}
 # block out of the answer so the client's `content` is the answer alone.
 TOOL_CALL_PARSER = "qwen3_xml"
 REASONING_PARSER = "qwen3"
+
+# How many sequences the engine schedules at once. vLLM's default is 256, and
+# for this model every decoding sequence also holds one Gated DeltaNet state
+# block; the second boot (0.90, 2026-09-05) sized the pool at 141,036 KV
+# tokens and 184 of those blocks and refused to capture CUDA graphs for 256.
+# The container accepts 8 inputs at a time, so 16 is twice what can arrive,
+# and the state the other 240 would have reserved goes back to the KV pool.
+MAX_NUM_SEQS = 16
 
 # Image and video are this model's modalities; there is no audio. `video: 0`
 # keeps vLLM from profiling with video inputs, which would take a share of the
@@ -180,6 +194,8 @@ class Server:
             str(MAX_MODEL_LEN),
             "--gpu-memory-utilization",
             str(GPU_MEMORY_UTILIZATION),
+            "--max-num-seqs",
+            str(MAX_NUM_SEQS),
             "--limit-mm-per-prompt",
             json.dumps(MM_LIMITS),
             "--enable-auto-tool-choice",
@@ -203,6 +219,15 @@ class Server:
         self.process = subprocess.Popen(command)
         base._wait_ready(self.process, base.START_READY_TIMEOUT, "start")
         base._warmup(SERVED_NAME)
+        # What the boot compiled is on the Volume only in this container until
+        # it is committed, and the snapshot keeps a handle into it: the third
+        # boot (2026-09-05) saved its AOT-compiled graph to the Volume, slept,
+        # snapshotted, and the restore died walking that path in the committed
+        # Volume, where it did not exist ("failed to walk ... torch_aot_compile
+        # ...: no such file or directory", exit 128). Commit before the sleep,
+        # so the restore finds what the snapshot holds open. The Gemma App never
+        # hit this only because its compile cache predates its snapshot.
+        base.vllm_cache.commit()
         base._sleep()
 
     @modal.enter(snap=False)

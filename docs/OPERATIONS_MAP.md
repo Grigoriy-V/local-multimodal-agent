@@ -488,14 +488,20 @@ checkpoint: Qwen/Qwen3.8-27B-FP8 (revision 017b9c7a)
 served name: qwen3.8-27b
 GPU: L40S
 max model length: 131072
-GPU memory utilization: 0.86
-KV cache dtype: auto (bf16)
+GPU memory utilization: 0.90 (0.86 was refused: 7.04 GiB of KV against 8.18 needed)
+KV cache dtype: auto (bf16); measured 9.75 GiB, 155,600 tokens, 1.19x at 131,072
+max num seqs: 16 (one Gated DeltaNet state block per decoding sequence)
 default chat template kwargs: {"reasoning_effort": "low"}
 parsers: tool qwen3_xml, reasoning qwen3
 multimodal per-prompt limits: image=4, video=0
 container memory request: 32 GiB (sleep level 1 holds the weights in CPU memory)
 scaledown window, containers, concurrency: the first App's, by import
+restored wake: 88.5 s measured (a 28.5 GiB CPU snapshot); first boot ~290 s to healthy
 ```
+
+Both Apps commit the compile-cache Volume after warmup and before the
+sleep the snapshot captures; a snapshot holding a handle into an
+uncommitted Volume path cannot be restored (ISS-0047).
 
 The same three functions, `fetch_weights`, `preflight` and `Server`, run
 from this file:
@@ -883,6 +889,7 @@ Human-readable implementation evidence belongs in `reports/` rather than in the 
 | Deploy CPU control plane | `deploy/modal/control_app.py` |
 | Deploy model server | `deploy/modal/model_app.py` |
 | Deploy the second model server (Qwen3.8) | `deploy/modal/model_app_qwen.py` |
+| Measure a wake and probe a model endpoint | `scripts/measure_endpoint_wake.py --url … --model <served name> [--no-audio]` |
 | Point the assistant at the other model | `MODEL_ENDPOINT`, `MODEL_NAME` in `.env`, then `tools/sync_control_secret.py` and a control-plane deploy |
 | Change current GPU idle window without deploy | `deploy/modal/autoscale.py` |
 | Diagnose deployed capabilities | `control_app.py::self_test` |

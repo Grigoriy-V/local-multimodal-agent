@@ -38,8 +38,10 @@ documents.
   ceiling is 65,536 since 2026-08-30, at 0.80 utilization and unquantized KV.
   The original `assistant-llm` stays deployed as rollback only; retiring it is a
   destructive human gate.
-- `assistant-llm-qwen` (`deploy/modal/model_app_qwen.py`, since 2026-09-05)
-  serves Qwen3.8-27B-FP8 on an L40S at a 131,072 ceiling, 0.86 utilization,
+- `assistant-llm-qwen` at
+  `https://grigoriy-v--assistant-llm-qwen-server-serve.modal.run`
+  (`deploy/modal/model_app_qwen.py`, since 2026-09-05) serves
+  Qwen3.8-27B-FP8 on an L40S at a 131,072 ceiling, 0.90 utilization,
   unquantized KV, as the second model; not yet the one the assistant uses.
 - `assistant-control` also serves `run_command` (the command runner, no
   secret) and `scenarios` (the live scenarios in the worker's own
@@ -243,11 +245,13 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    the human's word, thinking at `low`, `qwen3_xml`/`qwen3` parsers; the
    assistant switches by `MODEL_ENDPOINT` and `MODEL_NAME`. Why this
    checkpoint and card, the arithmetic and the published quantization
-   benchmarks: `reports/2026-09-05_qwen38_second_model.md`. The first boot
-   was refused by vLLM's memory check (7.04 GiB of KV against 8.18 needed
-   for 131,072 at 0.86; weights 28.5 GiB resident) and the App is stopped.
-   **Next, each its own gate:** the human's choice between 0.90 and a 96k
-   ceiling (report §5), then the boot and its log; the live scenarios on it
+   benchmarks: `reports/2026-09-05_qwen38_second_model.md`. Four boots to
+   a served endpoint: 0.86 refused (7.04 GiB of KV against 8.18 needed),
+   0.90 on the human's word, `max_num_seqs` 16 for the DeltaNet state
+   blocks, and the compile-cache Volume committed before the snapshot
+   (ISS-0047). Measured: 9.75 GiB of KV, 155,600 tokens, 1.19x at 131,072;
+   restored wake 88.5 s; text, image and a parsed tool call with thinking
+   at `low`. **Next, each its own gate:** the live scenarios on it
    against the Gemma runs of 2026-09-05; then the human's call on which
    the assistant uses.
 
