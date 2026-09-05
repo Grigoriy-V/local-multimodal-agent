@@ -677,6 +677,33 @@ connection or a "later" status still is, before the first chunk), and
 The run itself was left to finish: stopping it would have wasted the
 boot it was paying for.
 
+### The relaunch: D and G pass the model, H fails the template
+
+The first attempt's scenarios container was lost on Modal's side —
+"Function 'scenarios' is waiting to be scheduled on a CPU worker. We are
+actively working on acquiring more capacity" — with D's turn recorded as
+started and nothing after it; the morning's "killed" G on FP8 (§7) has
+the same shape. Stopped and relaunched on the control plane with the
+retry correction. Then: D answered in 22 s (3 calls); G answered in
+134 s with 13 model calls, 11 tool calls and 6,561 output tokens —
+against the FP8 attempt's one 457 s call and no tool — and H died on
+its first call with `HTTP 400: System message must be at the
+beginning.` (ISS-0052): the facts and summary layers are system
+messages, and this template takes exactly one, first. Fixed at the
+provider boundary; the remaining scenarios are the next gate.
+
+G's answer, read from the store rather than the report the run never
+printed: three files written, four looks with `inspect_page`, then a
+`run_command` that patches `app.js` with demo tasks so the screenshot
+shows something — run twice with the same arguments, refused by the
+repeat guard as already succeeded, sent a third and a fourth time
+unchanged, and the turn ended by the guard: "the same call kept failing
+in the same way". No `send_file`. So G on INT4 with thinking off does
+the work and loses the handover in a loop the guard has to break: a
+model finding, the first for the thinking dial to be measured against
+(`MODEL_CHAT_TEMPLATE_KWARGS`), not a harness one — the guard did what
+it is for.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`

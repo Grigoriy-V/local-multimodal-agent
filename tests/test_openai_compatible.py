@@ -549,6 +549,55 @@ def test_modal_proxy_auth_refuses_a_missing_or_malformed_token(api_key: str | No
         backend(lambda _request: httpx.Response(500), api_key=api_key, auth_style="modal_proxy")
 
 
+def test_leading_system_messages_are_sent_as_one() -> None:
+    # The prelude's layers are each a system message; the wire carries one.
+    sent = build_messages(
+        [
+            Message(role="system", content=[text_part("You are the assistant.")]),
+            Message(role="system", content=[text_part("Standing instructions.")]),
+            Message(role="system", content=[text_part("Summary of the earlier conversation: apples.")]),
+            Message(role="user", content=[text_part("hi")]),
+        ]
+    )
+    assert [item["role"] for item in sent] == ["system", "user"]
+    assert sent[0]["content"] == [
+        {
+            "type": "text",
+            "text": "You are the assistant.\n\nStanding instructions.\n\nSummary of the earlier conversation: apples.",
+        }
+    ]
+
+
+def test_a_system_message_after_history_rides_with_the_next_user_message() -> None:
+    # The facts layer stands between the history and the turn: it stays there,
+    # as the first text of the turn's user message, so a template that takes
+    # one system message accepts it and the cached prefix before it holds.
+    sent = build_messages(
+        [
+            Message(role="system", content=[text_part("You are the assistant.")]),
+            Message(role="user", content=[text_part("earlier")]),
+            Message(role="assistant", content=[text_part("yes")]),
+            Message(role="system", content=[text_part("Facts you saved:\n- tea, no sugar")]),
+            Message(role="user", content=[text_part("what do I take?")]),
+        ]
+    )
+    assert [item["role"] for item in sent] == ["system", "user", "assistant", "user"]
+    assert sent[-1]["content"][0] == {"type": "text", "text": "Facts you saved:\n- tea, no sugar"}
+    assert sent[-1]["content"][1] == {"type": "text", "text": "what do I take?"}
+
+
+def test_a_system_message_with_no_user_after_it_becomes_a_user_message() -> None:
+    sent = build_messages(
+        [
+            Message(role="user", content=[text_part("go")]),
+            Message(role="system", content=[text_part("A note from the harness.")]),
+            Message(role="assistant", content=[text_part("done")]),
+        ]
+    )
+    assert [item["role"] for item in sent] == ["user", "user", "assistant"]
+    assert sent[1]["content"] == [{"type": "text", "text": "A note from the harness."}]
+
+
 async def test_chat_template_kwargs_are_sent_when_configured() -> None:
     seen: dict[str, Any] = {}
 

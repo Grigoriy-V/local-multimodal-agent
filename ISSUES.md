@@ -97,6 +97,27 @@ Rules that keep the file honest:
   healthy and exits with its log; the snapshot boot follows only after
   that passes. What `dry_run` cannot see is the restore.
 
+### ISS-0052 — a system message that is not first is refused by Qwen3.8's chat template
+
+- **Status:** fixed 2026-09-05 in the tree, deployed with the next
+  `assistant-control` deploy
+- **Seen:** 2026-09-05, scenario H on the INT4 App (`deployed-54f64c45-80`):
+  the first model call answered `HTTP 400: System message must be at the
+  beginning.` The context is assembled in layers, each a system message —
+  the system prompt, standing instructions, the summary in the prelude,
+  and the retrieved facts between the history and the turn — and the
+  template's loop raises for any system message that is not the first.
+  Gemma 4's template took them anywhere, so nothing had noticed.
+- **Costs:** every turn with facts or a summary fails on this model; H, I
+  and K, and any real conversation past its first fold.
+- **Reproduce:** a turn with a stored fact, or after a fold, on a Qwen App.
+- **Where it belongs:** the harness, at the provider boundary. The layers
+  stay what they are inside the application; `build_messages` sends the
+  shape every template accepts: the leading system messages joined into
+  one, and a system message after history delivered as the first text of
+  the next user message, so its place in the prompt and the cached prefix
+  before it are unchanged. Three offline tests.
+
 ### ISS-0051 — the renderer's first `inspect_page` in a cold container fails before the browser is up
 
 - **Status:** fixed 2026-09-05 in the tree, deployed with the next

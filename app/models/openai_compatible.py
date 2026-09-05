@@ -122,33 +122,87 @@ def _content_part(part: ContentPart) -> dict[str, Any]:
     }
 
 
+# What separates one system message from the next when they are merged, and
+# a mid-thread system text from the user text it is delivered with.
+SYSTEM_JOIN = "\n\n"
+
+
+def _system_text(message: Message) -> str:
+    return "\n".join(part.text for part in message.content if part.kind == "text" and part.text)
+
+
+def _text_item(role: str, text: str) -> dict[str, Any]:
+    return {"role": role, "content": [{"type": "text", "text": text}]}
+
+
 def build_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
-    """Turn the application's messages into the provider's message list."""
+    """Turn the application's messages into the provider's message list.
+
+    One system message, first, or none. The application assembles its
+    context in layers — the system prompt, a person's standing instructions,
+    the summary, and the facts retrieved for the turn after the history — and
+    each layer is a system message of its own, because that is what each one
+    is. Chat templates do not agree on where a system message may stand:
+    Gemma 4's takes one anywhere, Qwen3.8's raises "System message must be at
+    the beginning" for any that is not the first (seen 2026-09-05, every turn
+    with facts or a summary). The shape every template accepts is the one
+    sent: the leading system messages joined into one, in their order, and a
+    system message that stands after a user or assistant message delivered as
+    the first text of the next user message — its position in the prompt, and
+    what the served prefix cache has already seen before it, unchanged. A
+    system message with no user message after it becomes a user message.
+    """
+
+    leading: list[str] = []
+    index = 0
+    while index < len(messages) and messages[index].role == "system":
+        leading.append(_system_text(messages[index]))
+        index += 1
 
     payload: list[dict[str, Any]] = []
-    for message in messages:
-        # An outbound part is a transport action the agent already chose, not
-        # fresh evidence for another model request. The accompanying tool text
-        # is the receipt the model sees.
-        parts = [_content_part(part) for part in message.content if not part.outbound]
-        if message.role == "tool" and not parts:
-            parts = [{"type": "text", "text": "The selected item was prepared for delivery."}]
-        # An assistant turn that only calls tools has no content, and the wire
-        # format spells that null rather than as an empty list.
-        item: dict[str, Any] = {"role": message.role, "content": parts or None}
-        if message.tool_calls:
-            item["tool_calls"] = [
-                {
-                    "id": call.id,
-                    "type": "function",
-                    "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
-                }
-                for call in message.tool_calls
-            ]
-        if message.tool_call_id is not None:
-            item["tool_call_id"] = message.tool_call_id
+    if leading:
+        payload.append(_text_item("system", SYSTEM_JOIN.join(leading)))
+
+    carried: list[str] = []
+    for message in messages[index:]:
+        if message.role == "system":
+            carried.append(_system_text(message))
+            continue
+        if carried and message.role != "user":
+            payload.append(_text_item("user", SYSTEM_JOIN.join(carried)))
+            carried = []
+        item = _payload_item(message)
+        if carried:
+            item["content"] = [{"type": "text", "text": SYSTEM_JOIN.join(carried)}, *(item["content"] or [])]
+            carried = []
         payload.append(item)
+    if carried:
+        payload.append(_text_item("user", SYSTEM_JOIN.join(carried)))
     return payload
+
+
+def _payload_item(message: Message) -> dict[str, Any]:
+    # An outbound part is a transport action the agent already chose, not
+    # fresh evidence for another model request. The accompanying tool text
+    # is the receipt the model sees.
+    parts = [_content_part(part) for part in message.content if not part.outbound]
+    if message.role == "tool" and not parts:
+        parts = [{"type": "text", "text": "The selected item was prepared for delivery."}]
+    # An assistant turn that only calls tools has no content, and the wire
+    # format spells that null rather than as an empty list.
+    item: dict[str, Any] = {"role": message.role, "content": parts or None}
+    if message.tool_calls:
+        item["tool_calls"] = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
+            }
+            for call in message.tool_calls
+        ]
+    if message.tool_call_id is not None:
+        item["tool_call_id"] = message.tool_call_id
+    return item
 
 
 def read_arguments(arguments: str) -> dict[str, Any] | None:
