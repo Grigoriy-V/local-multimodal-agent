@@ -53,8 +53,10 @@ BLOCKED = "blocked"
 # person had typed it. The request is quoted whole.
 CHECK = (
     "Turn control (not from the user). The person asked:\n\n{request}\n\n"
-    "Did what you did in this turn give them that, as they asked it? Answer "
-    "on the first line with exactly one of: `done` — they have it; `not yet` "
+    "Did what you did in this turn give them that, as they asked it? Judge "
+    "by the tool calls and their results above, not by what your answer "
+    "says: something was sent only if a tool that sends it ran. Answer on "
+    "the first line with exactly one of: `done` — they have it; `not yet` "
     "— there is work left that you can do now; `blocked: ` and the reason — "
     "you cannot finish. Nothing else."
 )
@@ -119,9 +121,10 @@ def verdict(text: str) -> tuple[str, str]:
 class MeetsTheRequest:
     """Ask the model whether the turn met the request, and refuse the ending if not.
 
-    `verdicts` is every answer the check has read, in order, for a caller
-    measuring the mechanism: the graph's trace records only that a turn was
-    steered and by whom, and `done` steers nothing.
+    The question is one model call of the turn, traced with purpose `goal`,
+    and what it answered is the `goal_checked` event's `verdict` — the word,
+    never the text. `verdicts` is the same in order, for a caller holding the
+    object rather than the trace.
     """
 
     def __init__(self, backend: ModelBackend, rounds: int = ROUNDS) -> None:
@@ -133,18 +136,21 @@ class MeetsTheRequest:
         if candidate.steerings >= self.rounds or not worked(candidate.messages):
             return None
         request = request_of(candidate.messages)
-        completion: Completion = await self.backend.invoke(
-            [
-                Message(role="system", content=[ContentPart(kind="text", text=CHECK_SYSTEM)]),
-                *candidate.messages,
-                Message(
-                    role="user",
-                    content=[ContentPart(kind="text", text=CHECK.format(request=request))],
-                ),
-            ]
-        )
+        with candidate.trace.model(SOURCE) as measured:
+            completion: Completion = await self.backend.invoke(
+                [
+                    Message(role="system", content=[ContentPart(kind="text", text=CHECK_SYSTEM)]),
+                    *candidate.messages,
+                    Message(
+                        role="user",
+                        content=[ContentPart(kind="text", text=CHECK.format(request=request))],
+                    ),
+                ]
+            )
+            measured.done(completion)
         word, reason = verdict(completion.text or "")
         self.verdicts.append(word)
+        candidate.trace.event("goal_checked", verdict=word, round=candidate.steerings + 1)
         if word == NOT_YET:
             return Steering(CONTINUE.format(request=request), source=f"{SOURCE}:{NOT_YET}")
         if word == BLOCKED:

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.models import ContentPart, Message
+from app.telemetry import NO_TRACE, TurnTrace
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,10 @@ class Candidate:
     never appended to the turn, precisely so neither reaches the conversation.
     Without this number the only bound on an extension that keeps objecting is
     the turn's budget, which is a ceiling on cost rather than a decision.
+
+    `trace` is the turn's recorder, for an extension that spends a model call:
+    a request the turn pays for is counted with the turn's others, and what
+    the extension decided is readable afterwards. It records no content.
     """
 
     message: Message
@@ -50,6 +55,7 @@ class Candidate:
     tool_calls: int = 0
     spent_seconds: float = 0.0
     steerings: int = 0
+    trace: TurnTrace = NO_TRACE
 
     @property
     def text(self) -> str:

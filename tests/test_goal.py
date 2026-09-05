@@ -221,3 +221,29 @@ async def test_no_objection_falls_through_to_the_next(store) -> None:
     await agent.ainvoke(ask("go"))
 
     assert check.verdicts == [DONE]
+
+
+# --- the question is in the trace ---------------------------------------------
+
+
+async def test_the_check_is_a_traced_model_call_with_its_verdict(store, tmp_path) -> None:
+    from app.agent.graph import RUN_ID
+    from app.telemetry import Telemetry, TurnRun
+    from app.telemetry.sqlite import SqliteTelemetry
+
+    telemetry = Telemetry(SqliteTelemetry(str(tmp_path / "telemetry.db")))
+    backend = ScriptedBackend(calls("ping"), says("v1"), says("not yet"), says("v2"), says("done"))
+    agent = build_agent(
+        backend, Toolbox([ping()]), store, OWNER, stopping=MeetsTheRequest(backend), telemetry=telemetry
+    )
+    trace = telemetry.start(TurnRun(run_id="goal-run", user_id=OWNER, thread_id="t", source="test"))
+    await agent.ainvoke(ask("go"), config={"configurable": {RUN_ID: "goal-run"}})
+    trace.flush()
+
+    events = telemetry.store.events("goal-run")
+    purposes = [e.data.get("purpose") for e in events if e.type == "model_finished"]
+    assert purposes.count("goal") == 2
+    verdicts = [e.data["verdict"] for e in events if e.type == "goal_checked"]
+    assert verdicts == [NOT_YET, DONE]
+    assert not any("v1" in str(e.data) for e in events)
+    telemetry.close()

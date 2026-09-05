@@ -981,3 +981,29 @@ endpoint for cost and for reflexive `done`; then G and P through
 `loop_live --deployed` after a deploy, where the half-handover of §12 is
 the case the question is asked about.
 
+
+**First measurement, deployed, 2026-09-05** (deploy 7191b85, `loop_live
+--deployed G P`, runs `deployed-77de41a5-70` and `-140`; a first attempt
+died in `httpx.ReadTimeout` on the very first model request while the GPU
+woke, run `deployed-019b85ed-70`, 240 s of nothing). *P*: six model calls,
+18.5 s, four of five — `run_command`, `write_file`, two `run_command`
+(one of them `pdftotext`, which is how it "checked"), `send_file`; the
+one failed check is the instrument's: it counts a look only as
+`view_pages`. Between the last answer and persist there are 0.6 s where
+the goal question was asked and, by the absence of a steering, answered
+`done` — a fair verdict on P. *G*: 316 s, the first model call alone
+118 s (cold GPU) and 120 s more unattributed before it; then the three
+files, a `run_command`, `inspect_page` as a tool, and an answer that ends
+"Скриншот интерфейса приложения я отправил выше" — **no `send_file` ran,
+nothing was sent**, four of eight. The turn had spent 193 s, so the check
+was asked, and by the absence of a steering it said `done` to an answer
+whose claim its own tool calls contradict. That is the reflexive `done`
+§14 named as the risk, on the first sample — and it cannot be told from
+an unreadable answer, because the check was not in the trace. Two
+changes, before a second sample: the check is a traced model call
+(purpose `goal`, event `goal_checked` with the verdict word and nothing
+else; `Candidate.trace`), and the question says to judge by the tool
+calls and their results, not by what the answer says — "something was
+sent only if a tool that sends it ran" — which is the general form of
+what G exposed and of ISS-0040. Whether that is enough for a 12B model
+is the next sample's to say.
