@@ -26,6 +26,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import urllib.request
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -251,17 +252,31 @@ class CdpSession:
         return str(result["data"])
 
 
-async def _wait_for_debugger(port: int, process: subprocess.Popen[bytes]) -> str:
+# How long a freshly launched browser may take to open its DevTools port. A
+# budget in seconds rather than a count of polls, because what it has to cover
+# is the browser's own first launch in a fresh container: on 2026-09-05 the
+# renderer's first `inspect_page` in a cold deployed container failed at 3.4 s
+# — the old budget was sixty polls of 50 ms — and the retry a second later
+# found the browser ready (ISS-0051). Fifteen seconds is generous for a warm
+# machine and still bounded for a broken one.
+DEVTOOLS_READY_SECONDS = 15.0
+
+
+async def _wait_for_debugger(
+    port: int, process: subprocess.Popen[bytes], timeout: float = DEVTOOLS_READY_SECONDS
+) -> str:
     url = f"http://127.0.0.1:{port}/json/version"
-    for _ in range(60):
+    deadline = time.monotonic() + timeout
+    while True:
         if process.poll() is not None:
             raise RuntimeError(f"browser exited before DevTools was ready ({process.returncode})")
         try:
             payload = await asyncio.to_thread(_read_json, url)
             return str(payload["Browser"])
         except (OSError, KeyError, RuntimeError):
+            if time.monotonic() >= deadline:
+                raise RuntimeError("browser DevTools endpoint did not become ready") from None
             await asyncio.sleep(0.05)
-    raise RuntimeError("browser DevTools endpoint did not become ready")
 
 
 @contextlib.asynccontextmanager

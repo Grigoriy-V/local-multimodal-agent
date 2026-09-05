@@ -97,6 +97,24 @@ Rules that keep the file honest:
   healthy and exits with its log; the snapshot boot follows only after
   that passes. What `dry_run` cannot see is the restore.
 
+### ISS-0051 — the renderer's first `inspect_page` in a cold container fails before the browser is up
+
+- **Status:** fixed 2026-09-05 in the tree, deployed with the next
+  `assistant-control` deploy
+- **Seen:** 2026-09-05, scenario F on the INT4 App (`deployed-b1661cff-60`):
+  `inspect_page` failed after 3.44 s with `browser.load_failed: browser
+  DevTools endpoint did not become ready`; the model called it again and
+  the second attempt succeeded in 1.36 s. The renderer container was
+  fresh, and Chromium's first launch took longer than the wait.
+- **Costs:** a failed tool call and a model call to repeat it on every
+  cold renderer; the check "no tool failed" in F.
+- **Reproduce:** let `render_web_page` scale to zero, then `inspect_page`.
+- **Where it belongs:** the harness. `_wait_for_debugger` waited sixty
+  polls of 50 ms — three seconds, a count that happened to fit a warm
+  machine — and now waits a stated budget of fifteen seconds
+  (`DEVTOOLS_READY_SECONDS`); a browser that exits is still reported at
+  once. Four offline tests.
+
 ### ISS-0050 — vLLM's ahead-of-time compile of the INT4 checkpoint dies tracing a renamed weight
 
 - **Status:** worked around 2026-09-05 (`VLLM_USE_AOT_COMPILE=0` on the

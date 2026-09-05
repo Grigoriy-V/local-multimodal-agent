@@ -498,10 +498,33 @@ to `MODEL_RETRIES`, as the non-streaming path always was. Before that,
 the same seven scenarios had died on a `MODEL_ENDPOINT` without `/v1`
 (`GET /models` 404) — a configuration slip, corrected by the human.
 
-Restore of the INT4 snapshot, measured twice: ~22–31 s, against the FP8
-App's 19–28 s warm and 80–86 s cold. The snapshot is 17.7 GiB against
-28.5. Two samples, both on hosts that had the snapshot; the cold-host
+Restore of the INT4 snapshot, measured three times: ~20–31 s, against
+the FP8 App's 19–28 s warm and 80–86 s cold. The snapshot is 17.7 GiB
+against 28.5. All three on hosts that had the snapshot; the cold-host
 case has not been observed on this App.
+
+### The seven scenarios on INT4, with the stream retry deployed
+
+Run `deployed-b1661cff-*`, 13:23–13:26 UTC, the model asleep at the
+start. Gemma's figures are the same scenarios earlier the same day
+(`deployed-abc3941b-*`).
+
+| Scenario | INT4, s | Gemma, s | Calls (INT4) | Result |
+|---|---|---|---|---|
+| A, an ordinary question | 26.7 (20 s of it the restore, model 3 s) | — | 1m/0t | pass |
+| B, one tool | 10.9 | 3.2 | 2m/1t | pass |
+| C, multi-step work | 15.8 | 5.1 | 3m/2t | pass |
+| E, a failing tool | 14.2 | 3.7 | 2m/1t | pass |
+| F, a page made and looked at | 28.0 | 15.5 | 4m/3t | one check failed: `inspect_page` first failed, then succeeded (ISS-0051, the renderer's cold browser, not the model) |
+| R, data into a picture | 40.0 | 15.8 | 5m/4t | pass |
+| S, a failing script repaired | 27.7 | 11.0 | 6m/6t | pass |
+
+All seven answered what was asked; the one failed check is the
+renderer's. The model's own calls: 2.5–6 s each for short answers with
+thinking at `low`, first token ~3 s; a turn is 2–3.5x Gemma's, which is
+the price of a 27B with reasoning against a 12B without. No restore fell
+inside a turn: the longest tool was R's `run_command` and the model's
+12 s window held. Cost of the run ~$0.06 of derived GPU.
 
 ## Sources
 

@@ -256,9 +256,15 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    worker, and the store's idle connection failed the turn (ISS-0048,
    fixed). On the human's word the same model in INT4 on an A100-40GB is
    a third App, `assistant-llm-qwen-int4` (`model_app_qwen_int4.py`), for
-   a snapshot half the size; its `preflight` now refuses on CPU a ceiling
-   the pool cannot hold (report §8). **Next, each its own gate:** deploy
-   the store fix; the INT4 App's first boot; the live scenarios on it
+   a snapshot half the size; its `preflight` refuses on CPU a ceiling the
+   pool cannot hold, and `dry_run` boots it once with no request behind
+   it (report §8–§9). Deployed and serving: restore 20–31 s on three
+   samples; A B C E F R S pass on it, F's one failed check being the
+   renderer's cold browser (ISS-0051, fixed); a turn is 2–3.5x Gemma's
+   (report §10). Found and fixed on the way: ISS-0044, ISS-0047, ISS-0048,
+   ISS-0051; open: ISS-0049 (platform restarts), ISS-0050 (AOT off).
+   **Next, each its own gate:** the remaining scenarios on INT4 (D, G, H,
+   I, K, J, O, P, Q), the same on FP8 for the comparison
    against the Gemma runs of 2026-09-05; then the human's call on which
    the assistant uses.
 
