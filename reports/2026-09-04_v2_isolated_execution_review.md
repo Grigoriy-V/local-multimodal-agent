@@ -1052,3 +1052,68 @@ request (verdict-first question), one invalid (history), one where the
 check was never reached. The list-first form has no valid sample yet.
 Worth the human's eye: the turns long enough to lose the request are the
 turns that hit the ceiling, where the check is skipped by design.
+
+## 15. The goal, read again against Hermes and DeepSeek — option, 2026-09-05
+
+Read from source on 2026-09-05: Hermes `website/docs/user-guide/features/goals.md`;
+DeepSeek `packages/goal/goal-round-driver/src/{index,prompt}.ts`,
+`packages/goal/tool-goal/src/wrapup.ts`, and the three Agent Notes
+(`same-session-goal-round-driver`, `model-facing-goal-tools`,
+`goal-round-wrapup-message`). The human's judgement after four samples:
+the architecture of §14 as built is wrong. It is, in four places.
+
+| | Hermes | DeepSeek | Ours (§14, built) |
+|---|---|---|---|
+| Where the check sits | **outside the turn**: the turn ends normally, a judge runs, `continue` appends a plain user message and a new turn begins | **outside the turn**: Goal → Round → Turn → Step; a round is a fresh goal-sourced user turn through the ordinary loop, with its own budget; "make every round another step" was considered and *rejected* | **inside the turn**, on the stopping seam, sharing the turn's step ceiling — so on the long turn that hit 12 steps the check was skipped by design (sample 4) |
+| Who judges | a **separate call with a fresh context**: goal text + the last ~4 KB of the answer, strict one-line JSON, "deliberately conservative: `done` only when the response explicitly confirms"; routable to a cheap model | nobody: the model itself records `complete`/`blocked` through `update_goal`; an "independent evaluator or completion certificate" is listed as deferred | the same model, in the same context, shown its own answer and tool results and asked to contradict itself — it said `done` twice to "sent above" with no send |
+| What the judge reads | the goal and the **answer**, not the transcript; mechanical evidence is a separate thing (quality gates, shell commands that must exit 0) | the round prompt tells the model to "treat the workspace, tool results and durable state as authoritative; inspect them instead of assuming earlier narration is still current" | the whole turn (3.4k tokens) plus a question to judge by the tool calls; a 12B model read the narration |
+| Which requests | **explicit**: `/goal` by the person, "tasks where the agent does one turn and stops don't need `/goal`" | explicit: `/goal` or the model creating one from a direct human request, "should not convert routine single-turn work into a goal" | every turn that ran a tool |
+| Continuation text | a plain user message (cache-friendly), with the goal, subgoals and gate output | `<goal_round> Objective … Round n/N … make concrete progress and verify … before claiming completion gather evidence … mark it complete` | a steering beside the withdrawn draft |
+| Ending | judge `done`/`blocked`, budget pause with `/goal resume` | a `<goal_complete>`/`<goal_blocked>` wrap-up instruction so the model addresses the person once; A/B-sampled wording | the candidate answer kept, or `EXPLAIN` on blocked |
+| Fail-open | judge error → `continue`; budget is the backstop | abnormal outcome → pause/block, never an automatic retry | check error → the turn ends |
+
+**What that says about the four samples.** The two `done`s are the
+predicted failure of "same model, same context": Hermes's judge is a
+different call precisely so the verdict is not written by the hand that
+wrote the claim, and it is fed the answer rather than the transcript
+because the answer is what a small model can judge. The skipped check of
+sample 4 is the predicted failure of "inside the turn": both references
+put the goal *over* turns, so a round has a budget of its own and a turn
+that used its ceiling is exactly the one that gets another. The
+every-request scope is the cost story and, plausibly, the reflex: a judge
+asked after every working turn is a judge trained to say `done`.
+
+**Option A — rounds over turns, a Hermes-shaped judge (proposed).**
+1. The turn ends as it always has. Nothing on the stopping seam; the
+   `todo` extension stays what it is.
+2. If the turn ran a tool, a judge call follows, in a **fresh context**:
+   a short system line, the request verbatim, the names of the tools that
+   ran (ours: whether a send happened is a fact, not prose), and the final
+   answer — no transcript. Strict one-line JSON `{verdict, reason}`,
+   `done | continue | blocked`, conservative wording taken from Hermes.
+   About 1 s and well under a thousand tokens.
+3. `continue` → a new turn in the same thread from a plain user-role
+   message that names the request and the judge's reason, stored in
+   history like any message (DeepSeek: it must have "its own durable user
+   prompt, turn boundary, round count"), with the turn's ordinary budget.
+   At most two rounds per request. `blocked` → the reason reaches the
+   person as the wrap-up, once. A judge error is `done` for us, not
+   `continue`: a broken judge must not spend a GPU.
+4. Scope stays "the request" by default — this product has no `/goal`
+   habit, and the lost-request cases were ordinary requests — but the
+   judge is the cheap kind and runs once per working turn.
+5. **Measured before the driver is built**: the judge alone, against the
+   four stored G answers of today whose truth is known (two half-done,
+   one whole, one repeat) and the P answer. If it says `done` to "sent
+   above" with `send_file` absent from the tool names, no driver is
+   built. That measurement is one small call per stored answer.
+
+**Option B — explicit goal only, as the references.** `/goal` in
+Telegram, the same judge and driver, nothing on ordinary turns. Cheapest,
+and the proven shape; it does not touch the half-handover of an ordinary
+request, which is the case the human brought.
+
+**Either way, what comes out:** `MeetsTheRequest` on the stopping seam,
+`FirstObjection`, and the goal wiring in `create_agent`; `Candidate.trace`
+can stay, it is a general property of the seam. Not approved; the human
+decides.
