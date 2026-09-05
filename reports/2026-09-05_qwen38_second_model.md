@@ -461,6 +461,48 @@ Spent on the INT4 App: five boots, about 32 A100-minutes, ~$1.10. Next,
 on the human's word: the first request to the deployed App, which
 creates the snapshot and restores from it.
 
+## 10. The INT4 App deployed: snapshot, restore, and the first scenarios
+
+The first request to the deployed App (on the human's word): weights
+21 s, compile and profiling 213 s with AOT off, `Free memory on device
+(39.08/39.49 GiB)`, `Available KV cache memory: 16.74 GiB`, `2.04x` at
+131,072, healthy after 412.5 s, asleep in 4.8 s, snapshot created,
+restored, awake in 2.1 s; the request answered after 482.7 s. The
+restore that ISS-0047 had blocked twice went through with no Volume
+under the engine.
+
+Then the restores:
+
+| Request | What happened | Request to serving |
+|---|---|---|
+| 2, 12:54 UTC | restore on a host with the snapshot | **30.7 s**, wake 2.0 s inside |
+| 3, 12:55 | `Creating GPU memory snapshot` — a full boot on another worker type | ~13 min, healthy 558.9 s |
+| 4, 13:09 | restore of the second snapshot | ~22 s (container start to healthy), wake 6.1 s |
+| 5, 13:12 | `Creating GPU memory snapshot` again, same compile-cache hash as request 3 | a full boot |
+
+Modal's guide: snapshots are "specific to the underlying worker type
+that created them", GPU Functions need "2-3 snapshots per GPU type".
+Requests 3 and 5 are that. What the guide does not say is what a
+worker type is beyond "e.g. CPU flags"; request 5 compiled into the
+same cache directory as request 3 (`a9661e2104`, a key of the CPU),
+so whatever distinguished its host is not the CPU. Whether the next
+cold start restores or creates a fourth is the thing to watch; if it
+creates, the question goes to Modal, not to more boots.
+
+The first scenario attempt, A B C E F R S, chosen for having no package
+installs inside a turn: died on the first model call with
+`httpx.ReadTimeout` — ISS-0044, the stream path's 120 s with no retry,
+while the endpoint was in request 5's boot. Fixed in the tree (§ISS-0044
+in `ISSUES.md`): a stream that has produced nothing is sent again, up
+to `MODEL_RETRIES`, as the non-streaming path always was. Before that,
+the same seven scenarios had died on a `MODEL_ENDPOINT` without `/v1`
+(`GET /models` 404) — a configuration slip, corrected by the human.
+
+Restore of the INT4 snapshot, measured twice: ~22–31 s, against the FP8
+App's 19–28 s warm and 80–86 s cold. The snapshot is 17.7 GiB against
+28.5. Two samples, both on hosts that had the snapshot; the cold-host
+case has not been observed on this App.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`

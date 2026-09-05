@@ -70,6 +70,10 @@ OPENAI_AUDIO_FORMATS = frozenset({"wav", "mp3"})
 # full, a proxy that gave up early. A 4xx about the request itself is excluded —
 # sending the same bad request again only wastes the time it takes to refuse it.
 TRANSIENT_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+
+
+class _Later(Exception):
+    """A status the server means as "ask again", raised inside the stream to retry it."""
 CONTEXT_OVERFLOW_STATUS = frozenset({400, 413, 422})
 CONTEXT_OVERFLOW_MARKERS = (
     "maximum context length",
@@ -627,13 +631,17 @@ class OpenAICompatibleBackend(ModelBackend):
         tools: Sequence[dict[str, Any]] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """Yield text as it arrives, then the assembled result. Not retried.
+        """Yield text as it arrives, then the assembled result.
 
-        A stream that fails halfway has already given the caller part of an
-        answer, and there is no way to ask for the rest — retrying would repeat
-        what was said, in front of the person reading it. A failure before the
-        first delta could be retried safely, and is not, for now: the caller
-        sees one failure mode either way.
+        Retried only while nothing has arrived. A stream that fails halfway
+        has already given the caller part of an answer, and there is no way to
+        ask for the rest — retrying would repeat what was said, in front of
+        the person reading it. A request that produced nothing yet may be
+        sent again, the same as `_completion` does: a transport failure, or a
+        status the server means as "later". The case that made this matter is
+        an endpoint waking from sleep (ISS-0044): the first request of a turn
+        waited out the read timeout and the turn died, though the server was
+        seconds from answering.
 
         `CompletionDone` is yielded only if the response ended; a stream that
         breaks raises out of here instead, so a caller can never mistake a
@@ -641,23 +649,36 @@ class OpenAICompatibleBackend(ModelBackend):
         """
 
         body = self._body(messages, tools, response_format, stream=True)
-        streamed = StreamedCompletion()
-        async with self._client.stream("POST", "/chat/completions", json=body) as response:
-            if response.status_code >= 400:
-                await response.aread()
-                error_type = (
-                    ContextOverflowError
-                    if is_context_overflow(response.status_code, response.text)
-                    else BackendError
-                )
-                raise error_type(f"HTTP {response.status_code}: {response.text}")
-            async for line in response.aiter_lines():
-                chunk = parse_stream_line(line)
-                if chunk is None:
-                    continue
-                text = streamed.add(chunk)
-                if text:
-                    yield TextDelta(text)
+        attempt = 0
+        while True:
+            streamed = StreamedCompletion()
+            received = False
+            try:
+                async with self._client.stream("POST", "/chat/completions", json=body) as response:
+                    if response.status_code >= 400:
+                        await response.aread()
+                        if response.status_code in TRANSIENT_STATUS and attempt < self.settings.retries:
+                            raise _Later(f"HTTP {response.status_code}: {response.text}")
+                        error_type = (
+                            ContextOverflowError
+                            if is_context_overflow(response.status_code, response.text)
+                            else BackendError
+                        )
+                        raise error_type(f"HTTP {response.status_code}: {response.text}")
+                    async for line in response.aiter_lines():
+                        chunk = parse_stream_line(line)
+                        if chunk is None:
+                            continue
+                        received = True
+                        text = streamed.add(chunk)
+                        if text:
+                            yield TextDelta(text)
+                break
+            except (httpx.HTTPError, _Later):
+                if received or attempt >= self.settings.retries:
+                    raise
+                await asyncio.sleep(self.settings.retry_backoff * 2**attempt)
+                attempt += 1
         finished = streamed.result()
         self._calibrate(messages, finished.usage)
         yield CompletionDone(readable(finished))
