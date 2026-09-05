@@ -1176,3 +1176,11 @@ found nothing deployed — ISS-0045, the Postgres tokenizer keeps a file
 name as one token and the query splits it; fixed in the tree, the
 contract test that would have caught it never ran against Postgres.
 
+**D and I deployed after the two fixes, 2026-09-05** (deploy 7b93d08,
+runs `deployed-99f16efe-40/-90`): D passes, the stop recorded mid-turn
+and the turn ended on it in 13 s; I passes two of two — `read_file`
+(not found), `list_files`, `search_history`, `read_history`, "4711"
+quoted, 6 s — the same route as the local run of 2026-09-03. Sixteen of
+sixteen scenarios have now run deployed with `set_goal` in the toolbox;
+the three checks still failing are G's variance and P's instrument.
+

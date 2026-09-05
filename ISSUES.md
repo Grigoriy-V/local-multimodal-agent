@@ -53,9 +53,9 @@ Rules that keep the file honest:
 
 ### ISS-0045 — deployed, history search cannot find a file name by its parts
 
-- **Status:** fixed in the tree, 2026-09-05 — every Postgres search matches
+- **Status:** fixed and deployed 2026-09-05 — every Postgres search matches
   on `plainto_tsquery` as well as the split query, so a name is found as
-  typed. Not yet deployed
+  typed; scenario I passes deployed (run `deployed-99f16efe-90`)
 - **Seen:** 2026-09-05, the first deployed run of scenario I (run
   `deployed-cf8c3774-90`): `search_history "config.ini"` answered "no
   message in this conversation matches", with "Read config.ini, then list
