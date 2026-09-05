@@ -622,6 +622,44 @@ one redeploy, the snapshot boots, and the same seven scenarios: if the
 calls drop from ~3 s to ~1 s the turn halves. MTP and the thinking
 budget are separate measurements after that, each its own gate.
 
+## 12. 0.28.0, prefix caching on, thinking off: the same seven scenarios
+
+One redeploy on the human's word (no `dry_run`, their point: it costs
+the same as the snapshot boot it precedes). The first request: vLLM
+0.28.0 in the banner, "Mamba cache mode is set to 'align' for
+Qwen3_5ForConditionalGeneration by default when prefix caching is
+enabled", attention block 784 tokens, `Available KV cache memory: 15.35
+GiB` (the preflight's 15.34), 241,051 tokens, 1.84x, healthy after
+342 s (compile and profiling 162 s), asleep in 5.4 s, snapshot,
+restore; served after 410 s, text and image answered with no reasoning.
+
+Run `deployed-6ec70d65-*`, 14:06–14:08 UTC, all seven passed:
+
+| Scenario | 0.26.0, no cache, thinking low | 0.28.0, cache, no thinking | Gemma |
+|---|---|---|---|
+| A | 26.7 s (20 s restore) | 33.1 s (28.5 s restore) | — |
+| B | 10.9 | **4.1** | 3.2 |
+| C | 15.8 | **6.6** | 5.1 |
+| E | 14.2 | **5.9** | 3.7 |
+| F | 28.0, one failed check | **11.3**, clean | 15.5 |
+| R | 40.0 | **26.6** | 15.8 |
+| S | 27.7 | **14.4** | 11.0 |
+
+What the calls say now: `cached 4704` on every call after the first in
+a turn (six aligned blocks of 784, the shared prefix), so a short call
+is 0.7–1.0 s and a call that writes ~150 tokens 2.7–2.9 s at ~55–70
+tokens/s. F's `inspect_page` succeeded first time in the cold renderer
+(ISS-0051). The restore in A was 28.5 s, a fourth sample in the 20–31 s
+band. The turn is now within 1.3–1.7x of Gemma on B, C, E and S, and
+faster than Gemma on F; R's extra is three `run_command` calls where
+Gemma used one.
+
+What is not measured yet and belongs to the next gates: the remaining
+scenarios, G above all (its first attempt on FP8 wrote 8k tokens in one
+call with thinking at `low`; now thinking is off and the cache is on);
+thinking turned back on by `MODEL_CHAT_TEMPLATE_KWARGS` for a
+comparison; MTP alone.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`

@@ -269,9 +269,12 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    human's word, cost). On the human's word: the Qwen Apps move to vLLM
    0.28.0 / transformers 5.15.0, prefix caching on, thinking off by
    default with `MODEL_CHAT_TEMPLATE_KWARGS` as the dial; `dry_run` is
-   not a required step. **Next, each its own gate:** the redeploy and its
-   snapshot boots, the seven scenarios again; then the remaining
-   scenarios (D, G, H, I, K, J, O, P, Q); MTP as a separate measurement
+   not a required step. Deployed and measured (report §12): the seven
+   scenarios all pass, B 4.1 s, C 6.6, E 5.9, F 11.3, R 26.6, S 14.4,
+   against 10.9/15.8/14.2/28.0/40.0/27.7 before, with `cached 4704` on
+   every call after a turn's first. **Next, each its own gate:** the
+   remaining scenarios (D, G, H, I, K, J, O, P, Q); thinking on through
+   the setting, for comparison; MTP as a separate measurement
    against the Gemma runs of 2026-09-05; then the human's call on which
    the assistant uses.
 
