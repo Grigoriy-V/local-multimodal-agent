@@ -1,6 +1,6 @@
 # Code Map
 
-This document is the low-cost navigation index for `local-multimodal-agent`.
+This document is the low-cost navigation index for Pinocchio Harness (`pinocchio-harness`).
 Its purpose is to help a developer or coding agent find the **existing owner** of a behavior before reading broad parts of the repository or creating a second implementation.
 
 It is not an architecture history and not a roadmap. Current work is in `ROADMAP.md`; product invariants are in `docs/PRODUCT.md`; the conceptual system map is in `docs/PROJECT_MAP.md`; operations are in `docs/OPERATIONS_MAP.md`.
@@ -65,6 +65,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Read the loop's steps back | `app/telemetry/inspect.py` | `steps`, `step_section`, `loop_step` |
 | Read the model server's engine metrics | `app/telemetry/vllm.py` | `parse_metrics`, `discover`, `restarted`, `summarize` |
 | Measure prefill, decode and prefix cache | `tools/vllm_baseline.py` | `plan`, `measure`, `report` |
+| Render a stored conversation as a page with its pictures and files | `tools/showcase.py` | `render_thread`, `--out`; read-only |
 | Compare one system prompt against another | `tools/prompt_scenarios.py` | `SCENARIOS`, `select`, `run_one`, `render`, `--dry-run` |
 | Estimate GPU seconds and cost of a turn | `app/telemetry/cost.py` | `gpu_cost`, `IDLE_WINDOW_SECONDS`, `A10_USD_PER_SECOND` |
 | Reach the model endpoint's auth headers | `app/models/openai_compatible.py` | `auth_headers` |

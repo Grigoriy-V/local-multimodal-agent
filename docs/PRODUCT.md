@@ -1,6 +1,6 @@
 # Product
 
-This document is the stable product contract for `local-multimodal-agent`.
+This document is the stable product contract for Pinocchio Harness (`pinocchio-harness`, until 2026-09-05 `local-multimodal-agent`).
 It explains what the product is and the principles that should survive implementation changes.
 It is **not** a roadmap, work log, architecture history, or evidence report.
 
@@ -12,7 +12,7 @@ not decision history, for the current product contract.
 
 ## Product
 
-`local-multimodal-agent` is a practical personal multimodal assistant for one owner and a small number of other users.
+Pinocchio Harness is a practical personal multimodal assistant for one owner and a small number of other users.
 
 The primary deployed interface is Telegram. A local Chainlit interface remains available for development and local use. The application is intended to remain the same product in both profiles: local versus deployed is a configuration and infrastructure difference, not a separate codebase or assistant.
 

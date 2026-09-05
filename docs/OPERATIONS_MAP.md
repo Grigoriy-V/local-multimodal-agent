@@ -1,6 +1,6 @@
 # Operations Map
 
-This document maps the **current operational surface** of `local-multimodal-agent`: configuration, deployment, secrets, migrations, Telegram mode, runtime controls, storage and diagnostics.
+This document maps the **current operational surface** of Pinocchio Harness (`pinocchio-harness`): configuration, deployment, secrets, migrations, Telegram mode, runtime controls, storage and diagnostics.
 
 It is a navigation/ownership document, not a deployment history. `ROADMAP.md` owns current work; `reports/` owns measurements and acceptance evidence; `AGENTS.md` owns permission and execution rules for coding agents.
 `DECISIONS.md` explains approved durable operational choices. Read the relevant
@@ -850,6 +850,7 @@ Human-readable implementation evidence belongs in `reports/` rather than in the 
 | Diagnose local install | `scripts/doctor.py` |
 | Measure endpoint wake | `scripts/measure_endpoint_wake.py` |
 | Compare prompt variants on fixed scenarios | `tools/prompt_scenarios.py` |
+| Render a stored conversation as Markdown with its media, read-only | `tools/showcase.py` |
 | Record/search agent/ML work journal | `tools/work_log.py` |
 
 ## Operations invariants

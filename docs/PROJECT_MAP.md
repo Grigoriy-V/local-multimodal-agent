@@ -1,6 +1,6 @@
 # Project Map
 
-This is the conceptual map of the **current implementation** of `local-multimodal-agent`.
+This is the conceptual map of the **current implementation** of Pinocchio Harness (`pinocchio-harness`).
 It explains components, ownership and runtime flows. It is not a roadmap or architecture history.
 
 For implementation navigation use `docs/CODEMAP.md`. For deployment commands and configuration use `docs/OPERATIONS_MAP.md`. Current work lives in `ROADMAP.md`; evidence lives in `reports/`.
