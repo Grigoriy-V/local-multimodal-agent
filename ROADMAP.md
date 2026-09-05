@@ -254,10 +254,11 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    at `low`. The scenarios ran once (report §7): A–F answered, G wrote
    8,334 tokens in one call and no tool, the first G was killed in the
    worker, and the store's idle connection failed the turn (ISS-0048,
-   fixed). The human means to move to `RedHatAI/Qwen3.8-27B-INT4` for a
-   snapshot half the size (report §5, §7). **Next, each its own gate:**
-   deploy the store fix; G alone on Qwen with the turn stored; the
-   INT4 App; then the live scenarios on it
+   fixed). On the human's word the same model in INT4 on an A100-40GB is
+   a third App, `assistant-llm-qwen-int4` (`model_app_qwen_int4.py`), for
+   a snapshot half the size; its `preflight` now refuses on CPU a ceiling
+   the pool cannot hold (report §8). **Next, each its own gate:** deploy
+   the store fix; the INT4 App's first boot; the live scenarios on it
    against the Gemma runs of 2026-09-05; then the human's call on which
    the assistant uses.
 

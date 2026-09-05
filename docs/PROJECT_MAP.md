@@ -521,9 +521,10 @@ The deployed workspace is Modal Volume `assistant-workspaces` mounted at `/works
 `deploy/modal/model_app.py` owns the current Modal vLLM deployment.
 `deploy/modal/model_app_qwen.py` owns a second one, since 2026-09-05:
 Qwen3.8-27B in FP8 on an L40S with a 131,072-token ceiling, importing the
-first file's machinery and sharing its Volumes. The assistant uses one at a
-time, chosen by `MODEL_ENDPOINT` and `MODEL_NAME`; the other sleeps
-(`DECISIONS.md` 2026-09-05).
+first file's machinery and sharing its Volumes; `model_app_qwen_int4.py` a
+third, the same model in INT4 on an A100-40GB for a snapshot half the size.
+The assistant uses one at a time, chosen by `MODEL_ENDPOINT` and
+`MODEL_NAME`; the others sleep (`DECISIONS.md` 2026-09-05).
 
 Current shape of the first:
 

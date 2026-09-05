@@ -503,6 +503,30 @@ Both Apps commit the compile-cache Volume after warmup and before the
 sleep the snapshot captures; a snapshot holding a handle into an
 uncommitted Volume path cannot be restored (ISS-0047).
 
+### The third model: `assistant-llm-qwen-int4`
+
+**Owner:** `deploy/modal/model_app_qwen_int4.py`: its own numbers and a
+small class; the spec, command, boot and CPU checks are
+`model_app_qwen.py`'s. Since 2026-09-05, on the human's word, for a
+snapshot half the FP8 App's.
+
+```text
+checkpoint: RedHatAI/Qwen3.8-27B-INT4 (revision 2fb0debc), W4A16 g128
+served name: qwen3.8-27b-int4
+GPU: A100-40GB
+max model length: 131072
+GPU memory utilization: 0.90
+everything else: the FP8 App's (parsers, thinking low, max num seqs 16, image=4)
+container memory request: 24 GiB
+```
+
+**Before any GPU boot of a Qwen App, `preflight` on CPU** builds the
+engine configuration and runs `model_app_qwen.fits`: the pool arithmetic
+calibrated on the boots of 2026-09-05 (KV 64 KB a token, weights resident
+at their bytes on disk, ~2 GiB of engine overhead, good to about half a
+gigabyte). It refuses a ceiling the pool cannot hold, which cost four L40S
+boots to learn.
+
 The same three functions, `fetch_weights`, `preflight` and `Server`, run
 from this file:
 
@@ -888,7 +912,9 @@ Human-readable implementation evidence belongs in `reports/` rather than in the 
 | Preview/publish Telegram profile and command menu | `tools/telegram_profile.py` |
 | Deploy CPU control plane | `deploy/modal/control_app.py` |
 | Deploy model server | `deploy/modal/model_app.py` |
-| Deploy the second model server (Qwen3.8) | `deploy/modal/model_app_qwen.py` |
+| Deploy the second model server (Qwen3.8 FP8, L40S) | `deploy/modal/model_app_qwen.py` |
+| Deploy the third model server (Qwen3.8 INT4, A100-40GB) | `deploy/modal/model_app_qwen_int4.py` |
+| Check a Qwen App's ceiling against its pool without a GPU | `modal run deploy/modal/model_app_qwen*.py::preflight` (`model_app_qwen.fits`) |
 | Measure a wake and probe a model endpoint | `scripts/measure_endpoint_wake.py --url … --model <served name> [--no-audio]` |
 | Point the assistant at the other model | `MODEL_ENDPOINT`, `MODEL_NAME` in `.env`, then `tools/sync_control_secret.py` and a control-plane deploy |
 | Change current GPU idle window without deploy | `deploy/modal/autoscale.py` |

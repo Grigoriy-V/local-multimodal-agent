@@ -220,6 +220,9 @@ if model_app is not None:
     sys.modules["model_app"] = model_app
     spec = importlib.util.spec_from_file_location("model_app_qwen_under_test", QWEN_SOURCE)
     model_app_qwen = importlib.util.module_from_spec(spec)
+    # A dataclass resolves its annotations through sys.modules; register
+    # first, as importing would.
+    sys.modules[spec.name] = model_app_qwen
     spec.loader.exec_module(model_app_qwen)
 else:  # pragma: no cover
     model_app_qwen = None
@@ -254,6 +257,75 @@ class SecondModelIdentityTests(unittest.TestCase):
         # One priced choice, made once; the second App inherits it by import
         # rather than restating a number that would then drift.
         self.assertIs(model_app_qwen.base, model_app)
+
+    def test_the_command_is_the_spec(self):
+        command = model_app_qwen.serve_command(model_app_qwen.SERVING)
+        self.assertEqual(command[:3], ["vllm", "serve", model_app_qwen.MODEL_REPO])
+        self.assertIn("--max-num-seqs", command)
+        self.assertEqual(command[command.index("--tool-call-parser") + 1], "qwen3_xml")
+        self.assertEqual(command[command.index("--reasoning-parser") + 1], "qwen3")
+        self.assertIn("--enable-sleep-mode", command)
+
+
+@unittest.skipIf(model_app_qwen is None, "modal is not installed")
+class PoolArithmeticTests(unittest.TestCase):
+    """`fits` reproduces the boots of 2026-09-05 before any GPU is paid for."""
+
+    FP8_ON_DISK = 28.75
+
+    def test_the_first_fp8_boot_is_refused_by_the_arithmetic(self):
+        # 0.86 at 131,072: 7.04 GiB of KV against 8.18 needed, refused by vLLM.
+        spec = model_app_qwen.Serving(
+            repo="r", revision="v", served_name="s", gpu="L40S", card_gib=44.39,
+            max_model_len=131072, utilization=0.86,
+        )
+        ok, line = model_app_qwen.fits(spec, self.FP8_ON_DISK)
+        self.assertFalse(ok, line)
+
+    def test_the_served_fp8_boot_passes(self):
+        # 0.90 at 131,072 served with 9.75 GiB of KV; the estimate must not
+        # refuse a configuration that booted.
+        ok, line = model_app_qwen.fits(model_app_qwen.SERVING, self.FP8_ON_DISK)
+        self.assertTrue(ok, line)
+
+    def test_kv_per_token_is_the_measured_one(self):
+        # vLLM: 8.18 GiB for 131,072 tokens.
+        self.assertAlmostEqual(model_app_qwen.kv_gib(131072), 8.0, places=1)
+
+
+INT4_SOURCE = SOURCE.with_name("model_app_qwen_int4.py")
+
+if model_app_qwen is not None:
+    sys.modules["model_app_qwen"] = model_app_qwen
+    spec = importlib.util.spec_from_file_location("model_app_qwen_int4_under_test", INT4_SOURCE)
+    model_app_qwen_int4 = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = model_app_qwen_int4
+    spec.loader.exec_module(model_app_qwen_int4)
+else:  # pragma: no cover
+    model_app_qwen_int4 = None
+
+
+@unittest.skipIf(model_app_qwen_int4 is None, "modal is not installed")
+class ThirdModelIdentityTests(unittest.TestCase):
+    INT4_ON_DISK = 18.14 * 1e9 / 1024**3
+
+    def test_is_its_own_app_and_name(self):
+        names = {"assistant-llm", model_app.APP_NAME, model_app_qwen.APP_NAME}
+        self.assertNotIn(model_app_qwen_int4.APP_NAME, names)
+        self.assertNotEqual(model_app_qwen_int4.SERVED_NAME, model_app_qwen.SERVED_NAME)
+
+    def test_the_card_and_the_pool(self):
+        self.assertEqual(model_app_qwen_int4.GPU, "A100-40GB")
+        ok, line = model_app_qwen.fits(model_app_qwen_int4.SERVING, self.INT4_ON_DISK)
+        self.assertTrue(ok, line)
+
+    def test_sleep_has_the_cpu_memory_the_weights_need(self):
+        self.assertGreaterEqual(model_app_qwen_int4.MEMORY_MB, 20 * 1024)
+
+    def test_shares_the_qwen_machinery(self):
+        self.assertIs(model_app_qwen_int4.qwen, model_app_qwen)
+        self.assertEqual(model_app_qwen_int4.SERVING.tool_call_parser, "qwen3_xml")
+        self.assertEqual(model_app_qwen_int4.SERVING.max_num_seqs, model_app_qwen.MAX_NUM_SEQS)
 
 
 if __name__ == "__main__":

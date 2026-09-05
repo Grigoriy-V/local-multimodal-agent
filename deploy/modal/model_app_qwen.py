@@ -13,12 +13,20 @@ same two keys back. Both sleep for free. And `assistant-llm-v2` stays the
 configuration behind the recorded measurements, which a redeploy over it
 would silently overwrite (`DECISIONS.md` 2026-09-05).
 
+This file also holds what every Qwen3.8 App shares — the `Serving` spec, the
+command, the boot, the two CPU checks — so `model_app_qwen_int4.py` is only
+its own numbers and a small class. The boot history that shaped those helpers
+is `reports/2026-09-05_qwen38_second_model.md` §5.
+
     modal run deploy/modal/model_app_qwen.py::fetch_weights
     modal run deploy/modal/model_app_qwen.py::preflight
     modal deploy deploy/modal/model_app_qwen.py
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import modal
 
@@ -44,6 +52,11 @@ SERVED_NAME = "qwen3.8-27b"
 # as they would be on an A10 or an A100. And 48 GB: the weights alone are more
 # than an A10 holds.
 GPU = "L40S"
+
+# What vLLM reported as the device's total on this card (`Free memory on
+# device (43.97/44.39 GiB)`); the pool is a share of this, and `fits` below
+# is only as good as this number.
+CARD_GIB = 44.39
 
 # The pool is sized here, as in the first App, and the ceiling is only checked
 # against it. Qwen3.8's attention is 16 full-attention layers of 4 KV heads at
@@ -107,6 +120,194 @@ MM_LIMITS = {"image": 4, "video": 0}
 # more if it needs to.
 MEMORY_MB = 32 * 1024
 
+# --- what every Qwen3.8 App shares ---------------------------------------------
+
+# Measured on the FP8 boots of 2026-09-05, and what `fits` reasons with:
+#
+# - a token of KV is 65,536 bytes: 8.18 GiB for 131,072 (vLLM's own line);
+# - weights resident are the checkpoint's bytes on disk, as near as makes
+#   no difference (28.75 GiB on disk, 28.51 GiB resident);
+# - beside them the profiling run, the encoder cache and the CUDA graphs
+#   took 1.7 GiB at 0.90 and 2.6 GiB at 0.86 before the pool was measured
+#   (the graph accounting is relative to the pool); 2.0 sits between;
+# - with 16 sequences, the DeltaNet state blocks and the rest took the
+#   difference between 9.75 GiB available and 155,600 tokens, ~0.25 GiB.
+#
+# Applied to the two boots: at 0.90 this predicts 9.2 GiB for KV against 9.75
+# measured (cautious by half a gigabyte); at 0.86, 7.4 against 7.04 (generous
+# by 0.4), and still refuses that ceiling, as vLLM did. So the estimate is
+# good to about half a gigabyte either way, which is why a ceiling wants a
+# margin of more than that.
+KV_BYTES_PER_TOKEN = 65_536
+RESIDENT_OVER_DISK = 1.0
+ENGINE_OVERHEAD_GIB = 2.0
+STATE_AND_SLACK_GIB = 0.3
+GIB = 1024**3
+
+
+@dataclass(frozen=True)
+class Serving:
+    """One Qwen3.8 deployment: the checkpoint, the card and the engine's numbers."""
+
+    repo: str
+    revision: str
+    served_name: str
+    gpu: str
+    card_gib: float
+    max_model_len: int
+    utilization: float
+    max_num_seqs: int = MAX_NUM_SEQS
+    mm_limits: dict = field(default_factory=lambda: dict(MM_LIMITS))
+    chat_template_kwargs: dict = field(default_factory=lambda: dict(DEFAULT_CHAT_TEMPLATE_KWARGS))
+    tool_call_parser: str = TOOL_CALL_PARSER
+    reasoning_parser: str = REASONING_PARSER
+
+
+SERVING = Serving(
+    repo=MODEL_REPO,
+    revision=MODEL_REVISION,
+    served_name=SERVED_NAME,
+    gpu=GPU,
+    card_gib=CARD_GIB,
+    max_model_len=MAX_MODEL_LEN,
+    utilization=GPU_MEMORY_UTILIZATION,
+)
+
+
+def kv_gib(tokens: int) -> float:
+    return tokens * KV_BYTES_PER_TOKEN / GIB
+
+
+def fits(spec: Serving, weights_disk_gib: float) -> tuple[bool, str]:
+    """Whether the ceiling's KV fits the pool, by the arithmetic of the boots.
+
+    Returns the verdict and one line of the numbers, so a refused deploy says
+    why in the same terms the boot log would.
+    """
+
+    pool = spec.card_gib * spec.utilization
+    resident = weights_disk_gib * RESIDENT_OVER_DISK
+    available = pool - resident - ENGINE_OVERHEAD_GIB
+    needed = kv_gib(spec.max_model_len) + STATE_AND_SLACK_GIB
+    line = (
+        f"pool {pool:.2f} GiB = {spec.card_gib} x {spec.utilization}; weights ~{resident:.2f} GiB "
+        f"resident; ~{available:.2f} GiB for KV against {needed:.2f} GiB that "
+        f"{spec.max_model_len:,} needs ({available / needed:.2f}x)"
+    )
+    return available >= needed, line
+
+
+def serve_command(spec: Serving) -> list[str]:
+    import json
+
+    command = [
+        "vllm",
+        "serve",
+        spec.repo,
+        "--revision",
+        spec.revision,
+        "--served-model-name",
+        spec.served_name,
+        "--max-model-len",
+        str(spec.max_model_len),
+        "--gpu-memory-utilization",
+        str(spec.utilization),
+        "--max-num-seqs",
+        str(spec.max_num_seqs),
+        "--limit-mm-per-prompt",
+        json.dumps(spec.mm_limits),
+        "--enable-auto-tool-choice",
+        "--enable-prompt-tokens-details",
+        "--tool-call-parser",
+        spec.tool_call_parser,
+        "--reasoning-parser",
+        spec.reasoning_parser,
+        "--default-chat-template-kwargs",
+        json.dumps(spec.chat_template_kwargs),
+        "--enable-sleep-mode",
+        "--uvicorn-log-level=info",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(base.VLLM_PORT),
+    ]
+    command += ["--enforce-eager" if base.FAST_BOOT else "--no-enforce-eager"]
+    return command
+
+
+def boot(spec: Serving):
+    """Start vLLM, warm it, commit what it compiled, put it to sleep; return the process."""
+
+    import subprocess
+
+    command = serve_command(spec)
+    print(*command, flush=True)
+    process = subprocess.Popen(command)
+    base._wait_ready(process, base.START_READY_TIMEOUT, "start")
+    base._warmup(spec.served_name)
+    # What the boot compiled is on the Volume only in this container until it
+    # is committed, and the snapshot keeps a handle into it: the third FP8
+    # boot (2026-09-05) saved its AOT-compiled graph to the Volume, slept,
+    # snapshotted, and the restore died walking that path in the committed
+    # Volume, where it did not exist ("failed to walk ... torch_aot_compile
+    # ...: no such file or directory", exit 128; ISS-0047). Commit before the
+    # sleep, so the restore finds what the snapshot holds open.
+    base.vllm_cache.commit()
+    base._sleep()
+    return process
+
+
+def wake(process) -> None:
+    base._wake_up()
+    base._wait_ready(process, base.WAKE_READY_TIMEOUT, "resume")
+
+
+def fetch(spec: Serving) -> None:
+    from huggingface_hub import snapshot_download
+
+    path = snapshot_download(spec.repo, revision=spec.revision)
+    base.hf_cache.commit()
+    print(f"weights ready at {path}", flush=True)
+
+
+def weights_on_disk_gib(spec: Serving) -> float:
+    """The checkpoint's safetensors bytes in the HF cache, which `fetch` filled."""
+
+    from huggingface_hub import snapshot_download
+
+    path = Path(snapshot_download(spec.repo, revision=spec.revision, local_files_only=True))
+    return sum(file.stat().st_size for file in path.rglob("*.safetensors")) / GIB
+
+
+def check(spec: Serving) -> None:
+    """The two things a boot has failed on, answered on CPU first.
+
+    The engine configuration, where a transformers/vLLM pair can refuse the
+    architecture; and the memory arithmetic, where the first FP8 boot was
+    refused at 0.86 and the second at 256 sequences. Neither proves the boot;
+    each refuses one that the boots of 2026-09-05 say would fail, for CPU
+    cents instead of GPU minutes. Needs the weights on the Volume.
+    """
+
+    import transformers
+    import vllm
+    from vllm.config import ModelConfig
+
+    print(f"vllm {vllm.__version__} / transformers {transformers.__version__}", flush=True)
+    config = ModelConfig(model=spec.repo, revision=spec.revision, max_model_len=spec.max_model_len)
+    print(f"  architectures: {config.architectures}", flush=True)
+    print(f"  max_model_len: {config.max_model_len}", flush=True)
+    disk = weights_on_disk_gib(spec)
+    ok, line = fits(spec, disk)
+    print(f"  weights on disk: {disk:.2f} GiB", flush=True)
+    print(f"  {line}", flush=True)
+    if not ok:
+        raise RuntimeError(f"preflight refused: {line}")
+    if spec.max_num_seqs > 32:
+        raise RuntimeError("preflight refused: max_num_seqs above 32 exceeded the DeltaNet state blocks on 2026-09-05")
+    print("PASS: the configuration builds and the ceiling fits the pool", flush=True)
+
+
 app = modal.App(APP_NAME)
 
 # The image is the first App's, with this directory's modules on it: the
@@ -124,11 +325,7 @@ image = base.image.add_local_python_source("model_app", "model_app_qwen")
 def fetch_weights() -> None:
     """Populate the weights Volume on CPU, at the pinned revision."""
 
-    from huggingface_hub import snapshot_download
-
-    path = snapshot_download(MODEL_REPO, revision=MODEL_REVISION)
-    base.hf_cache.commit()
-    print(f"weights ready at {path}", flush=True)
+    fetch(SERVING)
 
 
 @app.function(
@@ -138,24 +335,9 @@ def fetch_weights() -> None:
     timeout=15 * base.MINUTES,
 )
 def preflight() -> None:
-    """Build the engine's model configuration on CPU before paying for a boot.
+    """Build the engine's configuration and check the pool on CPU; see `check`."""
 
-    The first App's preflight exists because a `transformers` release once
-    broke config parsing on a GPU container. This checkpoint's architecture is
-    newer than the pinned pair, so the same question is worth the same CPU
-    cents: can this vLLM and this transformers read this config at this
-    ceiling. It cannot prove the boot; it can refuse one that would fail here.
-    """
-
-    import transformers
-    import vllm
-    from vllm.config import ModelConfig
-
-    print(f"vllm {vllm.__version__} / transformers {transformers.__version__}", flush=True)
-    config = ModelConfig(model=MODEL_REPO, revision=MODEL_REVISION, max_model_len=MAX_MODEL_LEN)
-    print(f"  architectures: {config.architectures}", flush=True)
-    print(f"  max_model_len: {config.max_model_len}", flush=True)
-    print("PASS: the engine configuration builds", flush=True)
+    check(SERVING)
 
 
 @app.cls(
@@ -179,61 +361,11 @@ class Server:
 
     @modal.enter(snap=True)
     def start(self) -> None:
-        import json
-        import subprocess
-
-        command = [
-            "vllm",
-            "serve",
-            MODEL_REPO,
-            "--revision",
-            MODEL_REVISION,
-            "--served-model-name",
-            SERVED_NAME,
-            "--max-model-len",
-            str(MAX_MODEL_LEN),
-            "--gpu-memory-utilization",
-            str(GPU_MEMORY_UTILIZATION),
-            "--max-num-seqs",
-            str(MAX_NUM_SEQS),
-            "--limit-mm-per-prompt",
-            json.dumps(MM_LIMITS),
-            "--enable-auto-tool-choice",
-            "--enable-prompt-tokens-details",
-            "--tool-call-parser",
-            TOOL_CALL_PARSER,
-            "--reasoning-parser",
-            REASONING_PARSER,
-            "--default-chat-template-kwargs",
-            json.dumps(DEFAULT_CHAT_TEMPLATE_KWARGS),
-            "--enable-sleep-mode",
-            "--uvicorn-log-level=info",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            str(base.VLLM_PORT),
-        ]
-        command += ["--enforce-eager" if base.FAST_BOOT else "--no-enforce-eager"]
-        print(*command, flush=True)
-
-        self.process = subprocess.Popen(command)
-        base._wait_ready(self.process, base.START_READY_TIMEOUT, "start")
-        base._warmup(SERVED_NAME)
-        # What the boot compiled is on the Volume only in this container until
-        # it is committed, and the snapshot keeps a handle into it: the third
-        # boot (2026-09-05) saved its AOT-compiled graph to the Volume, slept,
-        # snapshotted, and the restore died walking that path in the committed
-        # Volume, where it did not exist ("failed to walk ... torch_aot_compile
-        # ...: no such file or directory", exit 128). Commit before the sleep,
-        # so the restore finds what the snapshot holds open. The Gemma App never
-        # hit this only because its compile cache predates its snapshot.
-        base.vllm_cache.commit()
-        base._sleep()
+        self.process = boot(SERVING)
 
     @modal.enter(snap=False)
     def resume(self) -> None:
-        base._wake_up()
-        base._wait_ready(self.process, base.WAKE_READY_TIMEOUT, "resume")
+        wake(self.process)
 
     @modal.web_server(
         port=base.VLLM_PORT,

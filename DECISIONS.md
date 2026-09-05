@@ -1274,6 +1274,16 @@ is minutes. `reasoning_effort: low` is the first setting to measure against,
 not a finding. Which model the assistant uses is decided by the live
 scenarios run on both, then the human. `reports/2026-09-05_qwen38_second_model.md`.
 
+**Amended the same day, the human's words.** The FP8 App's restore
+measured 19–86 s on a 28.5 GiB snapshot, and "such cold starts do not
+suit a scale-to-zero architecture"; the human chose a third App with the
+same model in INT4 (`RedHatAI/Qwen3.8-27B-INT4`) on an A100-40GB, for a
+snapshot half the size, and asked that it be deployed without the refused
+boots the FP8 App went through. So every Qwen App shares one spec and one
+CPU `preflight` that applies the pool arithmetic of those boots before a
+GPU is paid for (`model_app_qwen.fits`). The FP8 App stays deployed as
+the comparison.
+
 Supersedes: the 2026-08-30 note that 128k belongs to "L40S with Qwen3-8B
 and quantized KV" — the model and the quantization changed; the card and
 the separate identity did not.

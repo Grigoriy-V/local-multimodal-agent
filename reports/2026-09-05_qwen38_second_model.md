@@ -328,6 +328,44 @@ by whether the host has it cached, so a 17 GiB INT4 snapshot is about
 half the restore, not a few seconds off it. The human chose to move to
 `RedHatAI/Qwen3.8-27B-INT4`; noted, not begun.
 
+## 8. The third App: INT4 on an A100-40GB, and a preflight that refuses on CPU
+
+The human's words after §7: the cold starts of the FP8 App do not suit
+scale-to-zero; a separate App with `RedHatAI/Qwen3.8-27B-INT4` on an
+A100-40GB, "without the deploy mistakes of today, so nothing is wasted".
+
+**The checkpoint.** W4A16, group 128, symmetric, llm-compressor with 512
+calibration samples; the vision tower, embeddings, head and the
+linear-attention projections stay bf16. 18.14 GB on disk (one shard plus
+an MTP head vLLM ignores), revision `2fb0debc`. Red Hat's card reports
+97–102% of the bf16 base on gsm8k, ifeval, aime25, math_500, gpqa; text
+only.
+
+**The card.** A100-40GB, 0.90, ceiling 131,072 as the FP8 App's, for a
+like-for-like comparison. By the arithmetic below: ~16.5 GiB for KV
+against 8.5 needed, 1.9x, the estimate's half-gigabyte left as margin. Why not the A10: ~2 GiB for KV, about 24k tokens (§3 recomputed
+with the measured weights).
+
+**Not wasting boots.** What the four FP8 boots cost was known before the
+GPU started, in principle: the pool arithmetic. So `model_app_qwen.fits`
+carries it now, calibrated on those boots — KV 65,536 bytes a token,
+weights resident at their bytes on disk, ~2 GiB of profiling, encoder
+cache and graphs, 0.3 GiB for the DeltaNet state at 16 sequences — and
+predicts 9.2 GiB for the L40S at 0.90 against 9.75 measured, 7.4 at 0.86
+against 7.04: good to about half a gigabyte either way, and it refuses
+the 0.86 ceiling as vLLM did. `preflight` on CPU builds the engine
+configuration, sums the checkpoint's safetensors on the Volume and
+refuses a ceiling the pool cannot hold, in the same terms the boot log
+uses. Offline, `fits` reproduces the refused 0.86 boot and passes the
+served 0.90 one. What it cannot see from CPU: the card's exact size (the
+A100's `CARD_GIB` is nominal until its first boot reports it), a kernel
+that fails on the architecture, and the restore. `max_num_seqs` is 16 by
+the shared spec; the compile-cache commit is in the shared `boot`.
+
+The three Apps: `model_app.py` (Gemma, A10), `model_app_qwen.py` (FP8,
+L40S, and everything the Qwen Apps share), `model_app_qwen_int4.py` (its
+numbers and a small class).
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`
