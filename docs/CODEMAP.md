@@ -101,7 +101,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change Chainlit adapter | `ui/chainlit_app.py` | `render`, `create_runtime_with_stops`, `to_message` |
 | Change Chainlit persisted history | `ui/chainlit_history.py` | `MemoryStoreDataLayer` |
 | Change deployed CPU control plane | `deploy/modal/control_app.py` | `telegram_webhook`, `process_telegram_update`, `render_web_page`, images |
-| Change model deployment | `deploy/modal/model_app.py` | `Server`, `fetch_weights`, `preflight`, `SCALEDOWN_WINDOW` |
+| Change model deployment | `deploy/modal/model_app.py` | `Server`, `fetch_weights`, `preflight`, `SCALEDOWN_WINDOW`, `build_image` |
 | Change the second model deployment (Qwen3.8 FP8 on L40S), or what every Qwen App shares | `deploy/modal/model_app_qwen.py` | `Serving`, `SERVING`, `fits`, `serve_command`, `boot`, `check`, `MAX_NUM_SEQS`, `DEFAULT_CHAT_TEMPLATE_KWARGS`; imports `model_app` |
 | Change the third model deployment (Qwen3.8 INT4 on A100-40GB) | `deploy/modal/model_app_qwen_int4.py` | `MODEL_REPO`, `GPU`, `CARD_GIB`, `MAX_MODEL_LEN`, `GPU_MEMORY_UTILIZATION`; imports `model_app_qwen` |
 | Change running GPU idle window without deploy | `deploy/modal/autoscale.py` | `update_autoscaler` |

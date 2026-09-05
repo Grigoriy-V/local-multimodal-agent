@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +34,20 @@ class ModelSettings(BaseSettings):
     # Extra attempts after the first, for failures that say "later", not "no".
     retries: int = 2
     retry_backoff: float = 0.5
+    # What the server's chat template is told on every request, as JSON: for
+    # Qwen3.8, `{"enable_thinking": true, "reasoning_effort": "low"}` turns
+    # reasoning on at an effort, over the server's own default. A setting,
+    # because it is the one model-side dial a person may want to move without
+    # booting the model App; empty sends nothing and the server's default holds.
+    chat_template_kwargs: dict[str, object] | None = None
+
+    @field_validator("chat_template_kwargs", mode="before")
+    @classmethod
+    def _empty_means_none(cls, value: object) -> object:
+        # An `.env` line left blank is "send nothing", not a parse error.
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class TelegramSettings(BaseSettings):

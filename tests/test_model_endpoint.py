@@ -251,7 +251,7 @@ class SecondModelIdentityTests(unittest.TestCase):
         # a `<think>` block that must not reach the client as the answer.
         self.assertEqual(model_app_qwen.TOOL_CALL_PARSER, "qwen3_xml")
         self.assertEqual(model_app_qwen.REASONING_PARSER, "qwen3")
-        self.assertIn("reasoning_effort", model_app_qwen.DEFAULT_CHAT_TEMPLATE_KWARGS)
+        self.assertIn("enable_thinking", model_app_qwen.DEFAULT_CHAT_TEMPLATE_KWARGS)
 
     def test_the_idle_window_and_timeouts_are_the_first_apps(self):
         # One priced choice, made once; the second App inherits it by import
@@ -288,6 +288,19 @@ class SecondModelIdentityTests(unittest.TestCase):
         source = inspect.getsource(model_app_qwen.boot)
         self.assertNotIn("vllm_cache", source)
         self.assertNotIn("copy_tree", source)
+
+    def test_the_qwen_apps_run_their_own_vllm_pair(self):
+        # 0.28.0 turns prefix caching on for hybrid models by default; the
+        # Gemma App keeps the pair validated with it.
+        self.assertNotEqual(model_app_qwen.VLLM_VERSION, model_app.VLLM_VERSION)
+        self.assertEqual(model_app_qwen.VLLM_VERSION, "0.28.0")
+        self.assertEqual(model_app_qwen.TRANSFORMERS_VERSION, "5.15.0")
+        self.assertEqual(model_app.VLLM_VERSION, "0.26.0")
+
+    def test_prefix_caching_is_asked_for_and_thinking_is_off_by_default(self):
+        command = model_app_qwen.serve_command(model_app_qwen.SERVING)
+        self.assertIn("--enable-prefix-caching", command)
+        self.assertEqual(model_app_qwen.DEFAULT_CHAT_TEMPLATE_KWARGS, {"enable_thinking": False})
 
     def test_the_command_is_the_spec(self):
         command = model_app_qwen.serve_command(model_app_qwen.SERVING)

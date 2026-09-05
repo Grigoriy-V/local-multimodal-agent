@@ -491,7 +491,7 @@ max model length: 131072
 GPU memory utilization: 0.90 (0.86 was refused: 7.04 GiB of KV against 8.18 needed)
 KV cache dtype: auto (bf16); measured 9.75 GiB, 155,600 tokens, 1.19x at 131,072
 max num seqs: 16 (one Gated DeltaNet state block per decoding sequence)
-default chat template kwargs: {"reasoning_effort": "low"}
+default chat template kwargs: {"enable_thinking": false} (since the 0.28.0 change; the deployed FP8 App still runs 0.26.0 with reasoning_effort low until redeployed)
 parsers: tool qwen3_xml, reasoning qwen3
 multimodal per-prompt limits: image=4, video=0
 container memory request: 32 GiB (sleep level 1 holds the weights in CPU memory)
@@ -516,9 +516,18 @@ served name: qwen3.8-27b-int4
 GPU: A100-40GB
 max model length: 131072
 GPU memory utilization: 0.90
-everything else: the FP8 App's (parsers, thinking low, max num seqs 16, image=4)
+vLLM 0.28.0 / transformers 5.15.0 (the Qwen Apps' own pair; Gemma stays on 0.26.0 / 5.14.1)
+prefix caching: on (--enable-prefix-caching; align mode for the DeltaNet layers)
+thinking: off by default on the server ({"enable_thinking": false})
+everything else: the FP8 App's (parsers, max num seqs 16, image=4)
 container memory request: 24 GiB
 ```
+
+**The thinking dial is configuration, not a boot.** `MODEL_CHAT_TEMPLATE_KWARGS`
+in `.env` (JSON, e.g. `{"enable_thinking": true, "reasoning_effort": "low"}`)
+is sent on every request as `chat_template_kwargs` and overrides the
+server's default; publish the secret and redeploy `assistant-control`.
+Blank or unset sends nothing.
 
 **The order for a Qwen App, each step its own gate:** `fetch_weights`
 (CPU) → `preflight` (CPU: the engine configuration builds, and

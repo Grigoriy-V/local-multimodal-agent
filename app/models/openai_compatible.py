@@ -569,6 +569,8 @@ class OpenAICompatibleBackend(ModelBackend):
             body["tool_choice"] = "auto"
         if response_format:
             body["response_format"] = response_format
+        if self.settings.chat_template_kwargs:
+            body["chat_template_kwargs"] = dict(self.settings.chat_template_kwargs)
         if stream:
             body["stream"] = True
             # Without this the streamed response carries no usage at all, and a

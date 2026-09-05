@@ -70,8 +70,10 @@ SERVING = qwen.Serving(
 )
 
 app = modal.App(APP_NAME)
-image = base.image.env(qwen.QWEN_ENV).add_local_python_source(
-    "model_app", "model_app_qwen", "model_app_qwen_int4"
+image = (
+    base.build_image(qwen.VLLM_VERSION, qwen.TRANSFORMERS_VERSION)
+    .env(qwen.QWEN_ENV)
+    .add_local_python_source("model_app", "model_app_qwen", "model_app_qwen_int4")
 )
 
 

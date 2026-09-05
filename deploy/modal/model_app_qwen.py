@@ -86,13 +86,22 @@ MAX_MODEL_LEN = 131072
 # `reports/2026-09-05_qwen38_second_model.md` §5.
 GPU_MEMORY_UTILIZATION = 0.90
 
-# Thinking is on by default in Qwen3.8's chat template, at `xhigh` effort. Left
-# there, a ten-call turn would reason at length before every call. `low` keeps
-# the model's reasoning — the thing its agentic scores are measured with — at a
-# cost an interactive turn can carry. The reasoning parser separates it from
-# the answer; the client reads `content` alone. A first setting to measure
-# against, not a finding: `reports/2026-09-05_qwen38_second_model.md`.
-DEFAULT_CHAT_TEMPLATE_KWARGS = {"reasoning_effort": "low"}
+# The vLLM the Qwen Apps run, apart from the Gemma App's 0.26.0. 0.28.0 turns
+# prefix caching on by default for hybrid models (#50991) — the setting that
+# was off through every Qwen boot of 2026-09-05 and made each call prefill
+# the whole prompt — fixes `/wake_up` on hybrids (#41602, 0.27.0) and the
+# prefix-cache poisoning under MTP (#51113), and carries the fused DeltaNet
+# kernels. It pins transformers 5.15.0. On the human's word, 2026-09-05;
+# `reports/2026-09-05_qwen38_second_model.md` §11.
+VLLM_VERSION = "0.28.0"
+TRANSFORMERS_VERSION = "5.15.0"
+
+# Thinking is on by default in Qwen3.8's chat template, at `xhigh` effort; at
+# `low` it still wrote ~240 tokens of reasoning before a one-line tool call.
+# Off by default on the server, on the human's word; the harness sends its own
+# `chat_template_kwargs` from `MODEL_CHAT_TEMPLATE_KWARGS`, so thinking is
+# turned on or set to an effort by configuration, with no boot of this App.
+DEFAULT_CHAT_TEMPLATE_KWARGS = {"enable_thinking": False}
 
 # The template writes a call as `<tool_call><function=name><parameter=key>…`;
 # `qwen3_xml` is vLLM's parser for that shape, and `qwen3` splits the `<think>`
@@ -187,6 +196,10 @@ class Serving:
     chat_template_kwargs: dict = field(default_factory=lambda: dict(DEFAULT_CHAT_TEMPLATE_KWARGS))
     tool_call_parser: str = TOOL_CALL_PARSER
     reasoning_parser: str = REASONING_PARSER
+    # Opt-in for hybrid models before 0.28.0 and the default from it; stated
+    # either way, because every call of this harness's loop shares the
+    # previous call's prompt and the cache is what makes the second cheap.
+    prefix_caching: bool = True
 
 
 SERVING = Serving(
@@ -244,6 +257,7 @@ def serve_command(spec: Serving) -> list[str]:
         json.dumps(spec.mm_limits),
         "--enable-auto-tool-choice",
         "--enable-prompt-tokens-details",
+        "--enable-prefix-caching" if spec.prefix_caching else "--no-enable-prefix-caching",
         "--tool-call-parser",
         spec.tool_call_parser,
         "--reasoning-parser",
@@ -315,6 +329,9 @@ def check(spec: Serving) -> None:
     config = ModelConfig(model=spec.repo, revision=spec.revision, max_model_len=spec.max_model_len)
     print(f"  architectures: {config.architectures}", flush=True)
     print(f"  max_model_len: {config.max_model_len}", flush=True)
+    print(f"  hybrid: {getattr(config, 'is_hybrid', '?')}; prefix caching asked: {spec.prefix_caching}", flush=True)
+    command = serve_command(spec)
+    print("  flags:", " ".join(command[3:]), flush=True)
     disk = weights_on_disk_gib(spec)
     ok, line = fits(spec, disk)
     print(f"  weights on disk: {disk:.2f} GiB", flush=True)
@@ -370,7 +387,11 @@ app = modal.App(APP_NAME)
 # The image is the first App's with the Qwen environment on it and this
 # directory's modules: the helpers this file calls live in `model_app`, and
 # Modal includes only the entrypoint by itself.
-image = base.image.env(QWEN_ENV).add_local_python_source("model_app", "model_app_qwen")
+image = (
+    base.build_image(VLLM_VERSION, TRANSFORMERS_VERSION)
+    .env(QWEN_ENV)
+    .add_local_python_source("model_app", "model_app_qwen")
+)
 
 
 @app.function(

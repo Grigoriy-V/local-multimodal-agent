@@ -50,6 +50,7 @@ ALLOWED: tuple[str | tuple[str, str], ...] = (
     "MODEL_NAME",
     "MODEL_API_KEY",
     "MODEL_AUTH_STYLE",
+    "MODEL_CHAT_TEMPLATE_KWARGS",
     # The web capability. The search key and the renderer's proxy token are
     # credentials; the identity is a courtesy to sites that ask for one.
     "WEB_FIRECRAWL_API_KEY",

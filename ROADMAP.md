@@ -266,10 +266,12 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    Read after: prefix caching is opt-in for hybrid models in vLLM 0.26.0
    and was off, so every call re-prefilled ~5k tokens (~3 s); the study
    of what else is faster is report §11. FP8 is not run again (the
-   human's word, cost). **Next, each its own gate:** `--enable-prefix-
-   caching` on INT4, one redeploy, the seven scenarios again; then the
-   remaining scenarios (D, G, H, I, K, J, O, P, Q); MTP and the thinking
-   budget as separate measurements
+   human's word, cost). On the human's word: the Qwen Apps move to vLLM
+   0.28.0 / transformers 5.15.0, prefix caching on, thinking off by
+   default with `MODEL_CHAT_TEMPLATE_KWARGS` as the dial; `dry_run` is
+   not a required step. **Next, each its own gate:** the redeploy and its
+   snapshot boots, the seven scenarios again; then the remaining
+   scenarios (D, G, H, I, K, J, O, P, Q); MTP as a separate measurement
    against the Gemma runs of 2026-09-05; then the human's call on which
    the assistant uses.
 

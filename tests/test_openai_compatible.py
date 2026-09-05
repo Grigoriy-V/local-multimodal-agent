@@ -549,6 +549,32 @@ def test_modal_proxy_auth_refuses_a_missing_or_malformed_token(api_key: str | No
         backend(lambda _request: httpx.Response(500), api_key=api_key, auth_style="modal_proxy")
 
 
+async def test_chat_template_kwargs_are_sent_when_configured() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json=completion_payload(content="pong"))
+
+    async with backend(handler, chat_template_kwargs={"enable_thinking": True, "reasoning_effort": "low"}) as client:
+        await client.invoke([Message(role="user", content=[text_part()])])
+
+    assert seen["chat_template_kwargs"] == {"enable_thinking": True, "reasoning_effort": "low"}
+
+
+async def test_no_chat_template_kwargs_by_default() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json=completion_payload(content="pong"))
+
+    async with backend(handler) as client:
+        await client.invoke([Message(role="user", content=[text_part()])])
+
+    assert "chat_template_kwargs" not in seen
+
+
 async def test_a_request_without_tools_omits_them() -> None:
     seen: dict[str, Any] = {}
 

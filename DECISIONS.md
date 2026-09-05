@@ -1284,6 +1284,19 @@ CPU `preflight` that applies the pool arithmetic of those boots before a
 GPU is paid for (`model_app_qwen.fits`). The FP8 App stays deployed as
 the comparison.
 
+**Amended again the same day, the human's words.** The Qwen Apps run
+their own vLLM pair, 0.28.0 with transformers 5.15.0, apart from the
+Gemma App's validated 0.26.0: 0.28.0 makes prefix caching the default for
+hybrid models (it was opt-in and off through every Qwen boot of the day,
+so every call prefilled the whole prompt), fixes `/wake_up` on hybrids
+and the prefix-cache poisoning under MTP. Prefix caching is asked for
+explicitly; thinking is off by default on the server and turned on by
+`MODEL_CHAT_TEMPLATE_KWARGS`, a setting, so no boot of a model App is
+needed to move it. `dry_run` stays available but is not a required step:
+the human's point that it costs the same as the snapshot boot it
+precedes, and the watcher that stops a failing container covers
+ISS-0049. Report §11.
+
 Supersedes: the 2026-08-30 note that 128k belongs to "L40S with Qwen3-8B
 and quantized KV" — the model and the quantization changed; the card and
 the separate identity did not.

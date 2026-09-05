@@ -219,64 +219,76 @@ app = modal.App(APP_NAME)
 hf_cache = modal.Volume.from_name("assistant-hf-cache", create_if_missing=True)
 vllm_cache = modal.Volume.from_name("assistant-vllm-cache", create_if_missing=True)
 
-image = (
-    # Modal's own vLLM example builds on the CUDA devel image rather than a slim
-    # Debian, and the difference is not cosmetic: a `debian_slim` build here
-    # produced `ModuleNotFoundError: No module named 'vllm._C'`, meaning vLLM's
-    # compiled extension was missing. Follow the reference.
-    modal.Image.from_registry("nvidia/cuda:12.9.0-devel-ubuntu22.04", add_python="3.12")
-    .entrypoint([])
-    .uv_pip_install(
-        # Plain `vllm` binds a placeholder audio module at import time; nothing
-        # short of the `[audio]` extra replaces it, and restarting after
-        # installing its dependencies separately does not help either. Recorded
-        # the hard way locally in `reports/2026-08-01_gemma4_endpoint_smoke.md`
-        # and rediscovered here when `assistant-llm-v2` answered audio with
-        # `Please install vllm[audio] for audio support` — the baseline was
-        # never actually tested against an audio request, so this image
-        # inherited the omission rather than a working configuration.
-        f"vllm[audio]=={VLLM_VERSION}",
-        f"transformers=={TRANSFORMERS_VERSION}",
-        "huggingface_hub[hf_transfer]",
+def build_image(vllm_version: str, transformers_version: str) -> modal.Image:
+    """The serving image for one vLLM/transformers pair.
+
+    A function rather than a constant because the pair is a choice per App:
+    this App keeps the one validated with Gemma; the Qwen Apps take a newer
+    vLLM whose defaults fit their hybrid model (`model_app_qwen.py`). The
+    steps are the same, so the same pair builds the same image.
+    """
+
+    return (
+        # Modal's own vLLM example builds on the CUDA devel image rather than a slim
+        # Debian, and the difference is not cosmetic: a `debian_slim` build here
+        # produced `ModuleNotFoundError: No module named 'vllm._C'`, meaning vLLM's
+        # compiled extension was missing. Follow the reference.
+        modal.Image.from_registry("nvidia/cuda:12.9.0-devel-ubuntu22.04", add_python="3.12")
+        .entrypoint([])
+        .uv_pip_install(
+            # Plain `vllm` binds a placeholder audio module at import time; nothing
+            # short of the `[audio]` extra replaces it, and restarting after
+            # installing its dependencies separately does not help either. Recorded
+            # the hard way locally in `reports/2026-08-01_gemma4_endpoint_smoke.md`
+            # and rediscovered here when `assistant-llm-v2` answered audio with
+            # `Please install vllm[audio] for audio support` — the baseline was
+            # never actually tested against an audio request, so this image
+            # inherited the omission rather than a working configuration.
+            f"vllm[audio]=={vllm_version}",
+            f"transformers=={transformers_version}",
+            "huggingface_hub[hf_transfer]",
+        )
+        .env(
+            {
+                # Saturates the network rather than downloading a 10 GB shard over a
+                # single stream. Matters only for `fetch_weights`. The older
+                # `HF_HUB_ENABLE_HF_TRANSFER` is deprecated in favour of this one.
+                "HF_XET_HIGH_PERFORMANCE": "1",
+                # Carried over from the validated local configuration so the first
+                # cloud run differs from the recorded evidence in the hardware only.
+                # Both are candidates for removal once there is a measurement to
+                # compare against.
+                "VLLM_USE_V2_MODEL_RUNNER": "0",
+                "VLLM_USE_FLASHINFER_SAMPLER": "0",
+                # Sleep mode is exposed on `/sleep` and `/wake_up` only in dev mode,
+                # and those two endpoints are what makes a GPU snapshot possible.
+                "VLLM_SERVER_DEV_MODE": "1",
+                # Modal's snapshot documentation warns that `torch.compile` can fail
+                # snapshot creation and names this as the mitigation; their vLLM
+                # snapshot example sets it too.
+                "TORCHINDUCTOR_COMPILE_THREADS": "1",
+                # The single-node rendezvous, pinned to loopback. vLLM builds a
+                # PyTorch process group even at `world_size=1`, and it picks the
+                # address for `distributed_init_method` from `VLLM_HOST_IP`. Left
+                # unset it takes the container's own address, which the snapshot
+                # captures and a restored container no longer owns — so the NCCL
+                # heartbeat monitor polls a socket with no peer and prints
+                # `Broken pipe` about once a second for the life of the container.
+                # Diagnosed in `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`
+                # and deliberately not fixed then, because it is warning-only and a
+                # snapshot must not be rebuilt to clean up logs. This is the deploy
+                # that report said to carry it on. It has to be here rather than in
+                # the enter hook: all three are read while the process group is
+                # constructed, which is before the snapshot exists.
+                "VLLM_HOST_IP": "127.0.0.1",
+                "NCCL_SOCKET_IFNAME": "lo",
+                "GLOO_SOCKET_IFNAME": "lo",
+            }
+        )
     )
-    .env(
-        {
-            # Saturates the network rather than downloading a 10 GB shard over a
-            # single stream. Matters only for `fetch_weights`. The older
-            # `HF_HUB_ENABLE_HF_TRANSFER` is deprecated in favour of this one.
-            "HF_XET_HIGH_PERFORMANCE": "1",
-            # Carried over from the validated local configuration so the first
-            # cloud run differs from the recorded evidence in the hardware only.
-            # Both are candidates for removal once there is a measurement to
-            # compare against.
-            "VLLM_USE_V2_MODEL_RUNNER": "0",
-            "VLLM_USE_FLASHINFER_SAMPLER": "0",
-            # Sleep mode is exposed on `/sleep` and `/wake_up` only in dev mode,
-            # and those two endpoints are what makes a GPU snapshot possible.
-            "VLLM_SERVER_DEV_MODE": "1",
-            # Modal's snapshot documentation warns that `torch.compile` can fail
-            # snapshot creation and names this as the mitigation; their vLLM
-            # snapshot example sets it too.
-            "TORCHINDUCTOR_COMPILE_THREADS": "1",
-            # The single-node rendezvous, pinned to loopback. vLLM builds a
-            # PyTorch process group even at `world_size=1`, and it picks the
-            # address for `distributed_init_method` from `VLLM_HOST_IP`. Left
-            # unset it takes the container's own address, which the snapshot
-            # captures and a restored container no longer owns — so the NCCL
-            # heartbeat monitor polls a socket with no peer and prints
-            # `Broken pipe` about once a second for the life of the container.
-            # Diagnosed in `reports/2026-08-28_v2_step3b_nccl_snapshot_warnings.md`
-            # and deliberately not fixed then, because it is warning-only and a
-            # snapshot must not be rebuilt to clean up logs. This is the deploy
-            # that report said to carry it on. It has to be here rather than in
-            # the enter hook: all three are read while the process group is
-            # constructed, which is before the snapshot exists.
-            "VLLM_HOST_IP": "127.0.0.1",
-            "NCCL_SOCKET_IFNAME": "lo",
-            "GLOO_SOCKET_IFNAME": "lo",
-        }
-    )
-)
+
+
+image = build_image(VLLM_VERSION, TRANSFORMERS_VERSION)
 
 with image.imports():
     import requests
