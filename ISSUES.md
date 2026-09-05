@@ -51,6 +51,34 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0054 — the model is put to sleep in the middle of a turn whenever a tool outlives the idle window
+
+- **Status:** open, recorded 2026-09-05 on the human's word; not scheduled
+- **Seen:** 2026-09-05, scenario G on the INT4 App (`deployed-c0c0a622-70`):
+  the turn ran ten `run_command` calls, several longer than the GPU
+  Function's 12 s `SCALEDOWN_WINDOW` (`apt-get install`, 41 s), and the
+  model endpoint scaled to zero between two of its own calls three times
+  in one turn; each next model call paid a restore (20–44 s on this
+  snapshot). The human's live run of the same request, whose tools were
+  short, paid none. The window is the same on all three model Apps
+  (`base.SCALEDOWN_WINDOW`).
+- **Costs:** the person waits 20–45 s in the middle of their own request,
+  once per long tool, and the turn's budget is spent on restores instead
+  of work; a long-running command makes the turn slower than the command
+  itself.
+- **Reproduce:** any turn whose tool takes longer than 12 s; the next
+  model call is a cold one (`first model token` in the telemetry).
+- **Cause:** the idle window is a property of the endpoint alone; nothing
+  tells it that a turn is still open. Between turns the window is right
+  (the person may not write again); inside a turn it is wrong (the
+  worker will certainly call again).
+- **Evidence:** `reports/2026-09-05_qwen38_second_model.md` §13,
+  `reports/2026-09-05_suite_and_tools_review.md` §2 point 4.
+- **Related:** roadmap item 6 (the adaptive window); its smallest form is
+  this: the endpoint is kept warm while a tool of the current turn runs,
+  and nothing between turns. ISS-0044 (what the first call to a sleeping
+  endpoint costs).
+
 ### ISS-0045 — deployed, history search cannot find a file name by its parts
 
 - **Status:** fixed and deployed 2026-09-05 — every Postgres search matches

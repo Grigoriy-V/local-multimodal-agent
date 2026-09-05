@@ -202,6 +202,10 @@ What exists. How it was reached, and every number, is in the linked report.
    `autoscale.py`. Prefix caching is confirmed active and needs no work before
    it is used deliberately; speculative decoding is the weakest lever, because
    prefill dominates long turns. `reports/2026-08-29_v2_gpu_baseline_measured.md`.
+   Its first case, observed 2026-09-05: the model sleeps inside a turn
+   whenever a tool outlives the 12 s window and the next call pays a
+   restore (ISS-0054); the smallest form of the adaptive window is to keep
+   the endpoint warm while a turn's tool runs, and nothing between turns.
 
 7. **The local profile as a place to work — open, separate, not scheduled.**
    Working on the person's own files on their own machine, with the local
