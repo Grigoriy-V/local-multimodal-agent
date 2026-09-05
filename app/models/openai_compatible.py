@@ -71,6 +71,10 @@ OPENAI_AUDIO_FORMATS = frozenset({"wav", "mp3"})
 # sending the same bad request again only wastes the time it takes to refuse it.
 TRANSIENT_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
+# How many edge redirects one request may follow while an endpoint boots: at
+# 150 s each, eight is twenty minutes.
+REDIRECT_HOPS = 8
+
 
 class _Later(Exception):
     """A status the server means as "ask again", raised inside the stream to retry it."""
@@ -573,6 +577,17 @@ class OpenAICompatibleBackend(ModelBackend):
             timeout=self.settings.timeout,
             headers=headers,
             transport=transport,
+            # A request that outlives the endpoint's edge timeout is answered
+            # with a redirect to a URL that holds it, and the answer arrives at
+            # the end of the redirects. Modal's edge does this at 150 s, every
+            # 150 s, with a 303 (`modal.com/docs/guide/webhook-timeouts`); a
+            # client that does not follow sees a 303 with no body and takes it
+            # for the answer — `context_limit` did on 2026-09-05 and died on the
+            # empty JSON, and every wake longer than 150 s looked like a
+            # failure before that (ISS-0044). Eight hops is twenty minutes, the
+            # model Apps' own startup ceiling.
+            follow_redirects=True,
+            max_redirects=REDIRECT_HOPS,
         )
         self._chars_per_token = CHARS_PER_TOKEN
 
@@ -792,9 +807,15 @@ class OpenAICompatibleBackend(ModelBackend):
             response = await self._client.get("/models")
         except httpx.HTTPError:
             return None
-        if response.status_code >= 400:
+        if response.status_code != 200:
             return None
-        return parse_context_limit(response.json(), self.settings.name)
+        try:
+            payload = response.json()
+        except ValueError:
+            # Not the server's answer — an edge page, an empty body. Unknown,
+            # the same as unreachable; the next model call says what is wrong.
+            return None
+        return parse_context_limit(payload, self.settings.name)
 
     async def aclose(self) -> None:
         await self._client.aclose()

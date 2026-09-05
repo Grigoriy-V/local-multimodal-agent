@@ -704,6 +704,22 @@ model finding, the first for the thinking dial to be measured against
 (`MODEL_CHAT_TEMPLATE_KWARGS`), not a harness one — the guard did what
 it is for.
 
+### H again: the 303 that was the cause all along
+
+H, I, K, J, O, P, Q relaunched with the template fix; the first call hit
+a third snapshot boot on a third host type, and H died after exactly
+150.18 s — in `context_limit`, on `json.decoder.JSONDecodeError:
+Expecting value: line 1 column 1`. Modal's edge answers a request older
+than 150 s with a `303` to a URL that holds it (its webhook-timeouts
+guide: "an HTTP status 303 redirect response is returned pointing at the
+original URL with a special query parameter"; browsers follow up to
+twenty, fifty minutes), and the model client never followed redirects:
+a 303 is under 400, its body is empty, and `.json()` on it is the
+error. Every wake longer than 150 s today was this — the read timeout
+and the retry were symptoms. `httpx.AsyncClient(follow_redirects=True,
+max_redirects=8)` now, twenty minutes of hops, and `context_limit`
+treats anything but a 200 with JSON as unknown. Three offline tests.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`

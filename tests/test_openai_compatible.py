@@ -598,6 +598,41 @@ def test_a_system_message_with_no_user_after_it_becomes_a_user_message() -> None
     assert sent[1]["content"] == [{"type": "text", "text": "A note from the harness."}]
 
 
+async def test_an_edge_redirect_is_followed_to_the_answer() -> None:
+    """Modal's edge answers a request older than 150 s with a 303 to a URL that holds it."""
+
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if "held=" not in str(request.url):
+            return httpx.Response(303, headers={"Location": f"{request.url}?held=1"})
+        return httpx.Response(200, json=completion_payload(content="after the wait"))
+
+    async with backend(handler) as client:
+        completion = await client.invoke([Message(role="user", content=[text_part()])])
+
+    assert completion.text == "after the wait"
+    assert len(seen) == 2 and "held=1" in seen[1]
+
+
+async def test_context_limit_treats_a_non_json_answer_as_unknown() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>waiting</html>")
+
+    async with backend(handler) as client:
+        assert await client.context_limit() is None
+
+
+async def test_context_limit_treats_a_redirect_it_cannot_follow_as_unknown() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(303, headers={"Location": str(request.url) + "?held=1"})
+
+    async with backend(handler) as client:
+        # Eight hops, all 303: httpx gives up with TooManyRedirects, an HTTPError.
+        assert await client.context_limit() is None
+
+
 async def test_chat_template_kwargs_are_sent_when_configured() -> None:
     seen: dict[str, Any] = {}
 

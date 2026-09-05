@@ -246,8 +246,17 @@ Rules that keep the file honest:
   second fix: a timeout is never retried, in `stream` or `_completion`;
   what is retried before the first chunk is a refused connection or a
   "later" status; and `MODEL_TIMEOUT` is 600 s, long enough for the
-  first byte of an endpoint creating a snapshot. Deployed with the next
-  `assistant-control` deploy.
+  first byte of an endpoint creating a snapshot. **Third, the cause:**
+  Modal's edge answers any request older than 150 s with a `303` to a
+  URL that holds it, every 150 s (`docs/guide/webhook-timeouts`), and the
+  model client did not follow redirects — so a wake longer than 150 s
+  never returned an answer, and `context_limit` took the 303's empty
+  body for the server's JSON and died (`deployed-2f3a23eb-80`, 14:45 UTC,
+  after exactly 150 s). The client now follows up to eight hops, twenty
+  minutes, and `context_limit` treats anything but a 200 with JSON as
+  unknown. The morning wake probe had said it: "Modal's edge can redirect
+  a request while the container is still coming up. `urllib` follows
+  that redirect". Deployed with the next `assistant-control` deploy.
 - **Also seen:** 2026-09-05, `loop_live --deployed A B C E F R S` on
   `assistant-llm-qwen-int4`, first call, `httpx.ReadTimeout`; the
   endpoint was seven minutes into a snapshot boot.
