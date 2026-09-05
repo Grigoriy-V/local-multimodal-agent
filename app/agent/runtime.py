@@ -30,8 +30,6 @@ from app.agent.graph import (
 from app.agent.mode import careful_enabled
 from app.agent.stop import NO_STOPS, StopRequests
 from app.agent.stopping import STOP_ON_ANSWER, TurnStopping
-from app.agent.goal import MeetsTheRequest
-from app.agent.stopping import FirstObjection
 from app.agent.todo import FinishesItsOwnList, planning_enabled
 from app.checkpoints import CheckpointHandle
 from app.capabilities import (
@@ -61,6 +59,7 @@ from app.tools import (
     history_tools,
     memory_tools,
     todo_tools,
+    goal_tools,
 )
 
 # The checkpoint holds this project's own dataclasses, so LangGraph is told
@@ -321,6 +320,10 @@ class Agent:
                 # person has switched it on (`/plan on`). Off, the tool and
                 # every brief line about it are simply absent.
                 *(todo_tools() if planning_enabled(self.workspace) else ()),
+                # The goal: the request's parts, written once by the model
+                # before it starts. Always offered; the model decides whether
+                # a request has more than one thing in it (2026-09-05).
+                *goal_tools(),
             ],
             # `careful` mode: the tools that change the workspace ask first.
             # Read here, per toolbox, so `/mode` takes effect from the next
@@ -744,11 +747,9 @@ def create_agent(
     `stopping` defaults here rather than on `Agent`, and the two defaults differ
     on purpose. `Agent` is the mechanism and stops when the model stops, so a
     test or a tool that builds one gets the loop with nothing added. This
-    function is the product, and the product's agent finishes what it was
-    asked: a turn that ran a tool is asked once, before it ends, whether what
-    it did gives the person what they asked for, and works on if not
-    (`app/agent/goal.py`). The todo list's own objection stays first in line
-    and is capped at nothing by default. A turn that used no tool meets neither.
+    function is the product, and the product's agent finishes what it said it
+    would do: an unfinished todo list refuses one ending. An agent that wrote no
+    list never meets it.
 
     `delivery` is the caller's statement of what its interface can put in front
     of a person. It controls whether the explicit presentation capability is
@@ -781,9 +782,8 @@ def create_agent(
     Path(agent_settings.workspace).mkdir(parents=True, exist_ok=True)
     workspace = user_workspace(agent_settings.workspace, user_id)
     workspace.mkdir(parents=True, exist_ok=True)
-    backend = OpenAICompatibleBackend(model_settings or ModelSettings())
     return Agent(
-        backend=backend,
+        backend=OpenAICompatibleBackend(model_settings or ModelSettings()),
         store=open_store(agent_settings),
         workspace=workspace,
         capability_registry=CapabilityRegistry(workspace, runner=runner) if runner else None,
@@ -803,9 +803,5 @@ def create_agent(
             max_seconds=agent_settings.turn_max_seconds,
         ),
         stops=stops,
-        stopping=(
-            stopping
-            if stopping is not None
-            else FirstObjection(FinishesItsOwnList(), MeetsTheRequest(backend))
-        ),
+        stopping=stopping if stopping is not None else FinishesItsOwnList(),
     )

@@ -772,9 +772,9 @@ each scenario through the same agent the bot uses.
 `--external` additionally sends a query to the search provider and spends its
 credit, which is a separate permission; it is left out by default.
 
-`--goal off` runs the same scenarios without the end-of-turn goal check
-(`app/agent/goal.py`), which is on by default; the report header names the
-setting, so two runs are compared as two named things.
+`--goal off` runs the same scenarios without the `set_goal` tool
+(`app/tools/goal.py`), which the product offers always; the report header
+names the setting, so two runs are compared as two named things.
 
 `--prompt-file` measures a prompt variant instead of the shipped default;
 `tools/prompts/` holds the variants worth keeping. Each run writes its own

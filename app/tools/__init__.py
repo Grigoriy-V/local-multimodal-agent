@@ -36,6 +36,7 @@ from app.tools.history import history_tools
 from app.tools.memory import memory_tools
 from app.tools.presentation import presentation_tools, send_file
 from app.tools.shell import Finished, LocalRunner, Runner, shell_tools
+from app.tools.goal import goal_tools
 from app.tools.todo import todo_tools
 from app.tools.web import web_fetch_tools, web_search_tools, web_tools, web_view_tools
 
@@ -82,6 +83,7 @@ __all__ = [
     "refusal_message",
     "send_file",
     "todo_tools",
+    "goal_tools",
     "tool_failed",
     "web_fetch_tools",
     "web_search_tools",

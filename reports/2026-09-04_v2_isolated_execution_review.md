@@ -1117,3 +1117,20 @@ request, which is the case the human brought.
 `FirstObjection`, and the goal wiring in `create_agent`; `Candidate.trace`
 can stay, it is a general property of the seam. Not approved; the human
 decides.
+
+**Decided, 2026-09-05, the human's words.** Neither option: a judge is
+"X2 по стоимости" with no controllable threshold, and nothing built so
+far under this heading gave real benefit. Back to the discussion before
+the goal began — proactivity, "if the model has no stimulus to go on it
+will not" — and the one measured stimulus: the plan. Its benefit came
+with the ending objection off and six of twelve calls spent on updates,
+so what worked was the list in the context, not the bookkeeping. The
+human: a cut-down plan that pushes the model without the cost, "и это
+будет новый Goal, а план отдельно". Built: `set_goal` (`app/tools/goal.py`)
+— the things a request asks for, one line each in the person's words,
+written once before the work, never updated, offered always; one brief
+line; nothing in the loop reads it. The in-turn check, `FirstObjection`
+and their wiring are out; `prompt_scenarios --goal off` now removes the
+tool. `DECISIONS.md` 2026-09-05 rewritten to this. To measure: G and P
+deployed, goal on and off.
+

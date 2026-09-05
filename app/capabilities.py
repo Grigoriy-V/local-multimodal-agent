@@ -231,6 +231,26 @@ def _observation_lines(tools: Toolbox) -> list[str]:
     ]
 
 
+def _goal_lines(tools: Toolbox) -> list[str]:
+    """Why the goal exists, which the schema cannot say.
+
+    Measured 2026-09-04: a request with several parts was finished when its
+    parts were written down in front of the model and left there, and
+    stopped short when they were not. The line states that, and the price,
+    which is one call. It does not say which requests: that is the model's
+    reading of "more than one thing".
+    """
+
+    if "set_goal" not in tools.names:
+        return []
+    return [
+        "- set_goal is where you write down, once, the things a request asks "
+        "for when there is more than one, so none of them is lost by the time "
+        "you finish: the parts, and how the person wants them. One call, then "
+        "the work; never updated. A request for one thing needs no goal."
+    ]
+
+
 def _planning_lines(tools: Toolbox) -> list[str]:
     """What a list costs, and what reads it once there is one.
 
@@ -382,6 +402,7 @@ def capability_brief(
                     "had checked the page."
                 )
     lines += _observation_lines(tools)
+    lines += _goal_lines(tools)
     lines += _planning_lines(tools)
     lines += _memory_lines(tools)
     asking = needs_approval(tools)

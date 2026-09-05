@@ -1192,48 +1192,51 @@ Consequences
 `app/context/summary.py`; `fitted` in `app/agent/graph.py` loops;
 `keep_recent` is gone from policy, settings and the Telegram wording.
 
-## 2026-09-05 — The person's request is the turn's goal, and a turn that worked is asked whether it met it
+## 2026-09-05 — The goal is the request's parts, written down once by the model; the plan stays a mode of its own
 
 Decision
 
-A turn in which at least one tool ran does not end on the model's first
-answer. The harness asks the same model, in the same turn and without
-tools, one question that quotes the person's request word for word:
-did what you did give them that, as they asked it? `done` ends the turn as
-it stands; `not yet` gives the tools back for another round, at most two
-per turn and always inside the turn's existing budget; `blocked` keeps the
-answer and asks for the reason only if the answer does not carry one. A
-turn that used no tool is never asked. The todo list's objection is asked
-first, so the cheap check goes before the one that costs a model call.
-`tools/prompt_scenarios.py --goal off` measures the loop without it.
+The model has a `set_goal` tool, offered always: when a request asks for
+more than one thing, it writes the things down once before it starts, one
+short line each in the person's words including how they want it, and
+never updates or marks them. The goal lives where the plan lives — in the
+arguments of the call, inside the turn's messages, checkpointed with the
+turn and cleared by the next user message. Nothing in the loop reads it
+back: the turn ends when the model stops, as it always has, and the
+harness makes no second model call about the request. `/plan` and
+`todo_write` stay exactly what they are, a separate mode with its own
+bookkeeping and its own switch. `tools/prompt_scenarios.py --goal off`
+measures the loop without the tool.
 
 Why
 
-Every unfinished turn of 2026-09-04 ended the same way: the model stopped
-when it had something — an English PDF against "по-русски", a text file
-against "PDF", half of a handover — not when it had what was asked. With
-`/plan` on, the same requests were finished, and the measured reason was
-not better planning but the open list keeping the request in front of the
-model until it was closed (report §14). That is DeepSeek Harness's
-goal-round-driver in its smallest form: the goal is the request, which
-already exists, rather than an object the model creates and must keep
-true; the check is about the request and not about any tool, which is
-what separates it from the check refused in 4.9. The words are the
-person's own, never the model's paraphrase, because "in Russian" is
-exactly what a paraphrase loses. The same model judges, deliberately: a
-separate reviewer is a second thing to keep true, and whether a 12B model
-answers `done` to its own English PDF is the measurement, not a design
-premise. If it does, the mechanism comes out.
+Measured on 2026-09-04: with the plan on, requests with several parts were
+finished — a PDF in Russian, screenshot and files — and without it the
+model stopped when it had something. The benefit was not the plan's
+bookkeeping: its ending objection was off, and six of the twelve calls of
+a planned turn were updates that changed nothing. What worked was the list
+of the request's parts in the model's context at every step. So the goal
+is that list with everything else removed, at the price of one short call
+in a turn that asks for several things and nothing in a turn that asks for
+one; which requests have several parts stays the model's reading.
+
+Built first the other way the same day and measured out: a check on the
+stopping seam that asked the same model, in the same turn, whether its
+work met the request. Two deployed samples answered `done` to half a
+handover, one was skipped at the step ceiling by the seam's own rule, and
+Hermes and DeepSeek both put such a judge outside the turn in a fresh
+context (report §14, §15). The human rejected that direction as doubling
+the cost of a turn with no controllable threshold and no measured benefit,
+and chose this one: the plan, cut down to what helped.
 
 Consequences
 
-`app/agent/goal.py` (`MeetsTheRequest`), `FirstObjection` in
-`app/agent/stopping.py`, wired in `create_agent`; a `not yet` reaches an
-interface as the existing `AnswerWithdrawn`; the trace records a steering
-with source `goal:not_yet` or `goal:blocked` and nothing of what was said.
-One short model call per working turn, nothing for a conversational one.
-The check's own call is not priced into the turn's seconds; the round it
-opens is. Measured before it is built on: report §14.
+`app/tools/goal.py` (`set_goal`, `goal_tools`), offered in
+`Agent.toolbox` beside memory and history; one brief line in
+`app/capabilities.py` saying why. The stopping seam is back to one
+extension, the todo list's. Measured next on G and P deployed, goal on and
+off; if the parts written down do not change what is handed over, the tool
+comes out the way the check did.
 
 ## 2026-09-04 — Generated code runs where no secret is, and what it installs lives in the workspace
 

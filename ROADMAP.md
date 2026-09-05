@@ -222,11 +222,12 @@ What exists. How it was reached, and every number, is in the linked report.
    and S (a failing script repaired from its traceback), pass live on this
    machine. The after-deploy run in the worker: A, B pass, G seven of
    eight twice, each with half of the handover (report §12). The goal
-   check of §14 was discussed and built on the human's word, 2026-09-05
-   (`app/agent/goal.py`, `DECISIONS.md` 2026-09-05), and is not yet
-   measured. **Next, each its own gate:** the measurement (`prompt_scenarios
-   --goal on/off` locally, then G and P deployed), then the close of the
-   step. Until 2026-09-04 this was 5a;
+   check of §14 was built 2026-09-05, measured on four deployed samples
+   (report §14) and taken out on the human's word; in its place the goal
+   is the request's parts written down once by the model, the plan cut to
+   what helped (`app/tools/goal.py`, `DECISIONS.md` 2026-09-05, report
+   §15), not yet measured. **Next, each its own gate:** G and P deployed
+   with the goal on and off, then the close of the step. Until 2026-09-04 this was 5a;
    the local half was 5b and is item 7 now, on the human's word: local work
    on files is a stage of its own, not a sub-step of the sandbox.
 

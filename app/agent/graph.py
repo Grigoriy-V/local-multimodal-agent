@@ -731,7 +731,6 @@ def build_agent(
                     tool_calls=priced.tool_calls,
                     spent_seconds=priced.spent_seconds,
                     steerings=state.steerings,
-                    trace=trace,
                 )
             )
         except Exception as error:  # noqa: BLE001 - an extension may not fail a turn

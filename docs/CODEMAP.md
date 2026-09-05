@@ -38,7 +38,7 @@ This is particularly important for `tools/`, `scripts/` and `deploy/`: operation
 | Change whether a model result ends the turn | `app/agent/stopping.py` | `TurnStopping`, `Candidate`, `Steering`, `Steered`, `STOP_ON_ANSWER`, `settled`, `carried`, `tests/test_turn_stopping.py` |
 | Change the agent's own plan for a turn | `app/tools/todo.py` | `todo_write`, `normalise`, `current`, `unfinished`, `tests/test_todo.py` |
 | Change what an unfinished plan does to an ending | `app/agent/todo.py` | `FinishesItsOwnList`, `INSTRUCTION`, `Candidate.steerings` |
-| Change whether a turn that worked is asked if it met the request | `app/agent/goal.py` | `MeetsTheRequest`, `CHECK`, `CONTINUE`, `EXPLAIN`, `ROUNDS`, `verdict`, `FirstObjection` in `stopping.py`, `tests/test_goal.py` |
+| Change the goal the model writes down before it starts | `app/tools/goal.py`, `app/capabilities.py` | `set_goal`, `normalise`, `DESCRIPTION`, `_goal_lines`, `tests/test_goal.py` — wording only; nothing classifies a request |
 | Change how much a plan is encouraged | `app/capabilities.py`, `app/tools/todo.py` | `_planning_lines`, `DESCRIPTION` — wording only; nothing classifies a request |
 | Change what the person sees of the plan | `ui/telegram/adapter.py` | `plan_lines`, `PLAN_MARKS`, `ToolActivity.plan`, `ToolActivity.show` |
 | Change which updates skip the conversation queue | `ui/telegram/wire.py` | `travels_out_of_band`, `needs_model`, `InboxJob.control` |
@@ -233,6 +233,7 @@ memory.py        remember_fact / search_memory
 history.py       search_history / read_history over stored messages, by position
 paging.py        page(): a window on a long text and the call for the rest
 todo.py          todo_write, and the plan folded back out of a turn
+goal.py          set_goal, the request's parts written once
 ```
 
 If a new tool needs an existing execution primitive, extend/reuse the primitive rather than cloning it under a new tool name.

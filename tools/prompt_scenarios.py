@@ -37,9 +37,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.agent.goal import MeetsTheRequest
 from app.agent.runtime import Agent, MessageProduced, create_agent, text_message
-from app.agent.stopping import STOP_ON_ANSWER
 from app.capabilities import system_message
 from app.config import AgentSettings, ModelSettings
 from app.context import DEFAULT_SYSTEM_PROMPT
@@ -50,6 +48,7 @@ from app.telemetry.inspect import tool_calls
 from app.telemetry.sqlite import SqliteTelemetry
 from app.telemetry.trace import Telemetry
 from app.tools import Tool, Toolbox
+from app.tools.goal import TOOL_NAME as GOAL_TOOL
 from app.tools.todo import TOOL_NAME as TODO_TOOL
 
 RUNS = Path("reports/prompt_runs")
@@ -322,6 +321,26 @@ def planning(agent: Agent, mode: str) -> None:
     agent.toolbox = swapped  # type: ignore[method-assign]
 
 
+def goal(agent: Agent, mode: str) -> None:
+    """Take the goal tool away for the length of one run (`--goal off`).
+
+    The product offers it always; the comparison is the loop with the
+    request's parts written down against the loop without, the way
+    `--planning none` is for the plan.
+    """
+
+    if mode == "on":
+        return
+    original = agent.toolbox
+
+    def without(thread_id: str) -> Toolbox:
+        return Toolbox(
+            [tool for tool in original(thread_id)._tools.values() if tool.name != GOAL_TOOL]  # noqa: SLF001
+        )
+
+    agent.toolbox = without  # type: ignore[method-assign]
+
+
 def select(only: Sequence[str] = (), external: bool = False) -> list[Scenario]:
     """The scenarios a run will actually take.
 
@@ -532,19 +551,15 @@ async def measure(options: argparse.Namespace) -> int:
     settings = sealed(root, stream=not options.no_stream)
     telemetry = Telemetry(SqliteTelemetry(settings.telemetry_database))
     model_settings = ModelSettings()
-    # The goal check is the product's default; `--goal off` measures the
-    # loop without it. Explicit either way, so the comparison is between two
-    # named things and not between a default and whatever it was that day.
-    goal = None if options.goal == "on" else STOP_ON_ANSWER
     agent = create_agent(
         model_settings=model_settings,
         agent_settings=settings,
         user_id=SCENARIO_USER,
         telemetry=telemetry,
         system_prompt=prompt,
-        stopping=goal,
     )
     planning(agent, options.planning)
+    goal(agent, options.goal)
     whole = assembled(agent, prompt, "preview")
     header = {
         "label": options.label,
@@ -555,7 +570,7 @@ async def measure(options: argparse.Namespace) -> int:
         "sampling": f"temperature {model_settings.temperature}, "
         f"max_tokens {model_settings.max_tokens}",
         "planning": options.planning,
-        "goal check": options.goal,
+        "goal": options.goal,
         "streaming": "on" if settings.stream_answers else "off",
     }
 
@@ -622,7 +637,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
         "--goal",
         choices=("on", "off"),
         default="on",
-        help="whether a turn that ran a tool is asked if it met the request",
+        help="whether the set_goal tool is offered, as the product offers it",
     )
     parser.add_argument(
         "--no-stream",

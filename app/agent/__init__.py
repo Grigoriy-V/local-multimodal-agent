@@ -15,7 +15,6 @@ from app.agent.stop import (
 )
 from app.agent.stopping import (
     STOP_ON_ANSWER,
-    FirstObjection,
     Candidate,
     Steered,
     Steering,
@@ -25,7 +24,6 @@ from app.agent.stopping import (
 __all__ = [
     "NO_STOPS",
     "STOP_ON_ANSWER",
-    "FirstObjection",
     "Agent",
     "AnswerWithdrawn",
     "AssistantDelta",

@@ -1,249 +1,97 @@
-"""The request as the turn's goal (2026-09-05, report §14).
+"""The goal: the request's parts, written once by the model (2026-09-05).
 
-A turn that ran a tool is asked once, without tools, whether what it did gives
-the person what they asked for; `not yet` gives the tools back for a round,
-`blocked` asks for the reason, `done` ends the turn. A turn without a tool is
-never asked. No model, no network: the model's answers are scripted.
+One call, one line per thing asked, never updated. Offered always; the brief
+says why; nothing in the loop reads it back. No model, no network.
 """
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 import pytest
 
-from app.agent.goal import BLOCKED, CHECK, DONE, NOT_YET, MeetsTheRequest, verdict
-from app.agent.graph import TurnBudget, build_agent
-from app.agent.stopping import STOP_ON_ANSWER, FirstObjection, Steering
-from app.memory import SqliteStore
-from app.models import ContentPart, Message
-from app.tools import Tool, Toolbox
-from tests.fakes import ScriptedBackend, calls, prompt_text, says
-
-OWNER = "goal-owner"
+from app.capabilities import capability_brief
+from app.tools.capabilities import CapabilityRegistry
+from app.models import ToolCall
+from app.tools import ToolExecutor, Toolbox, goal_tools
+from app.tools.base import ToolError
+from app.tools.goal import DESCRIPTION, MAX_PARTS, TOOL_NAME, normalise
 
 
-@pytest.fixture
-def store(tmp_path):
-    return SqliteStore(str(tmp_path / "conversations.db"))
+def _run(**arguments):
+    executor = ToolExecutor(Toolbox(goal_tools()))
+    prepared = executor.pre_execute(ToolCall(id="g1", name=TOOL_NAME, arguments=arguments))
+    return asyncio.run(executor.execute(prepared))
 
 
-def ping(recorded: list[str] | None = None) -> Tool:
-    def run() -> str:
-        if recorded is not None:
-            recorded.append("ran")
-        return "pong"
+def test_a_goal_is_noted_and_counted_back() -> None:
+    outcome = _run(parts=["a PDF about Japan, in Russian", "send it to me"])
 
-    return Tool(name="ping", description="answer", parameters={"type": "object", "properties": {}}, run=run)
-
-
-def loop(backend, store, stopping, budget=None):
-    return build_agent(backend, Toolbox([ping()]), store, OWNER, budget=budget, stopping=stopping)
+    assert outcome.failure is None
+    assert "2 thing(s)" in outcome.content[0].text
+    assert "not updated" in outcome.content[0].text
 
 
-def ask(text: str) -> dict[str, object]:
-    return {
-        "messages": [Message(role="user", content=[ContentPart(kind="text", text=text)])],
-        "sequence": 1,
-    }
-
-
-def spoken(messages) -> list[str]:
-    return [
-        " ".join(part.text or "" for part in message.content)
-        for message in messages
-        if message.role == "assistant" and message.content
-    ]
-
-
-# --- reading the answer -----------------------------------------------------
+def test_lines_are_recorded_as_the_model_will_read_them_back() -> None:
+    assert normalise(["  first ", "second"]) == ["first", "second"]
 
 
 @pytest.mark.parametrize(
-    ("text", "expected"),
+    "parts",
     [
-        ("done", (DONE, "")),
-        ("- a PDF: run_command made it\n- sent: send_file\n`done`", (DONE, "")),
-        ("- the files: nothing\nNot yet", (NOT_YET, "")),
-        ("not_yet — the file is in English", (NOT_YET, "")),
-        ("blocked: no Cyrillic font is installed", (BLOCKED, "no Cyrillic font is installed")),
-        ("Blocked — the site needs a login", (BLOCKED, "the site needs a login")),
-        ("blocked", (BLOCKED, "no reason given")),
-        ("I think it is fine", (DONE, "")),
-        ("", (DONE, "")),
+        [],
+        "one string",
+        [""],
+        ["same", "same"],
+        ["x" * 201],
+        ["p"] * (MAX_PARTS + 1),
     ],
 )
-def test_the_last_line_is_the_verdict(text, expected) -> None:
-    assert verdict(text) == expected
+def test_a_goal_that_cannot_be_recorded_honestly_is_refused(parts) -> None:
+    with pytest.raises(ToolError):
+        normalise(parts)
 
 
-# --- when the question is asked ---------------------------------------------
+def test_the_refusal_reaches_the_model_as_a_tool_error() -> None:
+    outcome = _run(parts=[])
+
+    assert outcome.failure is not None
+    assert outcome.failure.code == "goal.invalid"
 
 
-async def test_a_turn_without_a_tool_is_never_asked(store) -> None:
-    backend = ScriptedBackend(says("42"))
-    agent = loop(backend, store, MeetsTheRequest(backend))
-
-    result = await agent.ainvoke(ask("what is it"))
-
-    assert len(backend.requests) == 1
-    assert spoken(result["messages"]) == ["42"]
+def test_the_description_says_once_and_never_updated() -> None:
+    assert "once" in DESCRIPTION
+    assert "do not update" in DESCRIPTION
+    assert "more than one thing" in DESCRIPTION
 
 
-async def test_a_turn_that_worked_is_asked_over_its_own_turn_with_the_request_verbatim(
-    store,
-) -> None:
-    backend = ScriptedBackend(calls("ping"), says("pinged"), says("done"))
-    check = MeetsTheRequest(backend)
-    agent = loop(backend, store, check)
+def test_the_brief_says_why_only_when_the_tool_is_there(tmp_path: Path) -> None:
+    registry = CapabilityRegistry(tmp_path)
+    grant = registry.grant(capabilities=())
 
-    result = await agent.ainvoke(ask("ping it, по-русски"))
+    with_goal = capability_brief(registry.toolbox(grant, goal_tools()))
+    without = capability_brief(registry.toolbox(grant, []))
 
-    assert len(backend.requests) == 3
-    question = backend.requests[2]
-    assert backend.tools_seen[2] is None
-    assert question[0].role == "system"
-    assert "по-русски" in prompt_text(question)
-    assert CHECK.format(request="ping it, по-русски") in prompt_text(question)
-    assert any(message.role == "tool" for message in question)
-    assert check.verdicts == [DONE]
-    assert spoken(result["messages"]) == ["pinged"]
+    assert "set_goal" in with_goal and "never updated" in with_goal
+    assert "set_goal" not in without
 
 
-# --- what each verdict does ---------------------------------------------------
+def test_the_product_offers_the_goal_by_default(tmp_path: Path, monkeypatch) -> None:
+    from app.agent.runtime import create_agent
+    from app.config import AgentSettings, ModelSettings
 
-
-async def test_not_yet_gives_the_tools_back_and_the_draft_is_not_delivered(store) -> None:
-    ran: list[str] = []
-    backend = ScriptedBackend(
-        calls("ping"),
-        says("half done"),
-        says("not yet"),
-        calls("ping"),
-        says("all done"),
-        says("done"),
+    monkeypatch.setenv("AGENT_DATABASE_URL", "")
+    settings = AgentSettings(
+        workspace=str(tmp_path / "ws"),
+        database=str(tmp_path / "c.db"),
+        checkpoints=str(tmp_path / "ck.sqlite3"),
     )
-    check = MeetsTheRequest(backend)
-    agent = build_agent(backend, Toolbox([ping(ran)]), store, OWNER, stopping=check)
+    agent = create_agent(ModelSettings(), settings)
+    try:
+        names = agent.toolbox("t").names
+    finally:
+        asyncio.run(agent.aclose())
 
-    result = await agent.ainvoke(ask("ping twice"))
-
-    assert ran == ["ran", "ran"]
-    # The round after `not yet` is offered the tools again.
-    assert backend.tools_seen[3] is not None
-    assert "not yet done" in prompt_text(backend.requests[3])
-    assert check.verdicts == [NOT_YET, DONE]
-    assert spoken(result["messages"]) == ["all done"]
-    assert "half done" not in prompt_text(result["messages"])
-
-
-async def test_blocked_keeps_the_answer_and_asks_only_for_the_reason(store) -> None:
-    backend = ScriptedBackend(
-        calls("ping"),
-        says("I could not, the site needs a login."),
-        says("blocked: the site needs a login"),
-        says(""),  # the answer already says why: nothing to add
-    )
-    check = MeetsTheRequest(backend)
-    agent = loop(backend, store, check)
-
-    result = await agent.ainvoke(ask("fetch it"))
-
-    assert check.verdicts == [BLOCKED]
-    assert "the site needs a login" in prompt_text(backend.requests[3])
-    assert backend.tools_seen[3] is not None  # blocked is not a budget ending
-    assert spoken(result["messages"]) == ["I could not, the site needs a login."]
-
-
-async def test_the_rounds_are_capped(store) -> None:
-    backend = ScriptedBackend(
-        calls("ping"),
-        says("v1"),
-        says("not yet"),
-        says("v2"),
-        says("not yet"),
-        says("v3"),
-        # No third question: the cap is reached before it would be asked.
-    )
-    check = MeetsTheRequest(backend, rounds=2)
-    agent = loop(backend, store, check)
-
-    result = await agent.ainvoke(ask("go"))
-
-    assert check.verdicts == [NOT_YET, NOT_YET]
-    assert len(backend.requests) == 6
-    assert spoken(result["messages"]) == ["v3"]
-
-
-async def test_the_turn_budget_still_bounds_the_rounds(store) -> None:
-    backend = ScriptedBackend(calls("ping"), says("v1"), default=says("not yet"))
-    check = MeetsTheRequest(backend)
-    agent = loop(backend, store, check, budget=TurnBudget(max_steps=2))
-
-    result = await agent.ainvoke(ask("go"))
-
-    # Two steps used: the call and the answer. Nothing is left to steer into.
-    assert check.verdicts == []
-    assert spoken(result["messages"]) == ["v1"]
-
-
-async def test_a_check_that_fails_does_not_fail_the_turn(store) -> None:
-    backend = ScriptedBackend(calls("ping"), says("fine"), RuntimeError("boom"))
-    agent = loop(backend, store, MeetsTheRequest(backend))
-
-    result = await agent.ainvoke(ask("go"))
-
-    assert spoken(result["messages"]) == ["fine"]
-
-
-# --- composition ----------------------------------------------------------------
-
-
-class Objects:
-    async def stopping(self, candidate):
-        return Steering("finish your list", source="todo")
-
-
-async def test_the_first_objection_decides_and_the_next_is_not_asked(store) -> None:
-    backend = ScriptedBackend(calls("ping"), says("v1"), says(""))
-    check = MeetsTheRequest(backend)
-    agent = loop(backend, store, FirstObjection(Objects(), check))
-
-    await agent.ainvoke(ask("go"))
-
-    assert check.verdicts == []
-    assert "finish your list" in prompt_text(backend.requests[2])
-
-
-async def test_no_objection_falls_through_to_the_next(store) -> None:
-    backend = ScriptedBackend(calls("ping"), says("v1"), says("done"))
-    check = MeetsTheRequest(backend)
-    agent = loop(backend, store, FirstObjection(STOP_ON_ANSWER, check))
-
-    await agent.ainvoke(ask("go"))
-
-    assert check.verdicts == [DONE]
-
-
-# --- the question is in the trace ---------------------------------------------
-
-
-async def test_the_check_is_a_traced_model_call_with_its_verdict(store, tmp_path) -> None:
-    from app.agent.graph import RUN_ID
-    from app.telemetry import Telemetry, TurnRun
-    from app.telemetry.sqlite import SqliteTelemetry
-
-    telemetry = Telemetry(SqliteTelemetry(str(tmp_path / "telemetry.db")))
-    backend = ScriptedBackend(calls("ping"), says("v1"), says("not yet"), says("v2"), says("done"))
-    agent = build_agent(
-        backend, Toolbox([ping()]), store, OWNER, stopping=MeetsTheRequest(backend), telemetry=telemetry
-    )
-    trace = telemetry.start(TurnRun(run_id="goal-run", user_id=OWNER, thread_id="t", source="test"))
-    await agent.ainvoke(ask("go"), config={"configurable": {RUN_ID: "goal-run"}})
-    trace.flush()
-
-    events = telemetry.store.events("goal-run")
-    purposes = [e.data.get("purpose") for e in events if e.type == "model_finished"]
-    assert purposes.count("goal") == 2
-    verdicts = [e.data["verdict"] for e in events if e.type == "goal_checked"]
-    assert verdicts == [NOT_YET, DONE]
-    assert not any("v1" in str(e.data) for e in events)
-    telemetry.close()
+    assert TOOL_NAME in names
+    assert "todo_write" not in names  # the plan stays behind /plan

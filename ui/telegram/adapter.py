@@ -151,6 +151,7 @@ TOOL_ACTIVITY = {
     "send_file": "Sending file…",
     "run_command": "Running a command…",
     "todo_write": "Planning…",
+    "set_goal": "Noting what you asked for…",
     "remember_fact": "Saving to memory…",
     "search_memory": "Searching memory…",
     "search_history": "Searching the conversation…",
