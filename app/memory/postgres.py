@@ -140,6 +140,18 @@ def match_query(query: str) -> str:
     return " | ".join(TOKEN.findall(query))
 
 
+# Why every search matches twice, once on `match_query` and once on
+# `plainto_tsquery`: the stored vector is built by PostgreSQL's own parser,
+# which keeps `config.ini`, `app.js` or `v2.4` as one token of type `file`
+# or `version`, while `match_query` splits on anything but word characters
+# and asks for `config | ini`, which that vector never contains. SQLite's
+# FTS5 splits on the dot, so the same search found the file locally and
+# not deployed (ISS-0045, 2026-09-05). `plainto_tsquery` tokenizes the
+# query the way the vector was tokenized, so a name is found as typed; the
+# split form stays so a word inside a longer name is still found where the
+# parser did split.
+
+
 def migrate(connection: psycopg.Connection, schema: str) -> int:
     """Bring the database up to `SCHEMA_VERSION`, returning the version found.
 
@@ -487,14 +499,18 @@ class PostgresStore(ConversationStore):
         sql = (
             "SELECT m.thread_id, m.position, m.role, m.created_at, m.text"
             " FROM messages m JOIN threads t ON t.id = m.thread_id"
-            " WHERE t.user_id = %s AND m.search @@ to_tsquery('simple', %s)"
+            " WHERE t.user_id = %s AND (m.search @@ to_tsquery('simple', %s)"
+            " OR m.search @@ plainto_tsquery('simple', %s))"
         )
-        parameters: list[Any] = [user_id, match]
+        parameters: list[Any] = [user_id, match, query]
         if thread_id is not None:
             sql += " AND m.thread_id = %s"
             parameters.append(thread_id)
-        sql += " ORDER BY ts_rank(m.search, to_tsquery('simple', %s)) DESC, m.id DESC LIMIT %s"
-        parameters.extend([match, limit])
+        sql += (
+            " ORDER BY ts_rank(m.search, to_tsquery('simple', %s))"
+            " + ts_rank(m.search, plainto_tsquery('simple', %s)) DESC, m.id DESC LIMIT %s"
+        )
+        parameters.extend([match, query, limit])
         with self._cursor() as cursor:
             cursor.execute(sql, parameters)
             rows = cursor.fetchall()
@@ -583,10 +599,12 @@ class PostgresStore(ConversationStore):
         with self._cursor() as cursor:
             cursor.execute(
                 "SELECT text FROM facts"
-                " WHERE user_id = %s AND search @@ to_tsquery('simple', %s)"
-                " ORDER BY ts_rank(search, to_tsquery('simple', %s)) DESC, id DESC"
+                " WHERE user_id = %s AND (search @@ to_tsquery('simple', %s)"
+                " OR search @@ plainto_tsquery('simple', %s))"
+                " ORDER BY ts_rank(search, to_tsquery('simple', %s))"
+                " + ts_rank(search, plainto_tsquery('simple', %s)) DESC, id DESC"
                 " LIMIT %s",
-                (user_id, match, match, limit),
+                (user_id, match, query, match, query, limit),
             )
             rows = cursor.fetchall()
         return [row["text"] for row in rows]

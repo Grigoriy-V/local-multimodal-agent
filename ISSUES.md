@@ -51,6 +51,30 @@ Rules that keep the file honest:
 
 ---
 
+### ISS-0045 — deployed, history search cannot find a file name by its parts
+
+- **Status:** fixed in the tree, 2026-09-05 — every Postgres search matches
+  on `plainto_tsquery` as well as the split query, so a name is found as
+  typed. Not yet deployed
+- **Seen:** 2026-09-05, the first deployed run of scenario I (run
+  `deployed-cf8c3774-90`): `search_history "config.ini"` answered "no
+  message in this conversation matches", with "Read config.ini, then list
+  the workspace" the first message of the thread; the model gave up and
+  asked the person for the file. The same scenario passed locally on
+  2026-09-03 with the same search.
+- **Costs:** the way back to a stub or a summary (`DECISIONS.md`
+  2026-09-03) does not work deployed for anything with a dot in it: file
+  names, versions, hosts.
+- **Reproduce:** a Postgres store, a message saying `config.ini`,
+  `search_messages("config.ini")`.
+- **Cause:** the stored vector is `to_tsvector('simple', text)`, whose
+  parser keeps `config.ini` as one token of type `file`; `match_query`
+  keeps word characters only and asks `config | ini`. SQLite's FTS5
+  tokenizer splits on the dot, so the local store matched and the deployed
+  one could not. `tests/test_store_contract.py` already asserts a file
+  name is found, and had never run against Postgres.
+- **Where it belongs:** the harness.
+
 ### ISS-0044 — the first streamed request to a sleeping model endpoint dies at the read timeout
 
 - **Status:** open, 2026-09-05

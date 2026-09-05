@@ -396,7 +396,7 @@ async def run_scenarios(selected, agent, telemetry, agent_factory, prefix: str =
             # only meaningful once the turn has actually started spending.
             while len(stopped.tools) < 2 and not work.done():
                 await asyncio.sleep(0.05)
-            await stops.request(USER, 41)
+            await agent.stops.request(USER, 41)
             print("\n  (stop recorded while the turn was running)")
             await work
             failed += stopped.report(

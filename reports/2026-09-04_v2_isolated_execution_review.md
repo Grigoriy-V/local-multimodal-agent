@@ -1157,3 +1157,22 @@ record (G 7/8 with the plan on, 2026-09-03). What is missing in the
 7/8 run is the same one thing as in every G today: files named by path
 in the answer and not sent — ISS-0003's shape, the send-or-name confusion,
 not the goal's.
+
+**Every scenario deployed with `set_goal`, 2026-09-05** (the human: check
+the goal broke nothing; run `deployed-cf8c3774-*`, all but D, which the
+deployed runner could not start — `stops` was a name of `main()`'s
+scope, fixed to the agent's own). Fifteen turns, 5 failed checks in
+three scenarios, none the goal's. `set_goal` was called in exactly the
+two multi-part requests, G and P, and in none of the thirteen others:
+the threshold "more than one thing" held on this sample. A, B, C, E, F,
+H, J, K, O, Q, R, S all pass, 4–28 s each. *G* six of eight this time:
+the whole handover sent (files and a picture), but the picture was a
+white 800×600 PNG the model drew with PIL after telling itself it "can't
+take a screenshot in a headless container" — `inspect_page` never
+called — and the answer offered it as a path; a fabricated deliverable,
+the worst G of the day in kind if not in count. *P* four of five, the
+instrument check. *I* two of two failed: `search_history "config.ini"`
+found nothing deployed — ISS-0045, the Postgres tokenizer keeps a file
+name as one token and the query splits it; fixed in the tree, the
+contract test that would have caught it never ran against Postgres.
+
