@@ -526,6 +526,102 @@ the price of a 27B with reasoning against a 12B without. No restore fell
 inside a turn: the longest tool was R's `run_command` and the model's
 12 s window held. Cost of the run ~$0.06 of derived GPU.
 
+## 11. What can be faster, read before the next boot
+
+Asked by the human after §10: why a 27B int4 on an A100 is slower per
+turn than a 12B on an A10, and what else shortens the cold start. Read
+from vLLM 0.26.0's own source and docs and Modal's guides, not tried.
+
+### Inside a turn
+
+**The turn is slow because every call prefills the whole prompt.** In
+F, four calls of ~5k tokens each started their first token after ~3 s
+and decoded at ~70 tokens/s; `cached_tokens: 0` on every call, the
+engine's `Prefix cache hit rate: 0.0%`, and in the boot config
+`enable_prefix_caching=False`. Gemma's calls on the same scenario take
+0.5–0.8 s because its prefix is cached and only the new tokens are
+computed. The cause is one line in `vllm/engine/arg_utils.py` (0.26.0):
+"Hybrid models support prefix caching but keep it opt-in for now while
+the feature matures" — `default_prefix_caching = supported and not
+is_hybrid`. Qwen3.8 is hybrid. The FP8 App ran the same way, which is
+part of why its G was so expensive.
+
+1. **`--enable-prefix-caching`** — the one change with a known-shape
+   gain. vLLM then sets `--mamba-cache-mode align` itself (GDN has no
+   "all" mode; `MambaModelConfig.verify_and_update_config`), raises the
+   attention block to 784 tokens to match the DeltaNet page, requires
+   chunked prefill (on), and logs "experimental". How align caches: one
+   DeltaNet checkpoint per request, at the last 784-token boundary
+   before the prompt's end. In this harness's loop each call's prompt is
+   the previous call's prompt plus a tool result, so the previous
+   request's checkpoint lies inside the new request's shared prefix and
+   the hit reaches it; what is prefilled is the tail past that boundary.
+   Expected: calls near Gemma's, ~0.5–1 s instead of ~3 s. Known holes:
+   issue #45238 (a checkpoint landing in request-unique tokens drops the
+   hit to 0% silently — for this loop the checkpoint is in the shared
+   part by construction, but a `/plan` update or a fold that rewrites the
+   prefix loses it), #40696 (prompts under one block never hit), and the
+   prefix-cache reset at every sleep, so a turn after a restore starts
+   cold. Partial-block hits (PR #46384, merged July 2026) may or may not
+   be in 0.26.0; unknown.
+2. **MTP speculative decoding — not now.** Both checkpoints carry an MTP
+   head (`mtp_num_hidden_layers: 1`, the INT4's `model_mtp.safetensors`),
+   vLLM 0.26.0 registers `Qwen3_5MTP`, and the recipe recommends MTP-1
+   "for latency-sensitive scenarios with low user concurrency, pairing
+   it with disabled prefix caching". Decode would go from ~70 to
+   perhaps 100+ tokens/s. But with prefix caching on, issue #47194
+   reports tool-call XML leaking as text and multi-turn tool use at 0/5
+   on Qwen3.5/3.6; the fix (PR #51113) is newer than 0.26.0. This
+   product's calls are short outputs over long prompts, so the cache is
+   worth more than the decode; MTP is for a later measurement, alone.
+3. **Thinking budget.** `reasoning_effort: low` still writes reasoning
+   before every call (F's `write_file` call: 240 output tokens for one
+   short tool call). The template also takes `enable_thinking: false`
+   (the recipe's own way to turn reasoning off) and Unsloth's guide lists
+   a `none` effort. Fewer output tokens is time saved per call; what it
+   costs on G, the scenario where reasoning should matter, is the
+   measurement that decides it, not this note.
+4. **`--max-num-batched-tokens`: leave it.** On an A100 vLLM's OpenAI
+   server defaults to 2048, so a 5k prefill is three scheduler chunks;
+   the source carries a note that larger values reduce A100 throughput
+   (PR #17885). Only the prefix cache removes the prefill.
+5. Not applicable: `--language-model-only` (vision is used), fp8 KV (no
+   memory pressure, Ampere), a higher utilization.
+
+### The cold start
+
+The restore is bounded by the snapshot's size, 17.7 GiB of weights in
+CPU memory, and by whether the host has it cached: 20–31 s measured on
+warm hosts, and the cold-host case seen on FP8 at 80–86 s. Nothing in
+vLLM changes that; sleep level 2 would drop the weights from the
+snapshot and reload them from the Volume on wake (measured 17–21 s
+here), no gain. What Modal offers, from its cold-start guide and
+snapshot docs:
+
+- **Fewer restores, not faster ones.** `scaledown_window` up to twenty
+  minutes; `min_containers=1` in the hours the person is active,
+  through `autoscale.py` or a schedule, at $2.10/h while on;
+  `buffer_containers` is for spikes, not this. The adaptive window of
+  `ROADMAP.md` item 6 is the product-shaped version.
+- **Fewer full boots.** A snapshot is per version and per worker type
+  (2–3 per GPU type), so each redeploy of a Qwen App costs 2–3 boots of
+  ~7 min A100 (~$0.75) before restores begin; the flag changes below
+  are one redeploy, bundled. Region pinning (`region="us"`, 1.15x price)
+  is documented as widening the pool, not narrowing worker types.
+- **Restore speed itself:** nothing configurable; Modal's own numbers
+  (2–12 s) are for 3–8B models.
+- **The first request's wait** (ISS-0044 fixed): the model client now
+  retries until the endpoint serves; the webhook already wakes the GPU
+  in parallel with the worker.
+
+### What is proposed, one deploy
+
+`--enable-prefix-caching` on the INT4 App (the FP8 App untouched, the
+human's word), `preflight` checking that the built config has it on,
+one redeploy, the snapshot boots, and the same seven scenarios: if the
+calls drop from ~3 s to ~1 s the turn halves. MTP and the thinking
+budget are separate measurements after that, each its own gate.
+
 ## Sources
 
 - https://huggingface.co/Qwen/Qwen3.8-27B and `/raw/main/config.json`

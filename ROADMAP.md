@@ -263,8 +263,13 @@ application; see the amended FastAPI decision in `DECISIONS.md`.
    renderer's cold browser (ISS-0051, fixed); a turn is 2–3.5x Gemma's
    (report §10). Found and fixed on the way: ISS-0044, ISS-0047, ISS-0048,
    ISS-0051; open: ISS-0049 (platform restarts), ISS-0050 (AOT off).
-   **Next, each its own gate:** the remaining scenarios on INT4 (D, G, H,
-   I, K, J, O, P, Q), the same on FP8 for the comparison
+   Read after: prefix caching is opt-in for hybrid models in vLLM 0.26.0
+   and was off, so every call re-prefilled ~5k tokens (~3 s); the study
+   of what else is faster is report §11. FP8 is not run again (the
+   human's word, cost). **Next, each its own gate:** `--enable-prefix-
+   caching` on INT4, one redeploy, the seven scenarios again; then the
+   remaining scenarios (D, G, H, I, K, J, O, P, Q); MTP and the thinking
+   budget as separate measurements
    against the Gemma runs of 2026-09-05; then the human's call on which
    the assistant uses.
 
