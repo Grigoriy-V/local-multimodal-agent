@@ -446,8 +446,20 @@ was stopped, the next one started in four seconds and printed
 wait for an A100 — the availability risk named in §3. Not established
 either way; the copy is gone regardless.
 
-Spent on the INT4 App: four boots, about 25 A100-minutes, ~$0.85. Not
-booted since; `dry_run` is the next step, on the human's word.
+**`dry_run`, PASS.** One container, no snapshot, no request behind it:
+weights 21 s (17.71 GiB), `torch.compile` and the profiling run together
+203.6 s with AOT off, graphs 3 s, healthy after 404.5 s; three warmup
+completions; asleep in 4.4 s, awake in 4.1 s; three more completions;
+exit. The card Modal handed this Function was an A100 with `79.25 GiB`
+free — an 80 GB card for a `A100-40GB` request — so its pool (52.5 GiB of
+KV, 6.42x) says nothing about the deployed server, which on its second
+boot reported `39.49 GiB`. What the dry boot establishes: the
+configuration with AOT off and no cache Volume boots, sleeps and wakes.
+What it cannot: the restore. Cost ~7 A100-minutes.
+
+Spent on the INT4 App: five boots, about 32 A100-minutes, ~$1.10. Next,
+on the human's word: the first request to the deployed App, which
+creates the snapshot and restores from it.
 
 ## Sources
 
