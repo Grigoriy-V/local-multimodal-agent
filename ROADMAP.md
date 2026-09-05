@@ -38,6 +38,9 @@ documents.
   ceiling is 65,536 since 2026-08-30, at 0.80 utilization and unquantized KV.
   The original `assistant-llm` stays deployed as rollback only; retiring it is a
   destructive human gate.
+- `assistant-control` also serves `run_command` (the command runner, no
+  secret) and `scenarios` (the live scenarios in the worker's own
+  environment, `loop_live --deployed`), since 2026-09-04/05.
 - `assistant-control` serves the Telegram webhook and the update worker. Idle
   windows: 60 s on both CPU functions, 12 s on the GPU. The GPU value is live
   through `deploy/modal/autoscale.py` and matches `SCALEDOWN_WINDOW`, so a
@@ -124,6 +127,19 @@ What exists. How it was reached, and every number, is in the linked report.
   `reports/2026-08-29_v2_run_inspector_implementation.md`,
   `reports/2026-08-29_v2_gpu_baseline_measured.md`.
 
+- **Isolated execution, deployed** — `run_command` as a Modal Function
+  beside the renderer: the worker's image plus base tools, fonts and the
+  everyday libraries, the workspaces Volume, no secret, 180 s scaledown;
+  cold container 8 s, warm under a second; the Volume round trip both
+  ways. `read_file` shows a picture; a non-zero exit carries the harness's
+  line; the goal is the request's parts written once by the model
+  (`set_goal`, `DECISIONS.md` 2026-09-05). Scenarios O–S, and all sixteen
+  run deployed through the `scenarios` Function with the goal in the
+  toolbox: sixteen of sixteen pass except G's variance and P's instrument
+  check. Five harness defects found by refusing "it's the model"
+  (ISS-0041–0043, 0045, the fonts), and the goal check of §14 built,
+  measured out and removed. `reports/2026-09-04_v2_isolated_execution_review.md`.
+
 ### Queue
 
 4. **Agent harness and loop — closed 2026-09-04.** One loop, one tool
@@ -173,63 +189,9 @@ What exists. How it was reached, and every number, is in the linked report.
    keyword retrieval finds nothing. `ask_user` and the `todo` follow-up are
    in Not started.
 
-5. **Isolated execution, deployed (Modal) — current, selected 2026-09-04.**
-   An execution backend behind the 4.2 seam: shell, Python and package
-   installation in a workspace holding no control-plane secret; the
-   container is the boundary. Every deployed run is a product-runtime
-   worker and a separate human gate during development. The natural-request
-   PDF scenario is accepted here: create the PDF, inspect the real document
-   and explicitly deliver it, without a PDF-specific workflow. Reviewed
-   against the references and **the shape approved 2026-09-04**
-   (`reports/2026-09-04_v2_isolated_execution_review.md` §5, `DECISIONS.md`
-   2026-09-04): a `run_command` Function beside the renderer, same image
-   plus base tools, the workspaces Volume, no secret, 180 s scaledown; the
-   Volume round trip, O, P, Q through Telegram, the after-deploy run, the
-   cold-start number. What the tool and the modes are is built (item 7
-   below, the local half); this item is the second runner and the deploy.
-   **Built 2026-09-04, not yet deployed** (report §12): the `run_command`
-   Function on `command_image` (the worker's layers plus `BASE_TOOLS`), the
-   Volume and no secret, 180 s scaledown, 660 s timeout; `ModalRunner` in
-   the worker commits before and reloads after each call, the Function the
-   other way round; `create_agent` and the Telegram adapter take a
-   `runner`, and the worker passes it so a command never runs beside the
-   secrets; no venv is made in the container and the runner's `where` says
-   what survives; `scripts/measure_command_cold_start.py`. **Deployed and
-   measured 2026-09-04:** cold container 8.3 s, warm 0.7 s; the Volume
-   round trip holds both ways, a venv the model made in the workspace
-   served the next turn; O and Q passed through Telegram, P handed over a
-   PDF of black squares without looking (ISS-0040, the model's) because the
-   image had no Cyrillic font (the harness's, fixed: DejaVu and Liberation
-   in `BASE_TOOLS`, redeployed). P in Russian then looped six times on
-   fpdf2's API without opening the result and was stopped: the model's;
-   on the human's word the prompt core gained `WORKING_METHOD`, how an
-   agent works whatever the model (report §12), measured once: no visible
-   change. Then the harness's share was found (ISS-0041): the turn's own
-   tool results were being stubbed after the newest two, a command's
-   traceback included, so the model repeated its first error at the
-   fourth attempt; fixed, the turn in progress is never shortened
-   (`DECISIONS.md` 2026-09-03 amended). Deployed and seen live: results visible
-   through twelve steps; the remaining loop was the model running the
-   venv's python binary as a script six times, and the brief's venv recipe
-   run verbatim as every turn's first command — so the everyday libraries
-   went into the image (`BASE_PACKAGES`) and `where` states facts without
-   a command, deployed; then three more of the harness's found the same
-   way (results shortened mid-turn ISS-0041, an identical run refused after
-   the file changed ISS-0042, `pip` not `python3`'s ISS-0043), the
-   harness's own line on a non-zero exit, and the first measured benefit of
-   `/plan` (report §14: the request stays the goal). `read_file` shows an image as a picture,
-   and two more command scenarios, R (data into a chart, looked at, sent)
-   and S (a failing script repaired from its traceback), pass live on this
-   machine. The after-deploy run in the worker: A, B pass, G seven of
-   eight twice, each with half of the handover (report §12). The goal
-   check of §14 was built 2026-09-05, measured on four deployed samples
-   (report §14) and taken out on the human's word; in its place the goal
-   is the request's parts written down once by the model, the plan cut to
-   what helped (`app/tools/goal.py`, `DECISIONS.md` 2026-09-05, report
-   §15), not yet measured. **Next, each its own gate:** G and P deployed
-   with the goal on and off, then the close of the step. Until 2026-09-04 this was 5a;
-   the local half was 5b and is item 7 now, on the human's word: local work
-   on files is a stage of its own, not a sub-step of the sandbox.
+5. **Isolated execution, deployed (Modal) — closed 2026-09-05.** Outcome
+   under Done. Two things left it as their own items: the local profile
+   (7) and the plan/goal comparison (8).
 
 6. **Optimization after the agent is observable.** Adaptive scaledown through
    `autoscale.py`. Prefix caching is confirmed active and needs no work before
@@ -262,6 +224,15 @@ What exists. How it was reached, and every number, is in the linked report.
 `app/api/` stays deferred: Telegram runs in-process, so an HTTP layer would have
 no separately hosted caller. The trigger is a UI hosted apart from the
 application; see the amended FastAPI decision in `DECISIONS.md`.
+
+8. **The plan and the goal together — open, a comparison to run, 2026-09-05.**
+   With `/plan on` the model is offered both `todo_write` and `set_goal`,
+   and nothing makes one stand down for the other; every goal measurement
+   so far ran with the plan off. The question the human left open: whether
+   the plan should replace the goal when it is on, or both may stand.
+   Decided by a measurement, G and P deployed under `/plan on` with both,
+   against the runs of 2026-09-05 with the goal alone
+   (`reports/2026-09-04_v2_isolated_execution_review.md` §15).
 
 ### Not started
 

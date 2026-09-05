@@ -2,10 +2,10 @@
 
 **Date:** 2026-09-04
 **Agent:** Claude, direct session
-**Status:** analysis, and a shape **approved by the human on 2026-09-04**
-(§5) after four rounds in the chat. Step 5 was selected the same day and
-split on their word into the deployed profile (5a, Modal) and the local one
-(5b). Nothing is built; implementation is a separate start signal.
+**Status:** the record of step 5, from the analysis (§1–§11) through the
+build, deploy and every live run (§12–§15) to its close on 2026-09-05
+(§16). The shape was approved 2026-09-04 (§5); the local half is
+`ROADMAP.md` item 7; the plan/goal comparison is item 8.
 
 ## 1. What step 5 is
 
@@ -1183,4 +1183,30 @@ and the turn ended on it in 13 s; I passes two of two — `read_file`
 quoted, 6 s — the same route as the local run of 2026-09-03. Sixteen of
 sixteen scenarios have now run deployed with `set_goal` in the toolbox;
 the three checks still failing are G's variance and P's instrument.
+
+## 16. Step 5 closed, 2026-09-05
+
+What exists: `run_command` deployed as a Function beside the renderer with
+base tools, fonts and the everyday libraries in its image, the workspaces
+Volume, no secret; `ModalRunner` in the worker; the `scenarios` Function,
+and `loop_live --deployed` running every scenario in the worker's own
+environment from a clean thread; `read_file` showing a picture; the
+harness's line on a non-zero exit; `set_goal`. All sixteen scenarios have
+run deployed with the goal in the toolbox (runs `deployed-cf8c3774-*`,
+`deployed-99f16efe-*`); what still fails is G's variance (ISS-0003's
+shape, and once ISS-0046) and P's instrument check.
+
+Found on the way and fixed: ISS-0041 (the turn's own results stubbed),
+ISS-0042 (a repeat refused after the file changed), ISS-0043 (`pip` not
+`python3`'s), ISS-0045 (deployed search blind to a dotted name), the
+fonts and the stale venv on the Volume. Open: ISS-0044 (the first request
+to a sleeping endpoint dies), ISS-0040 and ISS-0003 (the model's, measured
+by P and G), ISS-0046 (once).
+
+Left open on the human's word, as `ROADMAP.md` items: 7, the local
+profile (the venv crutch of §11, the write boundary of §10); 8, whether
+the plan replaces the goal when both are on — a comparison to run, not
+a decision to make here. Not measured and not scheduled: the Volume
+commit/reload share of a warm command, `pandoc` without a PDF engine,
+the session directory of §13.
 

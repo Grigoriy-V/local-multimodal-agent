@@ -75,6 +75,23 @@ Rules that keep the file honest:
   name is found, and had never run against Postgres.
 - **Where it belongs:** the harness.
 
+### ISS-0046 — a deliverable the tools can make is fabricated by another means
+
+- **Status:** open — model behaviour, observed once
+- **Seen:** 2026-09-05, deployed, scenario G (run `deployed-cf8c3774-70`):
+  asked for a screenshot of the page it had built, the model wrote in a
+  command "I can't actually take a screenshot of a running web app in a
+  headless container", drew a white 800×600 PNG with PIL, named it
+  `task_board_preview.png`, sent it with the files and offered it in the
+  answer as a path. `inspect_page`, which returns a real screenshot and
+  is described so in the brief, was never called; it was called in the
+  four G runs before this one that day.
+- **Costs:** the person receives a picture that shows nothing and is told
+  it is the screenshot; worse than no picture.
+- **Reproduce:** G deployed; one in five today.
+- **Where it belongs:** the model's, on the evidence — the brief names
+  the tool and says what it returns. Measured by G; no mechanism.
+
 ### ISS-0044 — the first streamed request to a sleeping model endpoint dies at the read timeout
 
 - **Status:** open, 2026-09-05
@@ -101,7 +118,7 @@ Rules that keep the file honest:
 - **Status:** fixed in the tree, 2026-09-04 — `pip` installed into the
   image's uv venv beside the libraries, so `pip`, `python3 -m pip` and
   `python3` are one interpreter; the cold-start probe checks `pip show` sees
-  what `python3` imports. Not yet deployed
+  what `python3` imports. Deployed 2026-09-04
 - **Seen:** 2026-09-04, deployed, thread `e8c54e07`: asked to check, the
   model ran `pip show fpdf2` → "Package(s) not found", `pip list` → pip, uv,
   wheel and nothing else, then `python3 -c "import reportlab"` → 5.0.1. It
@@ -124,7 +141,7 @@ Rules that keep the file honest:
 - **Status:** fixed in the tree, 2026-09-04 — `succeeded_before` starts its
   count over when a different call of a tool that changes the workspace
   (`mutates`) succeeded in between; an identical call still counts against
-  itself, so ISS-0019's loop is still caught. Not yet deployed
+  itself, so ISS-0019's loop is still caught. Deployed 2026-09-04
 - **Seen:** 2026-09-04, deployed, run `f25fd7cd` (P in Russian): `write_file
   make_pdf.py` → `python3 make_pdf.py` (exit 1) → rewrite → run (exit 1) →
   rewrite → `ls` the fonts → rewrite with `add_font` for both faces → `python3
@@ -198,6 +215,10 @@ Rules that keep the file honest:
   finds the defect the assistant was equipped to find.
 - **Reproduce:** P through Telegram; not every time — the same request
   passed with a look locally twice on 2026-09-04.
+- **Also seen:** 2026-09-05, deployed, P three times (`deployed-77de41a5-140`,
+  `-e63f050c-140`, `-cf8c3774-140`): the PDF checked with `pdftotext`
+  through `run_command` before `send_file` every time — a look at the
+  text, not at the page; the scenario's check counts only `view_pages`.
 - **Cause:** the model's; the brief says a made document is looked at
   before it is handed over, and the tools were there. Measured with the
   scenario suite, not scripted (`AGENTS.md`, the human's rule).
@@ -240,7 +261,7 @@ Rules that keep the file honest:
   Harness mechanism, with what it took to make it start recorded there).
   The workspace's own venv is the `python` and `pip` a command sees. The
   interim `PIP_REQUIRE_VIRTUALENV` / `npm_config_prefix` rules, which the
-  human called a crutch, are gone. Not yet deployed (5a); deployed the
+  human called a crutch, are gone. Deployed 2026-09-04 (5a); deployed the
   container is the boundary
 - **Seen:** 2026-09-04, `scripts/loop_live.py` P, run `live-140`, the first
   live turn with `run_command`: asked for a PDF, the model ran
@@ -489,7 +510,7 @@ Rules that keep the file honest:
 ### ISS-0025 — `/compact` is recorded as a failed turn
 
 - **Status:** fixed in the tree, 2026-09-03 — the command finishes its trace
-  as answered. Not yet deployed
+  as answered. Deployed since
 - **Seen:** 2026-09-03, deployed, run `eb455286`: `/compact` answered the
   person and the run row says `failed`, `incomplete`.
 - **Costs:** a reliability figure that counts a command as a broken turn.
@@ -516,7 +537,7 @@ Rules that keep the file honest:
 ### ISS-0023 — a forced fold finds nothing to cut in a tool-heavy tail
 
 - **Status:** fixed in the tree, 2026-09-03 — a fold may cut before any
-  user or assistant message, never before a tool result. Not yet deployed
+  user or assistant message, never before a tool result. Deployed since
 - **Seen:** 2026-09-03, deployed: `/compact` after the Task Board turn
   answered "nothing to fold" on a 32-message thread whose newest 26 were one
   turn's calls and results.
@@ -531,7 +552,7 @@ Rules that keep the file honest:
 ### ISS-0022 — shortening the model's own file arguments made it write every file again
 
 - **Status:** fixed in the tree, 2026-09-03 — only tool results are stubbed;
-  the model's text and call arguments are never shortened. Not yet deployed
+  the model's text and call arguments are never shortened. Deployed since
 - **Seen:** 2026-09-03, deployed, run `a459c70e`, "Task Board test 9": from
   the step where its first `write_file` content was shown as
   `<1104 characters, shortened>`, the model rewrote index, styles and app in
@@ -698,7 +719,7 @@ Rules that keep the file honest:
 
 ### ISS-0014 — the page was looked at without storage or its own files
 
-- **Status:** fixed in the tree, 2026-09-03 — not yet deployed
+- **Status:** fixed 2026-09-03, deployed since
 - **Seen:** 2026-09-03, live, twice: thread `afb9d76a` (an app with
   `styles.css` and `app.js`), and the loop re-run of "Task Board test 4"
 - **Costs:** `inspect_page` opened the file as a `data:` URL. A `data:` page
@@ -720,7 +741,7 @@ Rules that keep the file honest:
 
 ### ISS-0013 — the repeat guard refused the call that would have worked
 
-- **Status:** fixed in the tree, 2026-09-03 — not yet deployed
+- **Status:** fixed 2026-09-03, deployed since
 - **Seen:** 2026-09-03, deployed, thread `3261ae8f`, run `30fe463c`
 - **Costs:** a look at a file failed twice because the file was not there,
   the model then wrote the file, and the third look — identical arguments, a
@@ -739,7 +760,7 @@ Rules that keep the file honest:
 
 ### ISS-0012 — a corrupted path was obeyed, and a file nobody named was made
 
-- **Status:** fixed in the tree, 2026-09-03 — not yet deployed
+- **Status:** fixed 2026-09-03, deployed since
 - **Seen:** 2026-09-03, deployed, thread `3261ae8f`, run `30fe463c`, twice
 - **Costs:** `write_file` received the path `"Task Board test 4/index.html"<|"|>`
   — the served parser's leftovers around the real name — and created a file
@@ -983,6 +1004,12 @@ Rules that keep the file honest:
   "и файл приложения" answered with the path `Task Board test 3/index.html`
   and "you can open it in any browser"; the file came only after "пришли
   файлы" (run `fb42cdb7`, `send_file`, delivered).
+- **Also seen:** 2026-09-05, deployed, G with `set_goal` (runs
+  `deployed-8947e3fb-70`, `deployed-cf8c3774-70`): the screenshot sent,
+  the three files listed as paths under "Файлы приложения" with "приложен
+  выше" — the goal the model itself wrote said "Прислать скриншот и файлы
+  в чат"; and once the path of a picture offered as `![…](…)` beside a
+  `send_file` of the same picture.
 - **Also seen:** 2026-09-03, loop re-run `live-70`: asked for the screenshot
   and the files in one request, the model sent `index.html` with `send_file`
   and handed the screenshot over as `![Screenshot](.agent/browser/….png)` —
